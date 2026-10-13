@@ -58,8 +58,10 @@ export function SettingsScreen() {
 
           <section className="card card-pad stack-4" aria-labelledby="prof-h">
             <div>
-              <h2 id="prof-h" className="t-title3">Your advisor details</h2>
-              <p className="t-footnote c3">Forms fill rep fields (name, rep code, phone) from here. Your name comes from your Microsoft account.</p>
+              <h2 id="prof-h" className="t-title3">{me.role === 'User' ? 'Your advisor details' : 'Your details'}</h2>
+              <p className="t-footnote c3">
+                {me.role === 'Assistant' ? 'Forms you prepare use the advisor you’re working for. ' : 'Forms fill rep fields (name, rep code, phone) from here. '}Your name comes from your Microsoft account.
+              </p>
             </div>
             <div className="grid-2">
               <Field label="Name" htmlFor="u-name" help="Managed in Microsoft Entra ID">

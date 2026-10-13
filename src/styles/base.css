@@ -658,6 +658,9 @@ a.list-row:hover {
 /* Segmented control */
 .segmented {
   display: inline-flex;
+  align-self: flex-start;
+  max-width: 100%;
+  overflow-x: auto;
   padding: 2px;
   border-radius: var(--r-sm);
   background: var(--fill-2);

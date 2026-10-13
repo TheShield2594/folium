@@ -552,7 +552,7 @@ button.check-row:hover {
 
 .editor {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 520px;
+  grid-template-columns: minmax(0, 1fr) 452px;
   gap: var(--sp-5);
   align-items: start;
 }

@@ -228,7 +228,7 @@ export function TemplateEditor() {
                     </div>
                   )}
                   <div style={{ overflowX: 'auto' }}>
-                    <table className="table mapping" style={{ minWidth: 860 }}>
+                    <table className="table mapping" style={{ minWidth: 760 }}>
                       <thead>
                         <tr>
                           <th>PDF field</th>
@@ -305,7 +305,7 @@ export function TemplateEditor() {
               <div className="card sticky" style={{ padding: 12, background: 'var(--surface-sunken)', maxHeight: 'calc(100vh - 140px)', overflow: 'auto' }}>
                 <PdfView
                   template={template}
-                  width={490}
+                  width={420}
                   fields={tab === 'fields' ? fieldsForPreview : []}
                   placements={tab === 'signers' ? mapping.placements : []}
                   activeKey={sel}

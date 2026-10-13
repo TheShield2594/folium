@@ -62,7 +62,8 @@ export function ReviewScreen() {
     for (const fill of view.fills) {
       fill.template.mapping.checks.forEach((c, i) => {
         if (view.checks.find((r) => r.id === `${fill.template.id}:check:${i}`)?.level !== 'block') return;
-        const names = 'fields' in c ? c.fields : [c.field];
+        // Pick-one groups need attention as a set; for totals, the first share is enough.
+        const names = c.type === 'oneOf' ? c.fields : 'fields' in c ? c.fields.slice(0, 1) : [c.field];
         for (const f of fill.fields) if (names.includes(f.mapping.pdfField) && req.has(f.key)) req.set(f.key, true);
       });
     }

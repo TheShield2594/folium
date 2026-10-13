@@ -1,0 +1,9 @@
+{
+  "appDisplayName": "Folium",
+  "description": "Forms, prefill and e-signature for Everence advisors",
+  "environmentId": "<your-environment-id>",
+  "buildPath": "./dist",
+  "buildEntryPoint": "index.html",
+  "logoPath": "./public/folium.svg",
+  "appSettings": { "showHeader": false }
+}
