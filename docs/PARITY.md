@@ -1,0 +1,35 @@
+# LaserApp Anywhere parity
+
+What advisors do in LaserApp Anywhere today, and where each piece lives in Folium. "Built" means it works end to end in this repo (demo mode, with Power Platform adapters written against the same interfaces). "Needs setup" means the code is in place but depends on an Everence environment, licence or decision. "Later" items are tracked as GitHub issues.
+
+| LaserApp Anywhere | Folium | Status |
+|---|---|---|
+| **Forms library** — search thousands of forms by name, number, company | Find forms: ranked search across name, form number (`1120`, `EV-1120`), issuer, category and Marketing's keywords (`SWP`, `TOA`, `RMD`). Filters for source, category, favorites and recent. `/` focuses search; `⌘K` searches everything. | Built |
+| **Forms always current** — updated daily from form authors | Templates come from Marketing's SharePoint library. Folium always opens the current Live revision; a revision published with a future effective date takes over on that day. Saved packets, favorites and recents resolve to the current revision. A pre-send check blocks stale or retired revisions. | Built |
+| **Request a form** | "Ask Marketing to add it" sends a form request (`ev_formrequest` row). | Built |
+| **Recent forms / favorites** | Recent & favorites screen, plus stars and a "Recently used" filter in Find forms. | Built |
+| **Saved forms / packages** | Saved packets: name, describe, reuse; share with your groups or keep private. | Built |
+| **Client profile prefill from CRM** | Prefill from the Dynamics 365 contact, the account the form is about, connections (spouse, joint owner, trusted contact) and the advisor's profile. Coverage % shown per form before you add it. | Built |
+| **Enter once, use everywhere** | Fields that share a source (or a mapping key) share one value across every form in the packet. "Used on 3 forms — enter it once." | Built |
+| **Rep / advisor data** | `rep.*` fields fill from the advisor's Folium profile (rep code, branch, phone). Assistants prefill with the advisor they're working for. | Built |
+| **Firm data** | `firm.*` fields fill from the Firm profile (legal name, broker-dealer, CRD, address); the firm disclosure is added to envelope emails. | Built |
+| **Edit client data** | Contact & accounts: correct the D365 contact and accounts in place, with a confirm step showing old → new. Review edits change one form only and never touch CRM. | Built (demo) · Needs setup (D365 field security) |
+| **Missing-data / NIGO checks** | Required fields, formats (SSN, dates, ZIP, phone, email, %, $), beneficiary totals, pick-one groups, conditional requirements and stale revisions — checked live, each one clickable to the field. | Built |
+| **Fill in on the form** | PDF preview with highlights (from CRM / needs input / changed / signer completes / signature tab). Click any field to edit; see where its value came from; put the CRM value back. | Built |
+| **Download a fillable PDF** | Download › Fillable PDF keeps every AcroForm field editable with values filled. Also flattened PDF and Print. | Built |
+| **Print / sign in person** | Download to sign in person (flattened, merged) and record it on the request. | Built |
+| **Attach supporting documents** | Attach PDFs (ID, statements, trust pages); they ride along in the envelope. | Built |
+| **E-signature** | DocuSign through a provider-neutral interface: signer roles from templates, conditional signers (spousal consent if married), routing order or any order, SMS / KBA / email verification, CC, subject and note, reminders, expiration. | Built (demo) · Needs setup (DocuSign custom connector, IDV workflows) |
+| **Envelope tracking** | Signature requests: Drafted → Sent → Viewed → Signed → In OnBase, with audit trail, Check status, Resend, Correct signer, Void, Download signed PDF + certificate, "Uploaded to OnBase" tick. | Built · DocuSign Connect webhook needs setup |
+| **Save & resume** | Save draft keeps every value and writes draft PDFs to the contact's SharePoint folder. Drafts & shared lists them. | Built |
+| **Form sharing between users** | Share a packet in progress with colleagues; it appears in their "Shared with me" with all values. Saved packets can be shared with groups. | Built (UI) · see issue for Dataverse row security |
+| **User groups** | Admins create groups by office, region or team; groups control which forms people see, who they share with, and which advisors an assistant works for. | Built (UI) · see issue for Dataverse row security |
+| **User and Assistant roles** | User (advisor), Assistant (works on behalf of the Users in their groups, picks who in the sidebar) and Admin. Requests record who prepared them and for whom. | Built (UI) · see issue for Dataverse row security |
+| **User account settings** | Settings: your details, sending defaults, email sign-off, appearance. | Built |
+| **Admin: forms setup** | Template library (Live / Needs mapping / Draft / Retired), "New from Marketing" queue, mapping editor with revision diff and carry-over, signature tab placement, pre-send check rules, test with a real contact, publish now or on the effective date. Scanned/XFA PDFs get overlay fields. | Built |
+| **Works on any device** | Responsive down to phone width; sidebar becomes a drawer; 44 pt touch targets. | Built |
+| **Embed in other platforms** | Opens from the Contact record (`?contactId=`) as a Power Apps code app. | Needs setup (spike 1 in the brief) |
+| **Other e-signature vendors** | Provider interface ready; only DocuSign implemented. | Later |
+| **Automatic OnBase filing** | Manual upload + tick in v1. | Later (phase 2) |
+
+LaserApp's partner integrations (other CRMs, custodians' platforms) are out of scope: Folium is Everence-only by design.

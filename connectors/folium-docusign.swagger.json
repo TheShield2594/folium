@@ -1,0 +1,104 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "Folium DocuSign",
+    "description": "The DocuSign eSignature REST v2.1 operations Folium uses: create an envelope from Folium's own PDFs with page + x/y tabs, read status, void/resend, correct recipients, download the signed PDF and certificate.",
+    "version": "1.0"
+  },
+  "host": "demo.docusign.net",
+  "basePath": "/restapi/v2.1/accounts/{accountId}",
+  "schemes": ["https"],
+  "consumes": ["application/json"],
+  "produces": ["application/json"],
+  "securityDefinitions": {
+    "oauth2_auth": {
+      "type": "oauth2",
+      "flow": "accessCode",
+      "authorizationUrl": "https://account-d.docusign.com/oauth/auth",
+      "tokenUrl": "https://account-d.docusign.com/oauth/token",
+      "scopes": { "signature": "Create and manage envelopes" }
+    }
+  },
+  "security": [{ "oauth2_auth": ["signature"] }],
+  "parameters": {
+    "accountId": { "name": "accountId", "in": "path", "required": true, "type": "string", "x-ms-visibility": "internal", "description": "DocuSign API account ID" },
+    "envelopeId": { "name": "envelopeId", "in": "path", "required": true, "type": "string" }
+  },
+  "paths": {
+    "/envelopes": {
+      "post": {
+        "operationId": "CreateEnvelope",
+        "summary": "Create and send an envelope",
+        "parameters": [
+          { "$ref": "#/parameters/accountId" },
+          { "name": "body", "in": "body", "required": true, "schema": { "type": "object", "description": "envelopeDefinition built by buildEnvelopeDefinition()" } }
+        ],
+        "responses": {
+          "201": { "description": "Created", "schema": { "type": "object", "properties": { "envelopeId": { "type": "string" }, "status": { "type": "string" }, "statusDateTime": { "type": "string" } } } }
+        }
+      }
+    },
+    "/envelopes/{envelopeId}": {
+      "get": {
+        "operationId": "GetEnvelope",
+        "summary": "Get envelope status",
+        "parameters": [
+          { "$ref": "#/parameters/accountId" },
+          { "$ref": "#/parameters/envelopeId" },
+          { "name": "include", "in": "query", "required": false, "type": "string", "default": "recipients" }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "status": { "type": "string" },
+                "deliveredDateTime": { "type": "string" },
+                "completedDateTime": { "type": "string" },
+                "recipients": { "type": "object" }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "UpdateEnvelope",
+        "summary": "Void or resend an envelope",
+        "parameters": [
+          { "$ref": "#/parameters/accountId" },
+          { "$ref": "#/parameters/envelopeId" },
+          { "name": "resend_envelope", "in": "query", "required": false, "type": "boolean" },
+          { "name": "body", "in": "body", "required": true, "schema": { "type": "object", "properties": { "status": { "type": "string" }, "voidedReason": { "type": "string" } } } }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/envelopes/{envelopeId}/recipients": {
+      "put": {
+        "operationId": "UpdateRecipients",
+        "summary": "Correct recipient details",
+        "parameters": [
+          { "$ref": "#/parameters/accountId" },
+          { "$ref": "#/parameters/envelopeId" },
+          { "name": "resend_envelope", "in": "query", "required": false, "type": "boolean" },
+          { "name": "body", "in": "body", "required": true, "schema": { "type": "object", "properties": { "signers": { "type": "array", "items": { "type": "object" } } } } }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/envelopes/{envelopeId}/documents/{documentId}": {
+      "get": {
+        "operationId": "GetDocument",
+        "summary": "Download a document (use 'combined' or 'certificate')",
+        "produces": ["application/pdf"],
+        "parameters": [
+          { "$ref": "#/parameters/accountId" },
+          { "$ref": "#/parameters/envelopeId" },
+          { "name": "documentId", "in": "path", "required": true, "type": "string" }
+        ],
+        "responses": { "200": { "description": "PDF", "schema": { "type": "string", "format": "binary" } } }
+      }
+    }
+  }
+}
