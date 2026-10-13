@@ -28,15 +28,25 @@ function launchContactId(): string | undefined {
   return hashQuery ? new URLSearchParams(hashQuery).get('contactId')?.replace(/[{}]/g, '') ?? undefined : undefined;
 }
 
-async function contactIdFromHost(): Promise<string | undefined> {
+async function contactIdFromHost(demo: boolean): Promise<string | undefined> {
   const direct = launchContactId();
   if (direct) return direct;
+  // Outside the Power Apps host there's no context to ask; open the sample client.
+  if (demo) return undefined;
   try {
     const { getContext } = await import('@microsoft/power-apps/app');
     const ctx = await Promise.race([getContext(), new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), 1500))]);
     return ctx.app.queryParams?.contactId?.replace(/[{}]/g, '');
   } catch {
     return undefined;
+  }
+}
+
+function hasLastContact() {
+  try {
+    return !!localStorage.getItem('folium.lastContact');
+  } catch {
+    return false;
   }
 }
 
@@ -63,10 +73,11 @@ export function App() {
     let cancelled = false;
     (async () => {
       const s = await createServices();
-      const contactId = await contactIdFromHost();
+      const demo = s.mode === 'demo';
+      const contactId = await contactIdFromHost(demo);
       if (cancelled) return;
       setServices(s);
-      await boot(s, contactId);
+      await boot(s, contactId ?? (demo && !hasLastContact() ? 'c-jordan' : undefined));
     })();
     return () => {
       cancelled = true;

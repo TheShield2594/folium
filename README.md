@@ -14,6 +14,8 @@ Everence's replacement for LaserApp Anywhere. Advisors pick forms from a client'
 
 ## Try it
 
+**Live demo:** https://theshield2594.github.io/folium/ — sample data only, rebuilt from `main` on every push.
+
 ```bash
 npm install
 npm run dev        # http://localhost:5173 — demo mode, sample clients and forms
