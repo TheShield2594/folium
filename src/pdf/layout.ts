@@ -7,6 +7,8 @@ import type { FieldFormat, FieldRect, Placement } from '../domain/types';
 export interface SpecField {
   name: string;
   label: string;
+  /** Longer label for Folium's UI when the printed label relies on its section for context. */
+  uiLabel?: string;
   /** Width in twelfths of the content area. */
   span: number;
   source: string;

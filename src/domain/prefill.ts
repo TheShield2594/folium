@@ -105,23 +105,33 @@ export function prefillPacket(
   return items.map((it) => prefillForm(it.template, { ...scope, account: it.account }, values));
 }
 
-/** Rough prefill coverage for the library list, before the advisor has entered anything. */
+/**
+ * How ready a form is before the advisor touches it: of the fields that will print
+ * (anything filled, plus anything required), the share Folium filled on its own.
+ */
 export function prefillCoverage(template: FormTemplate, scope: ResolveScope): number {
   const fill = prefillForm(template, scope, {});
-  const total = fill.fields.filter((f) => f.origin !== 'signer').length;
-  return total ? Math.round((fill.filledCount / total) * 100) : 100;
+  const filled = fill.fields.filter((f) => f.origin !== 'signer' && f.value.trim()).length;
+  const total = filled + fill.missingCount;
+  return total ? Math.round((filled / total) * 100) : 100;
 }
 
-/** Fields that need the advisor, de-duplicated across forms by key. */
-export function inputsNeeded(fills: FormFill[]): { key: string; fields: FieldState[] }[] {
+/**
+ * Fields that need the advisor, de-duplicated across forms by key. `required` is true
+ * when any form needs the value (or it's malformed); optional advisor fields come last.
+ */
+export function inputsNeeded(fills: FormFill[]): { key: string; fields: FieldState[]; required: boolean }[] {
   const byKey = new Map<string, FieldState[]>();
   for (const fill of fills) {
     for (const f of fill.fields) {
-      if (!(f.missing || f.formatError || (sourceKind(f.mapping.source) === 'advisor' && f.origin !== 'signer'))) continue;
+      if (f.origin === 'signer') continue;
+      if (!(f.missing || f.formatError || sourceKind(f.mapping.source) === 'advisor')) continue;
       const list = byKey.get(f.key) ?? [];
       list.push(f);
       byKey.set(f.key, list);
     }
   }
-  return [...byKey.entries()].map(([key, fields]) => ({ key, fields }));
+  return [...byKey.entries()]
+    .map(([key, fields]) => ({ key, fields, required: fields.some((f) => f.required || (f.formatError && f.value)) }))
+    .sort((a, b) => Number(b.required) - Number(a.required));
 }

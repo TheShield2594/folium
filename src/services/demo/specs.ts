@@ -56,12 +56,13 @@ const rep: SpecField[] = [
 const bene = (kind: 'Prim' | 'Cont', n: number, fromConn?: string): SpecField[] => {
   const p = `${kind === 'Prim' ? 'Bene' : 'ContBene'}${n}`;
   const conn = fromConn ? `connection[${fromConn}]` : undefined;
+  const who = `${kind === 'Prim' ? 'Primary' : 'Contingent'} beneficiary ${n}`;
   return [
-    { name: `${p}_Name`, label: 'Beneficiary name', span: 4, source: conn ? `${conn}.fullname` : 'advisor', required: n === 1 && kind === 'Prim', key: `bene.${kind}.${n}.name` },
-    { name: `${p}_Relationship`, label: 'Relationship', span: 2, source: conn ? `${conn}.role` : 'advisor', key: `bene.${kind}.${n}.rel` },
-    { name: `${p}_DOB`, label: 'Date of birth', span: 2, source: conn ? `${conn}.birthdate` : 'advisor', format: 'date', key: `bene.${kind}.${n}.dob` },
-    { name: `${p}_SSN`, label: 'SSN / Tax ID', span: 2, source: conn ? `${conn}.ev_ssn` : 'advisor', format: 'ssn', key: `bene.${kind}.${n}.ssn` },
-    { name: `${p}_Pct`, label: 'Share %', span: 2, source: conn ? `${conn}.ev_sharepct` : 'advisor', format: 'percent', required: n === 1 && kind === 'Prim', key: `bene.${kind}.${n}.pct` },
+    { name: `${p}_Name`, label: 'Beneficiary name', uiLabel: `${who} · name`, span: 4, source: conn ? `${conn}.fullname` : 'advisor', required: n === 1 && kind === 'Prim', key: `bene.${kind}.${n}.name` },
+    { name: `${p}_Relationship`, label: 'Relationship', uiLabel: `${who} · relationship`, span: 2, source: conn ? `${conn}.role` : 'advisor', key: `bene.${kind}.${n}.rel` },
+    { name: `${p}_DOB`, label: 'Date of birth', uiLabel: `${who} · date of birth`, span: 2, source: conn ? `${conn}.birthdate` : 'advisor', format: 'date', key: `bene.${kind}.${n}.dob` },
+    { name: `${p}_SSN`, label: 'SSN / Tax ID', uiLabel: `${who} · SSN / Tax ID`, span: 2, source: conn ? `${conn}.ev_ssn` : 'advisor', format: 'ssn', key: `bene.${kind}.${n}.ssn` },
+    { name: `${p}_Pct`, label: 'Share %', uiLabel: `${who} · share %`, span: 2, source: conn ? `${conn}.ev_sharepct` : 'advisor', format: 'percent', required: n === 1 && kind === 'Prim', key: `bene.${kind}.${n}.pct` },
   ];
 };
 

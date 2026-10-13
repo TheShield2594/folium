@@ -180,8 +180,16 @@ const templates: TemplateLibrary = {
   getPdf(t) {
     const key = t.id;
     if (!pdfCache.has(key)) {
-      const spec = SPECS.find((s) => s.id === t.id) ?? SPECS.find((s) => s.formNumber === t.formNumber);
-      if (!spec) return Promise.reject(new Error(`No PDF for ${t.formNumber}`));
+      // Registered demo uploads reuse the nearest spec; brand-new forms get a generic one.
+      const spec = SPECS.find((s) => s.id === t.id) ?? SPECS.find((s) => s.formNumber === t.formNumber) ?? {
+        ...SPECS[0],
+        name: t.name,
+        formNumber: t.formNumber,
+        revision: t.revision,
+        issuer: t.issuer ?? 'Everence Financial',
+        intro: undefined,
+        sections: [SPECS[1].sections[0], { title: 'Signature', signatures: [{ role: 'Owner', label: 'Owner' }] }],
+      };
       pdfCache.set(
         key,
         generateTemplatePdf({ title: spec.name, formNumber: spec.formNumber, revision: spec.revision, issuer: spec.issuer, intro: spec.intro, sections: spec.sections, kind: spec.pdfKind === 'flat' ? 'flat' : 'fillable' }),
@@ -211,9 +219,10 @@ const templates: TemplateLibrary = {
     if (!t) throw new Error('Template not found');
     t.status = status;
     if (effectiveDate) t.effectiveDate = effectiveDate;
-    if (status === 'Live') {
-      // Publishing retires the revision it supersedes.
-      for (const other of state.templates) if (other.id !== id && other.formNumber === t.formNumber && other.status === 'Live') other.status = 'Retired';
+    if (status === 'Live' && t.effectiveDate <= new Date().toISOString().slice(0, 10)) {
+      // Publishing an effective revision retires older live ones. A future-dated revision
+      // stays alongside the current one and takes over on its effective date.
+      for (const other of state.templates) if (other.id !== id && other.formNumber === t.formNumber && other.status === 'Live' && other.effectiveDate <= t.effectiveDate) other.status = 'Retired';
     }
     persist();
     return clone(t);

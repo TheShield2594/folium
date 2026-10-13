@@ -1,0 +1,186 @@
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import type { SavedPacket } from '../../domain/types';
+import { useServices } from '../../services';
+import { useApp } from '../../state/store';
+import { Button, Field, IconButton, Select, Sheet, SwitchRow, TextInput, toast } from '../../ui/controls';
+import { Icon } from '../../ui/Icon';
+import { usePacketView } from '../common/usePacket';
+
+/** The packet being assembled — Apple-style inspector on the right of Find forms. */
+export function PacketInspector() {
+  const packet = useApp((s) => s.packet);
+  const client = useApp((s) => s.client);
+  const removeFromPacket = useApp((s) => s.removeFromPacket);
+  const moveInPacket = useApp((s) => s.moveInPacket);
+  const setPacketAccount = useApp((s) => s.setPacketAccount);
+  const clearPacket = useApp((s) => s.clearPacket);
+  const view = usePacketView();
+  const navigate = useNavigate();
+  const [saving, setSaving] = useState(false);
+
+  const blocking = view?.checks.filter((c) => c.level === 'block').length ?? 0;
+
+  return (
+    <aside className="card sticky inspector" aria-label="This packet">
+      <div className="card-head" style={{ paddingBottom: 4 }}>
+        <h2>This packet</h2>
+        {packet.items.length > 0 && (
+          <button className="btn btn-plain btn-sm" onClick={clearPacket}>
+            Clear
+          </button>
+        )}
+      </div>
+      <div style={{ padding: '0 var(--sp-5) var(--sp-5)' }} className="stack-4">
+        {packet.items.length === 0 ? (
+          <div className="packet-empty">
+            <Icon name="tray" size={34} strokeWidth={1.3} />
+            <p className="t-callout c2">Add forms with <span className="kbd">+</span> and they’ll collect here. Fields shared across forms are entered once.</p>
+          </div>
+        ) : (
+          <>
+            <p className="t-footnote c3">
+              {packet.items.length} {packet.items.length === 1 ? 'form' : 'forms'} · {view?.totals.pages ?? 0} pages
+            </p>
+            <ol className="packet-list">
+              {packet.items.map((item, i) => {
+                const t = view?.templates.find((x) => x.id === item.templateId);
+                const fill = view?.fills.find((f) => f.template.id === item.templateId);
+                if (!t) return null;
+                const needsAccount = !!t.appliesTo?.length && (client?.accounts.length ?? 0) > 1;
+                return (
+                  <li key={item.templateId}>
+                    <div className="row" style={{ alignItems: 'flex-start' }}>
+                      <span className="num tabular">{i + 1}</span>
+                      <div className="grow" style={{ minWidth: 0 }}>
+                        <div className="t-headline ellipsis">{t.name}</div>
+                        <div className="t-footnote c3">
+                          <span className="mono">{t.formNumber}</span>
+                          {fill && fill.missingCount > 0 ? <span className="c-warn"> · {fill.missingCount} to fill</span> : <span className="c-accent"> · ready</span>}
+                        </div>
+                      </div>
+                      <div className="row" style={{ gap: 0 }}>
+                        <IconButton icon="chevronUp" label={`Move ${t.name} up`} size={15} disabled={i === 0} onClick={() => moveInPacket(t.id, -1)} />
+                        <IconButton icon="chevronDown" label={`Move ${t.name} down`} size={15} disabled={i === packet.items.length - 1} onClick={() => moveInPacket(t.id, 1)} />
+                        <IconButton icon="x" label={`Remove ${t.name}`} size={15} onClick={() => removeFromPacket(t.id)} />
+                      </div>
+                    </div>
+                    {needsAccount && (
+                      <Select aria-label={`Account for ${t.name}`} value={item.accountId ?? ''} onChange={(e) => setPacketAccount(t.id, e.target.value)} style={{ marginTop: 8, minHeight: 32, fontSize: 13 }}>
+                        <option value="" disabled>
+                          Choose account…
+                        </option>
+                        {client!.accounts.map((a) => (
+                          <option key={a.accountid} value={a.accountid}>
+                            {a.name} · {a.ev_accountno}
+                          </option>
+                        ))}
+                      </Select>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+            {view && (
+              <div className="stack" style={{ borderTop: '0.5px solid var(--separator)', paddingTop: 12 }}>
+                <div className="row t-callout">
+                  <span className="grow">Filled from CRM</span>
+                  <strong className="tabular">
+                    {view.totals.filled} of {view.totals.fields}
+                  </strong>
+                </div>
+                <div className="row t-callout">
+                  <span className="grow">Needs your input</span>
+                  <strong className={['tabular', view.totals.missing ? 'c-warn' : 'c-accent'].join(' ')}>{view.totals.missing || 'None'}</strong>
+                </div>
+                <div className="row t-callout">
+                  <span className="grow">Pre-send checks</span>
+                  <strong className={blocking ? 'c-warn' : 'c-accent'}>{blocking ? `${blocking} to fix` : 'All clear'}</strong>
+                </div>
+              </div>
+            )}
+            <Button variant="filled" size="lg" block icon="wand" onClick={() => navigate('/review')}>
+              Prefill & review
+            </Button>
+            <Button variant="bordered" block icon="tray" onClick={() => setSaving(true)}>
+              Save as packet
+            </Button>
+            <p className="t-footnote c3">Drafts save to {client?.contact.firstname}’s SharePoint folder. Nothing goes to the client until you send.</p>
+          </>
+        )}
+      </div>
+      {saving && <SavePacketSheet onClose={() => setSaving(false)} />}
+    </aside>
+  );
+}
+
+function SavePacketSheet({ onClose }: { onClose: () => void }) {
+  const packet = useApp((s) => s.packet);
+  const me = useApp((s) => s.me);
+  const groups = useApp((s) => s.groups);
+  const refreshPackets = useApp((s) => s.refreshPackets);
+  const services = useServices();
+  const [name, setName] = useState(packet.title || '');
+  const [desc, setDesc] = useState('');
+  const [shared, setShared] = useState(false);
+  const [groupIds, setGroupIds] = useState<string[]>(me?.groupIds ?? []);
+  const [busy, setBusy] = useState(false);
+  const myGroups = groups.filter((g) => g.memberIds.includes(me?.systemuserid ?? ''));
+
+  async function save() {
+    setBusy(true);
+    const p: SavedPacket = {
+      id: `new-${Date.now()}`,
+      name: name.trim(),
+      description: desc.trim() || undefined,
+      templateIds: packet.items.map((i) => i.templateId),
+      shared,
+      groupIds: shared ? groupIds : [],
+      owner: me?.fullname ?? '',
+      createdOn: new Date().toISOString(),
+      usedCount: 0,
+    };
+    await services.packets.save(p);
+    await refreshPackets();
+    toast.ok(`Saved “${p.name}”`);
+    onClose();
+  }
+
+  return (
+    <Sheet
+      title="Save as packet"
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="gray" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="filled" onClick={save} disabled={!name.trim()} busy={busy}>
+            Save packet
+          </Button>
+        </>
+      }
+    >
+      <div className="stack-4">
+        <p className="t-callout c2">A packet is a reusable list of forms. It always opens with the current revision of each form.</p>
+        <Field label="Name" htmlFor="pk-name">
+          <TextInput id="pk-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Retirement income set-up" />
+        </Field>
+        <Field label="Description" htmlFor="pk-desc" optional>
+          <TextInput id="pk-desc" value={desc} onChange={(e) => setDesc(e.target.value)} />
+        </Field>
+        <div className="list">
+          <SwitchRow label="Share with my groups" detail="Others in the group can start from this packet." checked={shared} onChange={setShared} />
+          {shared &&
+            myGroups.map((g) => (
+              <label key={g.id} className="list-row" style={{ cursor: 'pointer' }}>
+                <input type="checkbox" className="check" checked={groupIds.includes(g.id)} onChange={(e) => setGroupIds(e.target.checked ? [...groupIds, g.id] : groupIds.filter((x) => x !== g.id))} />
+                <span className="grow">{g.name}</span>
+                <span className="t-footnote c3">{g.memberIds.length} people</span>
+              </label>
+            ))}
+        </div>
+      </div>
+    </Sheet>
+  );
+}

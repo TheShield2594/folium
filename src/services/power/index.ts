@@ -203,8 +203,8 @@ export function createPowerServices(): Services {
       if (!t) throw new Error('Template not found');
       const next = { ...t, status, effectiveDate: effectiveDate ?? t.effectiveDate };
       unwrap(await client.updateRecordAsync(DATAVERSE.formTemplate, id, { ev_payload: JSON.stringify(next), ev_status: status }), 'Update status');
-      if (status === 'Live') {
-        for (const o of all.filter((x) => x.id !== id && x.formNumber === t.formNumber && x.status === 'Live')) {
+      if (status === 'Live' && next.effectiveDate <= new Date().toISOString().slice(0, 10)) {
+        for (const o of all.filter((x) => x.id !== id && x.formNumber === t.formNumber && x.status === 'Live' && x.effectiveDate <= next.effectiveDate)) {
           await client.updateRecordAsync(DATAVERSE.formTemplate, o.id, { ev_payload: JSON.stringify({ ...o, status: 'Retired' }), ev_status: 'Retired' });
         }
       }

@@ -1,0 +1,118 @@
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import type { SignatureRequest } from '../../domain/types';
+import { useServices } from '../../services';
+import { Toolbar } from '../../shell/Shell';
+import { useApp } from '../../state/store';
+import { Avatar, Badge, Button, Empty, Segmented, Spinner, toast } from '../../ui/controls';
+import { fmtDay } from './RequestCard';
+
+type Tab = 'mine' | 'shared';
+
+/** Drafts in progress, and packets colleagues have shared with you. */
+export function DraftsScreen() {
+  const services = useServices();
+  const me = useApp((s) => s.me);
+  const users = useApp((s) => s.users);
+  const actingForId = useApp((s) => s.actingForId);
+  const requests = useApp((s) => s.requests);
+  const openContact = useApp((s) => s.openContact);
+  const loadRequest = useApp((s) => s.loadRequest);
+  const contactId = useApp((s) => s.contactId);
+  const navigate = useNavigate();
+  const [tab, setTab] = useState<Tab>('mine');
+  const [list, setList] = useState<SignatureRequest[]>();
+  const [names, setNames] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let live = true;
+    services.requests.listMine().then(async (all) => {
+      const drafts = all.filter((r) => r.status === 'Drafted');
+      const n: Record<string, string> = {};
+      await Promise.all([...new Set(drafts.map((d) => d.contactId))].map(async (id) => (n[id] = (await services.crm.getClient(id).catch(() => undefined))?.contact.fullname ?? 'Client')));
+      if (live) {
+        setNames(n);
+        setList(drafts);
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [services, requests]);
+
+  const meId = me?.systemuserid ?? '';
+  const mine = (list ?? []).filter((r) => r.preparedById === meId || r.ownerId === actingForId || r.ownerId === meId);
+  const shared = (list ?? []).filter((r) => r.sharedWith?.includes(meId) && !mine.includes(r));
+  const shown = tab === 'mine' ? mine : shared;
+
+  async function open(r: SignatureRequest) {
+    try {
+      if (r.contactId !== contactId) await openContact(r.contactId);
+      loadRequest(r);
+      navigate('/review');
+    } catch {
+      toast.error('That client isn’t available to you.');
+    }
+  }
+
+  return (
+    <>
+      <Toolbar title="Drafts & shared">
+        <Segmented
+          label="Show"
+          value={tab}
+          onChange={setTab}
+          options={[
+            { value: 'mine', label: `Mine${mine.length ? ` (${mine.length})` : ''}` },
+            { value: 'shared', label: `Shared with me${shared.length ? ` (${shared.length})` : ''}` },
+          ]}
+        />
+      </Toolbar>
+      <div className="scroll">
+        <div className="page page-narrow stack-5">
+          <div>
+            <h1 className="t-large">{tab === 'mine' ? 'Drafts' : 'Shared with you'}</h1>
+            <p className="t-callout c2" style={{ marginTop: 4 }}>
+              {tab === 'mine' ? 'Packets saved before sending. Everything you entered is kept.' : 'Packets colleagues handed to you to review, finish or send.'}
+            </p>
+          </div>
+          {!list ? (
+            <div className="row" style={{ justifyContent: 'center', padding: 40 }}>
+              <Spinner />
+            </div>
+          ) : shown.length === 0 ? (
+            <Empty icon={tab === 'mine' ? 'pencil' : 'share'} title={tab === 'mine' ? 'No drafts' : 'Nothing shared with you'}>
+              {tab === 'mine' ? 'Use Save draft on the review screen to come back to a packet later.' : 'When someone shares a packet with you, it shows up here.'}
+            </Empty>
+          ) : (
+            <div className="list">
+              {shown.map((r) => {
+                const by = users.find((u) => u.systemuserid === r.preparedById);
+                const owner = users.find((u) => u.systemuserid === r.ownerId);
+                return (
+                  <div key={r.id} className="list-row" style={{ padding: '14px 16px' }}>
+                    <Avatar name={names[r.contactId] ?? '?'} size={36} alt />
+                    <div className="grow" style={{ minWidth: 0 }}>
+                      <div className="t-headline">
+                        {names[r.contactId]} · {r.title}
+                      </div>
+                      <div className="t-footnote c3">
+                        {r.documents.map((d) => d.formNumber).join(', ')} · {Object.keys(r.values).length} values entered · saved {fmtDay(r.audit.at(-1)?.at ?? r.createdOn)} by {by?.fullname ?? r.preparedBy}
+                        {owner && owner.systemuserid !== by?.systemuserid ? ` for ${owner.fullname}` : ''}
+                      </div>
+                    </div>
+                    {r.inPerson && <Badge>Printed</Badge>}
+                    {r.sharedWith?.length ? <Badge tone="info" icon="share">{r.sharedWith.length}</Badge> : null}
+                    <Button variant="tinted" onClick={() => open(r)}>
+                      Open
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}

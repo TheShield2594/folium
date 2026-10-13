@@ -141,7 +141,7 @@ export function specToTemplate(spec: FormSpec): FormTemplate {
               pdfField: field.name,
               source: field.source,
               required: !!field.required,
-              label: field.label,
+              label: field.uiLabel ?? field.label,
               key: field.key,
               format: field.format ?? (field.type === 'checkbox' ? 'checkbox' : undefined),
               help: field.help,
