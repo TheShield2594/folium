@@ -38,9 +38,13 @@ export function TemplateEditor() {
   const [publishing, setPublishing] = useState(false);
   const [filter, setFilter] = useState<'all' | 'attention'>('all');
 
+  // Load the mapping when the editor opens a template, not on every refresh of the
+  // template list, so a refresh from elsewhere never throws away unsaved edits.
+  const templateId = template?.id;
   useEffect(() => {
-    if (template) setMapping(structuredClone(template.mapping));
-  }, [template]);
+    const t = useApp.getState().templates.find((x) => x.id === templateId);
+    if (t) setMapping(structuredClone(t.mapping));
+  }, [templateId]);
 
   // Diff the PDF's actual fields against the previous revision's mapping.
   const diff = useMemo(() => {
@@ -322,7 +326,7 @@ export function TemplateEditor() {
       </div>
       {publishing && (
         <PublishSheet
-          template={template}
+          template={{ ...template, mapping }}
           onClose={() => setPublishing(false)}
           onPublish={async (date) => {
             await save('Live', date);

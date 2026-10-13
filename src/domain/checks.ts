@@ -73,7 +73,14 @@ function runTemplateCheck(check: Check, fill: FormFill, ctx: CheckContext, idx: 
     }
     case 'pattern': {
       const v = valueOf(fill, check.field) ?? '';
-      const ok = !v || new RegExp(check.pattern).test(v);
+      let re: RegExp;
+      try {
+        re = new RegExp(check.pattern);
+      } catch {
+        // A typo in an admin-authored rule shouldn't break review; flag it instead.
+        return { id, level: 'warn', title: `${check.label ?? check.field}: rule can’t be checked`, detail: `${t.name}: the template’s pattern is invalid. Ask an administrator to fix it.`, templateId: t.id };
+      }
+      const ok = !v || re.test(v);
       return { id, level: ok ? 'pass' : 'block', title: check.label ?? `${check.field} format`, detail: t.name, templateId: t.id, fieldKey: keyOf(fill, check.field) };
     }
   }

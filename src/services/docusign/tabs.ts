@@ -46,15 +46,24 @@ export function placementsToTabs(placements: Placement[], role: string, document
   return tabs;
 }
 
+/** Joins the roles of one person who signs for several (see buildEnvelopeDefinition). */
+export const ROLE_SEPARATOR = '+';
+
 /** DocuSign identity-verification workflow IDs for the account (Settings › Identity Verification). */
 export interface IdvWorkflows {
   sms?: string;
   kba?: string;
 }
 
-function authFor(method: VerificationMethod, phone: string | undefined, idv: IdvWorkflows): Record<string, unknown> {
-  if (method === 'sms' && phone && idv.sms) {
-    const number = phone.replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
+/**
+ * The identity-verification settings for one signer. Throws rather than quietly sending
+ * a financial form with weaker verification than the advisor chose.
+ */
+function authFor(method: VerificationMethod, phone: string | undefined, idv: IdvWorkflows, who: string): Record<string, unknown> {
+  if (method === 'sms') {
+    if (!idv.sms) throw new Error('SMS verification isn’t set up for this DocuSign account. Choose another method or ask an administrator.');
+    const number = (phone ?? '').replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
+    if (number.length !== 10) throw new Error(`${who} needs a mobile number for SMS verification.`);
     return {
       identityVerification: {
         workflowId: idv.sms,
@@ -62,7 +71,10 @@ function authFor(method: VerificationMethod, phone: string | undefined, idv: Idv
       },
     };
   }
-  if (method === 'kba' && idv.kba) return { identityVerification: { workflowId: idv.kba } };
+  if (method === 'kba') {
+    if (!idv.kba) throw new Error('ID-question (KBA) verification isn’t set up for this DocuSign account. Choose another method or ask an administrator.');
+    return { identityVerification: { workflowId: idv.kba } };
+  }
   return {};
 }
 
@@ -88,20 +100,34 @@ export function buildEnvelopeDefinition(req: SendRequest, idv: IdvWorkflows = {}
     documentBase64: toBase64(a.pdf),
   }));
 
-  const signers = req.signers.map((s, i) => {
+  // One person can hold two roles (joint owner and consenting spouse). They become one
+  // DocuSign recipient with every role's tabs, so they get one email and sign once.
+  const people = new Map<string, SendRequest['signers']>();
+  for (const s of req.signers) {
+    const key = `${s.name.trim().toLowerCase()}|${s.email.trim().toLowerCase()}`;
+    people.set(key, [...(people.get(key) ?? []), s]);
+  }
+  const strength = { email: 0, sms: 1, kba: 2 } as const;
+
+  const signers = [...people.values()].map((roles, i) => {
+    const s = roles[0];
+    const auth = roles.reduce((a, r) => (strength[r.auth] > strength[a] ? r.auth : a), s.auth);
+    const phone = roles.find((r) => r.phone)?.phone;
     const merged: DocuSignTabs = {};
     req.documents.forEach((d, di) => {
-      const tabs = placementsToTabs(d.placements, s.role, String(di + 1));
-      for (const [k, v] of Object.entries(tabs) as [keyof DocuSignTabs, TabList][]) (merged[k] ??= []).push(...v);
+      for (const r of roles) {
+        const tabs = placementsToTabs(d.placements, r.role, String(di + 1));
+        for (const [k, v] of Object.entries(tabs) as [keyof DocuSignTabs, TabList][]) (merged[k] ??= []).push(...v);
+      }
     });
     return {
       recipientId: String(i + 1),
-      roleName: s.role,
+      roleName: roles.map((r) => r.role).join(ROLE_SEPARATOR),
       name: s.name,
       email: s.email,
-      routingOrder: String(s.order),
+      routingOrder: String(Math.min(...roles.map((r) => r.order))),
       tabs: merged,
-      ...authFor(s.auth, s.phone, idv),
+      ...authFor(auth, phone, idv, s.name),
     };
   });
 

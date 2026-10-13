@@ -207,7 +207,12 @@ function RegisterSheet({ file, existing, onClose, onDone }: { file: IncomingFile
             disabled={!formNumber || !name || !revision}
             onClick={async () => {
               setBusy(true);
-              onDone(await services.templates.register(file, { formNumber, name, revision, effectiveDate: effective, source, category, issuer: prev?.issuer }));
+              try {
+                onDone(await services.templates.register(file, { formNumber, name, revision, effectiveDate: effective, source, category, issuer: prev?.issuer }));
+              } catch (e) {
+                toast.error(e instanceof Error ? e.message : 'Could not set up the template');
+                setBusy(false);
+              }
             }}
           >
             Continue to mapping

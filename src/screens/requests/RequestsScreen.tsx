@@ -3,7 +3,7 @@ import type { SignatureRequest } from '../../domain/types';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
 import { useApp } from '../../state/store';
-import { Empty, Segmented, Spinner } from '../../ui/controls';
+import { Empty, Segmented, Spinner, toast } from '../../ui/controls';
 import { RequestCard } from './RequestCard';
 
 type Scope = 'client' | 'all';
@@ -32,6 +32,10 @@ export function RequestsScreen() {
         setNames(n);
         setAll(mine);
       }
+    }).catch((e) => {
+      if (!live) return;
+      setAll([]);
+      toast.error(e instanceof Error ? e.message : 'Could not load requests');
     });
     return () => {
       live = false;

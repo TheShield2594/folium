@@ -86,7 +86,7 @@ export function Icon({ name, size = 18, strokeWidth = 1.7, className, label }: {
       aria-label={label}
       aria-hidden={label ? undefined : true}
       fill={filled ? 'currentColor' : 'none'}
-      stroke={filled ? 'currentColor' : 'currentColor'}
+      stroke="currentColor"
       strokeWidth={filled ? 1.2 : name === 'ellipsis' || name === 'dot' ? 3 : strokeWidth}
       strokeLinecap="round"
       strokeLinejoin="round"

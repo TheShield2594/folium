@@ -1,7 +1,7 @@
 import { roleLabel } from '../../domain/signers';
 import type { FormTemplate } from '../../domain/types';
 import { useServices } from '../../services';
-import { Badge, Button, Sheet, downloadBytes } from '../../ui/controls';
+import { Badge, Button, Sheet, downloadBytes, toast } from '../../ui/controls';
 import { PdfView } from '../common/PdfView';
 
 /** Quick Look: a fast preview of a blank form before adding it. */
@@ -14,7 +14,13 @@ export function QuickLook({ template, inPacket, onAdd, onClose, latest }: { temp
       onClose={onClose}
       footer={
         <>
-          <Button variant="gray" icon="download" onClick={async () => downloadBytes(await services.templates.getPdf(template), `${template.formNumber} ${template.name} (blank).pdf`)}>
+          <Button variant="gray" icon="download" onClick={async () => {
+              try {
+                downloadBytes(await services.templates.getPdf(template), `${template.formNumber} ${template.name} (blank).pdf`);
+              } catch (e) {
+                toast.error(e instanceof Error ? e.message : 'Could not download the form');
+              }
+            }}>
             Blank PDF
           </Button>
           <span className="spacer" />

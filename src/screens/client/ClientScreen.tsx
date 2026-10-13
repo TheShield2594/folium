@@ -102,7 +102,10 @@ export function ClientScreen() {
     setBusy(true);
     try {
       if (contactChanges.length) await services.crm.updateContact(c.contactid, Object.fromEntries(contactChanges));
-      for (const [id, ch] of Object.entries(acctDraft)) if (Object.keys(ch).length) await services.crm.updateAccount(id, ch);
+      // Only fields that really differ from CRM, so an edit put back is never written.
+      const byAccount = new Map<string, Partial<Account>>();
+      for (const x of acctChanges) byAccount.set(x.id, { ...byAccount.get(x.id), [x.k]: x.to });
+      for (const [id, ch] of byAccount) await services.crm.updateAccount(id, ch);
       await refreshClient();
       setDraft({});
       setAcctDraft({});

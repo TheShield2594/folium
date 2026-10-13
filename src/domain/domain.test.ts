@@ -104,6 +104,12 @@ describe('checks', () => {
     expect(summarize(results).blocking).toBe(0);
   });
 
+  it('warns instead of crashing on an invalid pattern rule', () => {
+    const bad = { ...bene, mapping: { ...bene.mapping, checks: [{ type: 'pattern' as const, field: 'Owner_Name_Full', pattern: '([' }] } };
+    const results = runChecks(prefillPacket([{ template: bad }], scope, {}), ctx({}));
+    expect(results.find((r) => r.title.includes('can’t be checked'))!.level).toBe('warn');
+  });
+
   it('flags retired revisions', () => {
     const old = tpl('tpl-ev1004-0619');
     const results = runChecks(prefillPacket([{ template: old }], scope, {}), ctx({}));
@@ -143,6 +149,13 @@ describe('revisions', () => {
     const next = carryForward(prev, rows, '10/2026', 'PX-305');
     expect(next.fields.find((f) => f.pdfField === 'Owner_FullName')!.source).toBe('contact.fullname');
   });
+
+  it('keeps check rules pointing at a renamed field', () => {
+    const prev = { ...tpl('tpl-px305-0825').mapping, checks: [{ type: 'requiredIf' as const, field: 'Owner_Name_Full', when: 'contact.familystatuscode == married' }] };
+    const rows = diffRevision(prev, ['Owner_FullName', 'Acct_Number']);
+    const next = carryForward(prev, rows, '10/2026', 'PX-305');
+    expect(next.checks).toEqual([{ type: 'requiredIf', field: 'Owner_FullName', when: 'contact.familystatuscode == married' }]);
+  });
 });
 
 describe('docusign', () => {
@@ -171,5 +184,48 @@ describe('docusign', () => {
     expect(env.recipients.signers[0]).toHaveProperty('identityVerification.workflowId', 'wf-sms');
     expect(env.notification.reminders.reminderDelay).toBe('3');
     expect(env.documents[0].documentBase64).toBe('JVBERg==');
+  });
+
+  it('merges one person holding two roles into a single recipient with both roles’ tabs', () => {
+    const env = buildEnvelopeDefinition(
+      {
+        documents: [{ name: 'Bene.pdf', pdf: new Uint8Array([1]), placements: [
+          { role: 'JointOwner', type: 'signature', page: 1, x: 50, y: 600 },
+          { role: 'SpouseConsent', type: 'signature', page: 1, x: 50, y: 660 },
+        ] }],
+        signers: [
+          { role: 'JointOwner', name: 'Sam Miller', email: 'sam@x.co', order: 2, auth: 'email' },
+          { role: 'SpouseConsent', name: 'Sam Miller', email: 'SAM@x.co', order: 3, auth: 'email' },
+        ],
+        subject: 'Sign',
+        message: '',
+      },
+      {},
+    );
+    expect(env.recipients.signers).toHaveLength(1);
+    expect(env.recipients.signers[0].roleName).toBe('JointOwner+SpouseConsent');
+    expect(env.recipients.signers[0].routingOrder).toBe('2');
+    expect(env.recipients.signers[0].tabs.signHereTabs).toHaveLength(2);
+    expect(validateSigners([
+      { role: 'JointOwner', name: 'Sam Miller', email: 'sam@x.co', order: 1, auth: 'email' },
+      { role: 'SpouseConsent', name: 'Sam Miller', email: 'sam@x.co', order: 2, auth: 'email' },
+    ])).toEqual([]);
+    expect(validateSigners([
+      { role: 'Owner', name: 'Jordan Miller', email: 'home@x.co', order: 1, auth: 'email' },
+      { role: 'SpouseConsent', name: 'Sam Miller', email: 'home@x.co', order: 2, auth: 'email' },
+    ])[0].message).toMatch(/share an email/);
+  });
+
+  it('refuses to send when the chosen verification is not configured', () => {
+    const req = {
+      documents: [{ name: 'Bene.pdf', pdf: new Uint8Array([1]), placements: [] }],
+      signers: [{ role: 'Owner', name: 'Jordan', email: 'j@x.co', phone: '574-555-0118', order: 1, auth: 'sms' as const }],
+      subject: 'Sign',
+      message: '',
+    };
+    expect(() => buildEnvelopeDefinition(req, {})).toThrow(/SMS verification/);
+    expect(() => buildEnvelopeDefinition({ ...req, signers: [{ ...req.signers[0], phone: undefined }] }, { sms: 'wf' })).toThrow(/mobile number/);
+    expect(() => buildEnvelopeDefinition({ ...req, signers: [{ ...req.signers[0], auth: 'kba' as const }] }, {})).toThrow(/KBA/);
+    expect(() => buildEnvelopeDefinition({ ...req, signers: [{ ...req.signers[0], auth: 'email' as const }] }, {})).not.toThrow();
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { FieldState } from '../../domain/prefill';
 import type { FieldRect, FormTemplate, Placement } from '../../domain/types';
 import { inspectPdf, type PdfInspection } from '../../pdf/inspect';
@@ -15,8 +15,16 @@ export function useInspection(template: FormTemplate | undefined) {
   useEffect(() => {
     if (!template) return;
     let live = true;
-    if (!inspections.has(template.id)) inspections.set(template.id, services.templates.getPdf(template).then(inspectPdf));
-    inspections.get(template.id)!.then((i) => live && setInfo(i));
+    if (!inspections.has(template.id)) {
+      const p = services.templates.getPdf(template).then(inspectPdf);
+      // Don't cache a failure: the next mount should try again.
+      p.catch(() => inspections.delete(template.id));
+      inspections.set(template.id, p);
+    }
+    inspections
+      .get(template.id)!
+      .then((i) => live && setInfo(i))
+      .catch(() => undefined);
     return () => {
       live = false;
     };
@@ -24,14 +32,16 @@ export function useInspection(template: FormTemplate | undefined) {
   return info;
 }
 
-function PageCanvas({ template, page, width, onSize }: { template: FormTemplate; page: number; width: number; onSize: (s: { w: number; h: number; scale: number }) => void }) {
+type PageSize = { w: number; h: number; scale: number };
+
+function PageCanvas({ template, page, width, onSize }: { template: FormTemplate; page: number; width: number; onSize: (page: number, s: PageSize) => void }) {
   const services = useServices();
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     let live = true;
     loadPdf(template.id, () => services.templates.getPdf(template))
       .then((doc) => (live && ref.current ? renderPage(doc, page, ref.current, width) : undefined))
-      .then((r) => r && live && onSize({ w: r.width, h: r.height, scale: r.scale }))
+      .then((r) => r && live && onSize(page, { w: r.width, h: r.height, scale: r.scale }))
       .catch(() => undefined);
     return () => {
       live = false;
@@ -66,7 +76,9 @@ export interface PdfViewProps {
  */
 export function PdfView({ template, fields = [], placements = [], width = 640, activeKey, onFieldClick, onPageClick, onPlacementClick, selectedPlacement, showValues = true, maskSensitive = true, maxPages, pageLabel }: PdfViewProps) {
   const info = useInspection(template);
-  const [sizes, setSizes] = useState<Record<number, { w: number; h: number; scale: number }>>({});
+  const [sizes, setSizes] = useState<Record<number, PageSize>>({});
+  // Stable across renders, so each page's render effect only re-runs when it needs to.
+  const onSize = useCallback((page: number, v: PageSize) => setSizes((p) => (p[page]?.scale === v.scale ? p : { ...p, [page]: v })), []);
   const pages = Math.min(info?.pageCount ?? template.pageCount, maxPages ?? Infinity);
 
   const rectsFor = (f: FieldState): FieldRect[] => {
@@ -90,7 +102,7 @@ export function PdfView({ template, fields = [], placements = [], width = 640, a
                 onPageClick(page, (e.clientX - r.left) / s, (e.clientY - r.top) / s);
               }}
             >
-              <PageCanvas template={template} page={page} width={width} onSize={(v) => setSizes((p) => (p[page]?.scale === v.scale ? p : { ...p, [page]: v }))} />
+              <PageCanvas template={template} page={page} width={width} onSize={onSize} />
               <div className="pdf-overlay">
                 {fields.flatMap((f) =>
                   rectsFor(f)

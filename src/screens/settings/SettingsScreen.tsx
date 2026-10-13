@@ -31,6 +31,8 @@ export function SettingsScreen() {
       await services.directory.saveUser(p!);
       await reloadDirectory();
       toast.ok('Profile saved. New forms use it right away.');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not save your profile');
     } finally {
       setBusy(false);
     }

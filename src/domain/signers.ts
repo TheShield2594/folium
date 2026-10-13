@@ -90,7 +90,10 @@ export function validateSigners(signers: SignerAssignment[]): SignerProblem[] {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.email)) problems.push({ role: s.role, message: `${roleLabel(s.role)} needs a valid email.` });
     if (s.auth === 'sms' && (s.phone ?? '').replace(/\D/g, '').length < 10) problems.push({ role: s.role, message: `${roleLabel(s.role)} needs a mobile number for SMS verification.` });
     const prior = emails.get(s.email.toLowerCase());
-    if (s.email && prior && prior !== s.name) problems.push({ role: s.role, message: `${s.name} and ${prior} share an email. DocuSign needs each signer to have their own.` });
+    // The same person in two roles is fine: the envelope merges them into one recipient.
+    // Two different people on one address is not — DocuSign can't tell who signed.
+    if (s.email && prior && prior.trim().toLowerCase() !== s.name.trim().toLowerCase())
+      problems.push({ role: s.role, message: `${s.name} and ${prior} share an email. Each person needs their own to sign.` });
     if (s.email) emails.set(s.email.toLowerCase(), s.name);
   }
   return problems;

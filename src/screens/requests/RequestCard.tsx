@@ -91,8 +91,17 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
   const refresh = () =>
     withBusy('status', async () => {
       const st = await services.signing.getStatus(r.envelopeId!);
-      if (st.status === r.status) return toast.ok('No change yet');
+      // One signer can finish while the envelope is still "Sent", so compare signers too.
+      const signers = r.signers.map((s) => {
+        const rec = st.recipients.find((x) => x.role === s.role);
+        if (!rec) return s;
+        const status = rec.status === 'completed' ? 'signed' : rec.status === 'delivered' ? 'viewed' : rec.status === 'declined' ? 'declined' : 'sent';
+        return { ...s, status, signedOn: rec.at ?? s.signedOn } as typeof s;
+      });
+      const signersChanged = signers.some((s, i) => s.status !== r.signers[i].status);
+      if (st.status === r.status && !signersChanged) return toast.ok('No change yet');
       const events = [...r.audit];
+      for (const s of signers) if (s.status === 'signed' && r.signers.find((x) => x.role === s.role)?.status !== 'signed') events.push({ at: s.signedOn ?? new Date().toISOString(), actor: s.name, action: 'Signed' });
       if (st.viewedOn && !r.viewedOn) events.push({ at: st.viewedOn, actor: r.signers[0]?.name ?? 'Signer', action: 'Viewed' });
       if (st.status === 'Signed') events.push({ at: st.signedOn ?? new Date().toISOString(), actor: 'DocuSign', action: 'Completed', detail: 'All signers signed' });
       await save(
@@ -101,13 +110,10 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
           status: st.status,
           viewedOn: st.viewedOn ?? r.viewedOn,
           signedOn: st.signedOn ?? r.signedOn,
-          signers: r.signers.map((s) => {
-            const rec = st.recipients.find((x) => x.role === s.role);
-            return rec ? { ...s, status: rec.status === 'completed' ? 'signed' : rec.status === 'delivered' ? 'viewed' : rec.status === 'declined' ? 'declined' : 'sent', signedOn: rec.at ?? s.signedOn } : s;
-          }),
+          signers,
           audit: events,
         },
-        `Now: ${st.status.toLowerCase()}`,
+        st.status === r.status ? `${signers.filter((s) => s.status === 'signed').length} of ${signers.length} signed` : `Now: ${st.status.toLowerCase()}`,
       );
     });
 
@@ -118,10 +124,14 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
     });
 
   async function openDraft(asNew?: boolean) {
-    if (r.contactId !== contactId) await openContact(r.contactId);
-    loadRequest(asNew ? { ...r, id: '', values: r.values } : r);
-    if (asNew) useApp.getState().setPacket({ requestId: undefined, sharedWith: [] });
-    navigate('/review');
+    try {
+      if (r.contactId !== contactId) await openContact(r.contactId);
+      loadRequest(asNew ? { ...r, id: '', values: r.values } : r);
+      if (asNew) useApp.getState().setPacket({ requestId: undefined, sharedWith: [] });
+      navigate('/review');
+    } catch {
+      toast.error('That client isn’t available to you.');
+    }
   }
 
   const steps = [

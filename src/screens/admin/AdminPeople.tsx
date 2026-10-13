@@ -11,6 +11,18 @@ const ROLES: { value: UserRole; label: string; detail: string }[] = [
   { value: 'Assistant', label: 'Assistant', detail: 'Fills out and sends forms on behalf of the Users in their groups.' },
   { value: 'Admin', label: 'Administrator', detail: 'Manages templates, groups, users and firm data.' },
 ];
+/** Run a sheet's save with a spinner that always clears, and say so if it fails. */
+async function runSave(setBusy: (b: boolean) => void, fn: () => Promise<void>) {
+  setBusy(true);
+  try {
+    await fn();
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : 'Could not save');
+  } finally {
+    setBusy(false);
+  }
+}
+
 const SOURCES: FormSource[] = ['Everence', 'Praxis', 'Carrier'];
 const CATEGORIES: FormCategory[] = ['Account maintenance', 'Beneficiary', 'Distributions', 'Transfers', 'New accounts', 'Insurance service', 'Banking'];
 
@@ -177,7 +189,7 @@ function UserSheet({ user, groups, onClose, onSave }: { user?: UserProfile; grou
           <Button variant="gray" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="filled" busy={busy} disabled={!u.fullname || !u.email} onClick={async () => (setBusy(true), await onSave(u, groupIds))}>
+          <Button variant="filled" busy={busy} disabled={!u.fullname || !u.email} onClick={() => runSave(setBusy, () => onSave(u, groupIds))}>
             Save
           </Button>
         </>
@@ -254,7 +266,7 @@ function GroupSheet({ group, users, onClose, onSave, onDelete }: { group?: UserG
           <Button variant="gray" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="filled" busy={busy} disabled={!g.name.trim()} onClick={async () => (setBusy(true), await onSave(g))}>
+          <Button variant="filled" busy={busy} disabled={!g.name.trim()} onClick={() => runSave(setBusy, () => onSave(g))}>
             Save
           </Button>
         </>

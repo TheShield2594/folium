@@ -1,7 +1,7 @@
 import { getContext } from '@microsoft/power-apps/app';
 import { getClient, type DataClient } from '@microsoft/power-apps/data';
 import type { Account, Connection, Contact, FirmProfile, FormTemplate, SavedPacket, SignatureRequest, SignatureStatus, TemplateMapping, UserGroup, UserProfile } from '../../domain/types';
-import { buildEnvelopeDefinition } from '../docusign/tabs';
+import { buildEnvelopeDefinition, ROLE_SEPARATOR } from '../docusign/tabs';
 import type { CrmService, DirectoryService, DraftStore, IncomingFile, PacketStore, RequestStore, Services, SigningProvider, TemplateLibrary } from '../types';
 import { CONNECTORS, DATAVERSE, DOCUSIGN, SHAREPOINT } from './config';
 import { dataSourcesInfo } from './dataSourcesInfo';
@@ -205,7 +205,7 @@ export function createPowerServices(): Services {
       unwrap(await client.updateRecordAsync(DATAVERSE.formTemplate, id, { ev_payload: JSON.stringify(next), ev_status: status }), 'Update status');
       if (status === 'Live' && next.effectiveDate <= new Date().toISOString().slice(0, 10)) {
         for (const o of all.filter((x) => x.id !== id && x.formNumber === t.formNumber && x.status === 'Live' && x.effectiveDate <= next.effectiveDate)) {
-          await client.updateRecordAsync(DATAVERSE.formTemplate, o.id, { ev_payload: JSON.stringify({ ...o, status: 'Retired' }), ev_status: 'Retired' });
+          unwrap(await client.updateRecordAsync(DATAVERSE.formTemplate, o.id, { ev_payload: JSON.stringify({ ...o, status: 'Retired' }), ev_status: 'Retired' }), `Retire ${o.formNumber} Rev ${o.revision}`);
         }
       }
       return next;
@@ -260,11 +260,11 @@ export function createPowerServices(): Services {
       return rows.map((r) => ({ ...payloadRow<SignatureRequest>(r), id: r.ev_signaturerequestid }));
     },
     async listMine() {
-      const ctx = await getContext();
-      const rows = unwrap(
-        await client.retrieveMultipleRecordsAsync<Row>(DATAVERSE.signatureRequest, { filter: `_createdby_value eq ${ctx.user.objectId}`, orderBy: ['createdon desc'], top: 200 }),
-        'Load my requests',
-      );
+      // Every request this user can see: their own, ones they prepared as an assistant,
+      // and drafts shared with them. Dataverse security decides which rows those are
+      // (issue #1); the screens then narrow by ownerId / preparedById / sharedWith.
+      // Filtering on _createdby_value here would drop shared and acting-for rows.
+      const rows = unwrap(await client.retrieveMultipleRecordsAsync<Row>(DATAVERSE.signatureRequest, { orderBy: ['modifiedon desc'], top: 500 }), 'Load my requests');
       return rows.map((r) => ({ ...payloadRow<SignatureRequest>(r), id: r.ev_signaturerequestid }));
     },
     async get(id) {
@@ -325,7 +325,10 @@ export function createPowerServices(): Services {
         status: mapStatus(e.status),
         viewedOn: e.deliveredDateTime,
         signedOn: e.completedDateTime,
-        recipients: (e.recipients?.signers ?? []).map((s) => ({ role: s.roleName, email: s.email, status: s.status as 'sent' | 'delivered' | 'completed' | 'declined', at: s.signedDateTime })),
+        // A recipient signing for several roles reports once per role.
+        recipients: (e.recipients?.signers ?? []).flatMap((s) =>
+          s.roleName.split(ROLE_SEPARATOR).map((role) => ({ role, email: s.email, status: s.status as 'sent' | 'delivered' | 'completed' | 'declined', at: s.signedDateTime })),
+        ),
       };
     },
     async downloadCompleted(envelopeId) {
@@ -342,7 +345,7 @@ export function createPowerServices(): Services {
     },
     async correctRecipient(envelopeId, role, change) {
       const e = await connector<{ recipients: { signers: { recipientId: string; roleName: string }[] } }>(CONNECTORS.docuSign, 'GetEnvelope', { envelopeId, include: 'recipients' }, 'Envelope recipients');
-      const r = e.recipients.signers.find((s) => s.roleName === role);
+      const r = e.recipients.signers.find((s) => s.roleName.split(ROLE_SEPARATOR).includes(role));
       if (!r) throw new Error(`No ${role} on this envelope`);
       await connector(CONNECTORS.docuSign, 'UpdateRecipients', { envelopeId, resend_envelope: true, body: { signers: [{ recipientId: r.recipientId, ...change }] } }, 'Correct recipient');
     },

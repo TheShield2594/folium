@@ -18,8 +18,14 @@ export function ContactPicker({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     let live = true;
     const t = setTimeout(async () => {
-      const list = q.trim() ? await services.crm.searchContacts(q) : await services.crm.recentContacts();
-      if (live) setResults(list);
+      try {
+        const list = q.trim() ? await services.crm.searchContacts(q) : await services.crm.recentContacts();
+        if (live) setResults(list);
+      } catch (e) {
+        if (!live) return;
+        setResults([]);
+        toast.error(e instanceof Error ? e.message : 'Could not search contacts');
+      }
     }, q ? 180 : 0);
     return () => {
       live = false;

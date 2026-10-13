@@ -171,8 +171,11 @@ export const useApp = create<AppState>((set, get) => ({
     writeLocal('folium.lastContact', contactId);
     try {
       const [client, requests] = await Promise.all([s.crm.getClient(contactId), s.requests.listForContact(contactId)]);
+      // A newer pick wins: ignore a slow response for a contact the user has moved away from.
+      if (get().contactId !== contactId) return;
       set({ client, requests, clientLoading: false });
     } catch (e) {
+      if (get().contactId !== contactId) return;
       set({ clientLoading: false, client: undefined, contactId: undefined });
       throw e;
     }

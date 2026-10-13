@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import type { SavedPacket } from '../../domain/types';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
-import { useApp } from '../../state/store';
+import { latestLive, useApp } from '../../state/store';
 import { Badge, Button, Empty, IconButton, Menu, SearchField, Segmented, toast } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
 
@@ -17,6 +17,7 @@ export function PacketsScreen() {
   const groups = useApp((s) => s.groups);
   const client = useApp((s) => s.client);
   const loadPacket = useApp((s) => s.loadPacket);
+  const addToPacket = useApp((s) => s.addToPacket);
   const refreshPackets = useApp((s) => s.refreshPackets);
   const services = useServices();
   const navigate = useNavigate();
@@ -30,12 +31,31 @@ export function PacketsScreen() {
     .filter((p) => !q || p.name.toLowerCase().includes(q.toLowerCase()) || p.templateIds.some((id) => templates.find((t) => t.id === id)?.name.toLowerCase().includes(q.toLowerCase())))
     .sort((a, b) => b.usedCount - a.usedCount);
 
-  async function start(p: SavedPacket, go: 'review' | 'library') {
+  function countUse(p: SavedPacket) {
+    services.packets
+      .save({ ...p, usedCount: p.usedCount + 1 })
+      .then(() => refreshPackets())
+      .catch(() => undefined); // a missed usage count isn't worth interrupting the advisor
+  }
+
+  /** Start a fresh packet from a saved one and go straight to review. */
+  function start(p: SavedPacket) {
     if (!client) return toast.error('Choose a client first.');
     loadPacket(p);
-    await services.packets.save({ ...p, usedCount: p.usedCount + 1 });
-    refreshPackets();
-    navigate(go === 'review' ? '/review' : '/');
+    countUse(p);
+    navigate('/review');
+  }
+
+  /** Add a saved packet's forms to the packet in progress, keeping what's already there. */
+  function addToCurrent(p: SavedPacket) {
+    if (!client) return toast.error('Choose a client first.');
+    for (const id of p.templateIds) {
+      const t = templates.find((x) => x.id === id);
+      if (t) addToPacket((latestLive(templates, t.formNumber) ?? t).id);
+    }
+    countUse(p);
+    toast.ok(`Added ${p.templateIds.length} forms from “${p.name}”`);
+    navigate('/');
   }
 
   async function remove(p: SavedPacket) {
@@ -96,7 +116,7 @@ export function PacketsScreen() {
                       <Menu
                         trigger={(t) => <IconButton icon="ellipsis" label={`More for ${p.name}`} {...t} />}
                         items={[
-                          { label: 'Add to current packet', icon: 'plus', onSelect: () => start(p, 'library') },
+                          { label: 'Add to current packet', icon: 'plus', onSelect: () => addToCurrent(p) },
                           ...(isMine || me?.role === 'Admin'
                             ? [
                                 { label: p.shared ? 'Stop sharing' : 'Share with my groups', icon: 'people' as const, onSelect: async () => (await services.packets.save({ ...p, shared: !p.shared, groupIds: p.shared ? [] : [...myGroups] }), refreshPackets()) },
@@ -117,7 +137,7 @@ export function PacketsScreen() {
                     </ol>
                     <div className="row">
                       <span className="spacer" />
-                      <Button variant="filled" icon="wand" disabled={!client} onClick={() => start(p, 'review')}>
+                      <Button variant="filled" icon="wand" disabled={!client} onClick={() => start(p)}>
                         {client ? `Prefill for ${client.contact.firstname}` : 'Choose a client first'}
                       </Button>
                     </div>

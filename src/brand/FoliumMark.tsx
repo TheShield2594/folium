@@ -1,3 +1,5 @@
+import { useId } from 'react';
+
 // The Folium mark: a single leaf split into Everence's two greens, with a vine
 // tendril for a stem — a leaf from the Everence vine.
 
@@ -22,15 +24,16 @@ export function FoliumMark({ size = 28, title = 'Folium', mono }: { size?: numbe
 
 /** App icon: the mark on Apple's rounded-square tile. */
 export function FoliumAppIcon({ size = 64 }: { size?: number }) {
+  const gradientId = useId();
   return (
     <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true">
       <defs>
-        <linearGradient id="folium-tile" x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="#FFFFFF" />
           <stop offset="1" stopColor="#EAEDD3" />
         </linearGradient>
       </defs>
-      <rect width="64" height="64" rx="14.5" fill="url(#folium-tile)" />
+      <rect width="64" height="64" rx="14.5" fill={`url(#${gradientId})`} />
       <g transform="translate(6 5) scale(0.82)">
         <path d={LEAF_PATHS.upper} fill={LIME} />
         <path d={LEAF_PATHS.lower} fill={GREEN} />

@@ -34,6 +34,10 @@ export function DraftsScreen() {
         setNames(n);
         setList(drafts);
       }
+    }).catch((e) => {
+      if (!live) return;
+      setList([]);
+      toast.error(e instanceof Error ? e.message : 'Could not load drafts');
     });
     return () => {
       live = false;

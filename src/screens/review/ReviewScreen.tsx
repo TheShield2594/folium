@@ -133,6 +133,8 @@ export function ReviewScreen() {
       if (mode === 'print') openPdf(bytes);
       else downloadBytes(bytes, name);
       markUsed(view.templates.map((t) => t.id));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not build the PDF');
     } finally {
       setBusy(undefined);
     }

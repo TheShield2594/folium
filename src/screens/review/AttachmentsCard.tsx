@@ -15,7 +15,7 @@ export function AttachmentsCard() {
 
   async function add(files: FileList | null) {
     if (!files) return;
-    const next = [...packet.attachments];
+    const added: typeof packet.attachments = [];
     for (const f of Array.from(files)) {
       if (f.type !== 'application/pdf') {
         toast.error(`${f.name} isn’t a PDF.`);
@@ -28,9 +28,10 @@ export function AttachmentsCard() {
       const id = crypto.randomUUID();
       const meta = { id, name: f.name, size: f.size, addedOn: new Date().toISOString() };
       services.attachments.set(id, { meta, bytes: new Uint8Array(await f.arrayBuffer()) });
-      next.push(meta);
+      added.push(meta);
     }
-    setPacket({ attachments: next });
+    // Reading files is async; append to the latest list so a removal made meanwhile sticks.
+    if (added.length) setPacket({ attachments: [...useApp.getState().packet.attachments, ...added] });
   }
 
   return (

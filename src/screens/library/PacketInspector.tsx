@@ -140,10 +140,16 @@ function SavePacketSheet({ onClose }: { onClose: () => void }) {
       createdOn: new Date().toISOString(),
       usedCount: 0,
     };
-    await services.packets.save(p);
-    await refreshPackets();
-    toast.ok(`Saved “${p.name}”`);
-    onClose();
+    try {
+      await services.packets.save(p);
+      await refreshPackets();
+      toast.ok(`Saved “${p.name}”`);
+      onClose();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not save the packet');
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (

@@ -9,7 +9,12 @@ const docs = new Map<string, Promise<pdfjs.PDFDocumentProxy>>();
 export function loadPdf(key: string, bytes: () => Promise<Uint8Array>): Promise<pdfjs.PDFDocumentProxy> {
   if (!docs.has(key)) {
     // pdf.js takes ownership of the buffer it's given, so hand it a copy.
-    docs.set(key, bytes().then((b) => pdfjs.getDocument({ data: b.slice(), isEvalSupported: false }).promise));
+    const p = bytes().then((b) => pdfjs.getDocument({ data: b.slice(), isEvalSupported: false }).promise);
+    // Don't cache a failure; only drop the entry if it's still this attempt.
+    p.catch(() => {
+      if (docs.get(key) === p) docs.delete(key);
+    });
+    docs.set(key, p);
   }
   return docs.get(key)!;
 }

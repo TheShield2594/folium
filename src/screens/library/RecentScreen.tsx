@@ -6,16 +6,39 @@ import { Badge, Button, Empty, IconButton } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
 import { fmtDay } from '../requests/RequestCard';
 
+/** One form, with favorite and add-to-packet controls. Module scope so React keeps rows (and focus) across renders. */
+function Row({ t, detail }: { t: FormTemplate; detail?: string }) {
+  const inPacket = useApp((s) => s.packet.items.some((i) => i.templateId === t.id));
+  const fav = useApp((s) => s.favorites.includes(t.id));
+  const client = useApp((s) => s.client);
+  const addToPacket = useApp((s) => s.addToPacket);
+  const removeFromPacket = useApp((s) => s.removeFromPacket);
+  const toggleFavorite = useApp((s) => s.toggleFavorite);
+  return (
+    <div className="list-row">
+      <Icon name="doc" size={20} className="c3" />
+      <div className="grow" style={{ minWidth: 0 }}>
+        <div className="t-headline">{t.name}</div>
+        <div className="t-footnote c3">
+          <span className="mono">{t.formNumber}</span> · {t.issuer ?? t.source} · Rev {t.revision}
+          {detail ? ` · ${detail}` : ''}
+        </div>
+      </div>
+      {t.status !== 'Live' && <Badge tone="warn">{t.status}</Badge>}
+      <IconButton icon={fav ? 'starFill' : 'star'} label={fav ? 'Remove from favorites' : 'Add to favorites'} className={fav ? 'fav on' : 'fav'} onClick={() => toggleFavorite(t.id)} />
+      <Button variant={inPacket ? 'tinted' : 'gray'} size="sm" icon={inPacket ? 'check' : 'plus'} disabled={!client} onClick={() => (inPacket ? removeFromPacket(t.id) : addToPacket(t.id))}>
+        {inPacket ? 'Added' : 'Add'}
+      </Button>
+    </div>
+  );
+}
+
 /** Recently used and favorite forms, one click from the packet. */
 export function RecentScreen() {
   const templates = useApp((s) => s.templates);
   const recent = useApp((s) => s.recent);
   const favorites = useApp((s) => s.favorites);
   const packet = useApp((s) => s.packet);
-  const addToPacket = useApp((s) => s.addToPacket);
-  const removeFromPacket = useApp((s) => s.removeFromPacket);
-  const toggleFavorite = useApp((s) => s.toggleFavorite);
-  const client = useApp((s) => s.client);
   const navigate = useNavigate();
 
   // A favorite or recent may point at an old revision; always show the current one.
@@ -25,28 +48,6 @@ export function RecentScreen() {
   };
   const favs = favorites.map(current).filter((t): t is FormTemplate => !!t);
   const recents = recent.map((r) => ({ t: current(r.templateId), at: r.at })).filter((r): r is { t: FormTemplate; at: string } => !!r.t);
-
-  function Row({ t, detail }: { t: FormTemplate; detail?: string }) {
-    const inPacket = packet.items.some((i) => i.templateId === t.id);
-    const fav = favorites.includes(t.id);
-    return (
-      <div className="list-row">
-        <Icon name="doc" size={20} className="c3" />
-        <div className="grow" style={{ minWidth: 0 }}>
-          <div className="t-headline">{t.name}</div>
-          <div className="t-footnote c3">
-            <span className="mono">{t.formNumber}</span> · {t.issuer ?? t.source} · Rev {t.revision}
-            {detail ? ` · ${detail}` : ''}
-          </div>
-        </div>
-        {t.status !== 'Live' && <Badge tone="warn">{t.status}</Badge>}
-        <IconButton icon={fav ? 'starFill' : 'star'} label={fav ? 'Remove from favorites' : 'Add to favorites'} className={fav ? 'fav on' : 'fav'} onClick={() => toggleFavorite(t.id)} />
-        <Button variant={inPacket ? 'tinted' : 'gray'} size="sm" icon={inPacket ? 'check' : 'plus'} disabled={!client} onClick={() => (inPacket ? removeFromPacket(t.id) : addToPacket(t.id))}>
-          {inPacket ? 'Added' : 'Add'}
-        </Button>
-      </div>
-    );
-  }
 
   return (
     <>

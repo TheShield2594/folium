@@ -1,6 +1,11 @@
 import type { FormTemplate } from '../../domain/types';
 
-const norm = (s: string) => s.toLowerCase().normalize('NFKD').replace(/[^a-z0-9 ]/g, ' ');
+const norm = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '') // drop accents so "Bénéficiaire" matches "beneficiaire"
+    .replace(/[^a-z0-9 ]/g, ' ');
 
 /**
  * Rank templates for a query. Matches form numbers exactly (EV-1120, "1120"), names,

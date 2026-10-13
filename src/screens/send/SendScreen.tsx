@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { summarize } from '../../domain/checks';
 import { assignSigners, roleLabel, rolesForPacket, validateSigners } from '../../domain/signers';
@@ -44,6 +44,10 @@ export function SendScreen() {
   const [expires, setExpires] = useState('60');
   const [busy, setBusy] = useState<string>();
   const [sharing, setSharing] = useState(false);
+  /** Set the moment DocuSign accepts the envelope, so a failed save can never lead to a second send. */
+  const [sentEnvelopeId, setSentEnvelopeId] = useState<string>();
+  /** The draft row saved for this envelope, so a retry updates it instead of adding another. */
+  const savedDraft = useRef<SignatureRequest>(undefined);
 
   // Seed signers and message once the packet is known (or restore them from a draft).
   useEffect(() => {
@@ -99,32 +103,52 @@ export function SendScreen() {
   }
 
   async function send() {
-    if (!contactId || !me || !owner || !view) return;
+    if (!contactId || !me || !owner || !view || sentEnvelopeId) return;
     setBusy('send');
+    let envelopeId: string;
     try {
       const docs = await fillPacket(services, view.fills, 'flatten');
       const attachments = packet.attachments.map((a) => services.attachments.get(a.id)).filter((x): x is NonNullable<typeof x> => !!x);
-      const ccs = ccMe ? [{ name: owner.fullname, email: owner.email }, ...(me.systemuserid !== owner.systemuserid ? [{ name: me.fullname, email: me.email }] : [])] : [];
-      const { envelopeId } = await services.signing.send({
+      ({ envelopeId } = await services.signing.send({
         documents: docs.map((d) => ({ name: d.fileName, pdf: d.pdf, placements: d.placements })),
         signers: ordered,
-        ccs,
+        ccs: ccList(),
         subject,
         message: firm?.disclosure ? `${message}\n\n${firm.disclosure}` : message,
         reminderDays: reminder === '0' ? undefined : Number(reminder),
         expiresInDays: Number(expires),
         attachments: attachments.map((a) => ({ name: a.meta.name, pdf: a.bytes })),
-      });
-      const draft = await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing });
-      const now = new Date().toISOString();
+      }));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'DocuSign didn’t accept the envelope');
+      setBusy(undefined);
+      return;
+    }
+    setSentEnvelopeId(envelopeId);
+    await recordSent(envelopeId);
+  }
+
+  function ccList() {
+    if (!ccMe || !me || !owner) return [];
+    return [{ name: owner.fullname, email: owner.email }, ...(me.systemuserid !== owner.systemuserid ? [{ name: me.fullname, email: me.email }] : [])];
+  }
+
+  /** Save the Signature Request for an envelope DocuSign already accepted. Safe to retry. */
+  async function recordSent(envelopeId: string) {
+    if (!contactId || !me || !owner || !view) return;
+    setBusy('send');
+    try {
+      const draft = savedDraft.current ?? (await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing }));
+      savedDraft.current = draft;
+      setPacket({ requestId: draft.id });
       const sent: SignatureRequest = {
         ...draft,
         status: 'Sent',
         envelopeId,
-        sentOn: now,
+        sentOn: new Date().toISOString(),
         sentBy: me.fullname,
         signers: ordered.map((s) => ({ ...s, status: s.order === Math.min(...ordered.map((x) => x.order)) ? 'sent' : 'pending' })),
-        ccs,
+        ccs: ccList(),
         subject,
         message,
         anyOrder,
@@ -139,7 +163,7 @@ export function SendScreen() {
       toast.ok(`Sent to ${ordered.map((s) => s.name.split(' ')[0]).join(' and ')}`);
       navigate('/requests');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'DocuSign didn’t accept the envelope');
+      toast.error(`DocuSign sent the envelope, but Folium couldn’t record it${e instanceof Error ? ` (${e.message})` : ''}. Don’t send again — use “Record it again”.`);
     } finally {
       setBusy(undefined);
     }
@@ -157,6 +181,8 @@ export function SendScreen() {
       markUsed(view.templates.map((t) => t.id));
       await refreshRequests();
       toast.ok('Downloaded. Upload the wet-signed copy to OnBase when it’s back.');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not prepare the PDF');
     } finally {
       setBusy(undefined);
     }
@@ -290,9 +316,23 @@ export function SendScreen() {
                     ))}
                   </ul>
                 )}
-                <Button variant="filled" size="lg" block icon="send" busy={busy === 'send'} disabled={blockers.length > 0} onClick={send}>
-                  Send with DocuSign
-                </Button>
+                {sentEnvelopeId ? (
+                  <>
+                    <div className="banner" role="alert">
+                      <Icon name="warning" size={18} />
+                      <span className="t-footnote">
+                        DocuSign already has this envelope (<span className="mono">{sentEnvelopeId.slice(0, 8)}</span>). Folium just needs to save the record.
+                      </span>
+                    </div>
+                    <Button variant="filled" size="lg" block icon="refresh" busy={busy === 'send'} onClick={() => recordSent(sentEnvelopeId)}>
+                      Record it again
+                    </Button>
+                  </>
+                ) : (
+                  <Button variant="filled" size="lg" block icon="send" busy={busy === 'send'} disabled={blockers.length > 0} onClick={send}>
+                    Send with DocuSign
+                  </Button>
+                )}
                 {sum.blocking > 0 && (
                   <Button variant="tinted" block onClick={() => navigate('/review')}>
                     Fix in review

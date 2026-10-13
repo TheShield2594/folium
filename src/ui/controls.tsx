@@ -201,6 +201,10 @@ export function Spinner({ label = 'Loading' }: { label?: string }) {
 export function Sheet({ title, onClose, children, footer, wide, icon }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean; icon?: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  // Read onClose through a ref so an inline handler from the parent doesn't re-run the
+  // focus effect on every render (which would pull focus out of the field being typed in).
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
     const el = ref.current;
@@ -209,7 +213,7 @@ export function Sheet({ title, onClose, children, footer, wide, icon }: { title:
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
       }
       if (e.key === 'Tab' && el) {
         const items = [...el.querySelectorAll<HTMLElement>('a[href], button:not(:disabled), input:not(:disabled), select, textarea, [tabindex]:not([tabindex="-1"])')];
@@ -229,7 +233,7 @@ export function Sheet({ title, onClose, children, footer, wide, icon }: { title:
       document.removeEventListener('keydown', onKey, true);
       prev?.focus?.();
     };
-  }, [onClose]);
+  }, []);
 
   return createPortal(
     <div className="sheet-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
@@ -340,14 +344,24 @@ interface Toast {
   action?: { label: string; onClick: () => void };
 }
 
+let nextToastId = 1;
+const toastTimers = new Map<number, ReturnType<typeof setTimeout>>();
+
 const useToasts = create<{ toasts: Toast[]; push: (t: Omit<Toast, 'id'>) => void; dismiss: (id: number) => void }>((set, get) => ({
   toasts: [],
   push: (t) => {
-    const id = Date.now() + Math.random();
-    set({ toasts: [...get().toasts, { ...t, id }].slice(-3) });
-    setTimeout(() => get().dismiss(id), t.action ? 6500 : 3800);
+    const id = nextToastId++;
+    const kept = [...get().toasts, { ...t, id }];
+    // Only three show at once; the oldest drop off (and their timers with them).
+    for (const old of kept.slice(0, -3)) get().dismiss(old.id);
+    set({ toasts: kept.slice(-3) });
+    toastTimers.set(id, setTimeout(() => get().dismiss(id), t.action ? 6500 : 3800));
   },
-  dismiss: (id) => set({ toasts: get().toasts.filter((x) => x.id !== id) }),
+  dismiss: (id) => {
+    clearTimeout(toastTimers.get(id));
+    toastTimers.delete(id);
+    set({ toasts: get().toasts.filter((x) => x.id !== id) });
+  },
 }));
 
 export const toast = {

@@ -38,10 +38,15 @@ export function AdminFirm() {
           busy={busy}
           onClick={async () => {
             setBusy(true);
-            await services.directory.saveFirm(f);
-            await reloadDirectory();
-            setBusy(false);
-            toast.ok('Firm profile saved');
+            try {
+              await services.directory.saveFirm(f);
+              await reloadDirectory();
+              toast.ok('Firm profile saved');
+            } catch (e) {
+              toast.error(e instanceof Error ? e.message : 'Could not save the firm profile');
+            } finally {
+              setBusy(false);
+            }
           }}
         >
           Save

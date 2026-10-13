@@ -95,6 +95,9 @@ export function diffRevision(previous: TemplateMapping | undefined, newFieldName
 /** Build a draft mapping for the new revision from a diff, keeping signers/placements/checks. */
 export function carryForward(previous: TemplateMapping | undefined, rows: FieldDiffRow[], revision: string, formNumber: string): TemplateMapping {
   const liveNames = new Set(rows.filter((r) => r.change !== 'removed').map((r) => r.pdfField));
+  // Checks name PDF fields; follow renames so a rule survives its field being renamed.
+  const renamed = new Map(rows.filter((r) => r.change === 'renamed' && r.previousName).map((r) => [r.previousName!, r.pdfField]));
+  const rename = (f: string) => renamed.get(f) ?? f;
   return {
     formNumber,
     revision,
@@ -103,6 +106,8 @@ export function carryForward(previous: TemplateMapping | undefined, rows: FieldD
       .map((r) => r.mapping ?? { pdfField: r.pdfField, source: 'advisor', required: false }),
     signers: previous?.signers ?? [{ role: 'Owner' }],
     placements: previous?.placements ?? [],
-    checks: (previous?.checks ?? []).filter((c) => ('fields' in c ? c.fields.every((f) => liveNames.has(f)) : liveNames.has(c.field))),
+    checks: (previous?.checks ?? [])
+      .map((c) => ('fields' in c ? { ...c, fields: c.fields.map(rename) } : { ...c, field: rename(c.field) }))
+      .filter((c) => ('fields' in c ? c.fields.every((f) => liveNames.has(f)) : liveNames.has(c.field))),
   };
 }

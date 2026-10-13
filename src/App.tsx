@@ -72,20 +72,25 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const s = await createServices();
-      const demo = s.mode === 'demo';
-      const contactId = await contactIdFromHost(demo);
-      if (cancelled) return;
-      setServices(s);
-      await boot(s, contactId ?? (demo && !hasLastContact() ? 'c-jordan' : undefined));
+      try {
+        const s = await createServices();
+        const demo = s.mode === 'demo';
+        const contactId = await contactIdFromHost(demo);
+        if (cancelled) return;
+        setServices(s);
+        await boot(s, contactId ?? (demo && !hasLastContact() ? 'c-jordan' : undefined));
+      } catch (e) {
+        // A misconfigured environment should say so, not spin forever.
+        if (!cancelled) useApp.setState({ error: e instanceof Error ? e.message : String(e), ready: true });
+      }
     })();
     return () => {
       cancelled = true;
     };
   }, [boot]);
 
-  if (!services || !ready) return <Launch />;
-  if (error) {
+  if (!ready) return <Launch />;
+  if (error || !services) {
     return (
       <div className="empty" style={{ height: '100%', justifyContent: 'center' }}>
         <FoliumAppIcon size={64} />

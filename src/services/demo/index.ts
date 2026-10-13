@@ -45,7 +45,7 @@ function load(): DemoState {
   return {
     requests: seedRequests(),
     packets: seedPackets(),
-    templates: TEMPLATES,
+    templates: structuredClone(TEMPLATES),
     incomingDismissed: [],
     formRequests: [],
     users: structuredClone(USERS),
