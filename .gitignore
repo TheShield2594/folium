@@ -3,3 +3,7 @@ dist
 *.tsbuildinfo
 .DS_Store
 coverage
+
+# Scratch output from local test runs (screenshots live in docs/)
+/*.png
+/*.pdf
