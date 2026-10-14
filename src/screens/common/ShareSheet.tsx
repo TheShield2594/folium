@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useServices } from '../../services';
-import { saveDraft } from '../../state/actions';
+import { saveDraft, type SendSetup } from '../../state/actions';
 import { useActingFor, useApp } from '../../state/store';
 import { Avatar, Button, SearchField, Sheet, toast } from '../../ui/controls';
 import { usePacketView } from './usePacket';
@@ -10,7 +10,7 @@ import { usePacketView } from './usePacket';
  * "Drafts & shared", with every value entered so far. Folium lists people in your groups
  * first; anyone with Folium can be added.
  */
-export function ShareSheet({ onClose }: { onClose: () => void }) {
+export function ShareSheet({ onClose, sendSetup }: { onClose: () => void; sendSetup?: SendSetup }) {
   const users = useApp((s) => s.users);
   const groups = useApp((s) => s.groups);
   const me = useApp((s) => s.me);
@@ -38,8 +38,8 @@ export function ShareSheet({ onClose }: { onClose: () => void }) {
     try {
       const next = { ...packet, sharedWith: picked };
       const existing = packet.requestId ? requests.find((r) => r.id === packet.requestId) : undefined;
-      const saved = await saveDraft({ services, packet: next, fills: view.fills, contactId, me, owner, existing });
-      setPacket({ sharedWith: picked, requestId: saved.id });
+      const saved = await saveDraft({ services, packet: next, fills: view.fills, contactId, me, owner, existing, sendSetup });
+      setPacket({ sharedWith: picked, requestId: saved.id, attachments: saved.attachments, snapshot: saved.prefillSnapshot });
       await refreshRequests();
       const names = users.filter((u) => picked.includes(u.systemuserid)).map((u) => u.fullname.split(' ')[0]);
       toast.ok(picked.length ? `Shared with ${names.join(', ')}` : 'Sharing turned off');

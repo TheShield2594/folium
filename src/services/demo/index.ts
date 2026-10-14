@@ -25,6 +25,9 @@ const KEY = 'folium.demo.v1';
 interface DemoState {
   requests: SignatureRequest[];
   packets: SavedPacket[];
+  /** Soft-deleted rows, so Undo can bring back the same ID. */
+  deletedRequests?: SignatureRequest[];
+  deletedPackets?: SavedPacket[];
   templates: FormTemplate[];
   incomingDismissed: string[];
   formRequests: { name: string; issuer?: string; note?: string; requestedBy: string; at: string }[];
@@ -68,6 +71,7 @@ function persist() {
 export function resetDemo() {
   try {
     localStorage.removeItem(KEY);
+    localStorage.removeItem(FILES_KEY);
   } catch {
     /* ignore */
   }
@@ -263,10 +267,47 @@ const templates: TemplateLibrary = {
   },
 };
 
+// Attached files: in memory, and in localStorage when it has room, so a demo draft's
+// attachments survive a reload.
+const FILES_KEY = 'folium.demo.files.v1';
+const files = new Map<string, Uint8Array>();
+function storedFile(id: string): Uint8Array | undefined {
+  if (files.has(id)) return files.get(id);
+  try {
+    const all = JSON.parse(localStorage.getItem(FILES_KEY) ?? '{}') as Record<string, string>;
+    return all[id] ? Uint8Array.from(atob(all[id]), (c) => c.charCodeAt(0)) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+function storeFile(id: string, bytes: Uint8Array) {
+  files.set(id, bytes);
+  try {
+    const all = JSON.parse(localStorage.getItem(FILES_KEY) ?? '{}') as Record<string, string>;
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    all[id] = btoa(bin);
+    localStorage.setItem(FILES_KEY, JSON.stringify(all));
+  } catch {
+    /* too big for storage; memory only */
+  }
+}
+
 const drafts: DraftStore = {
   async saveDraft(contactId, fileName) {
     await wait(150);
     return { url: `${await drafts.folderUrl(contactId)}/${encodeURIComponent(fileName)}` };
+  },
+  async saveAttachment(contactId, fileName, bytes) {
+    await wait(100);
+    const itemId = `file-${crypto.randomUUID()}`;
+    storeFile(itemId, bytes);
+    return { itemId, url: `${await drafts.folderUrl(contactId)}/Folium%20attachments/${encodeURIComponent(fileName)}` };
+  },
+  async getFile(itemId) {
+    const bytes = storedFile(itemId);
+    if (!bytes) throw new Error('That attachment is no longer stored. Attach it again.');
+    return bytes;
   },
   async folderUrl(contactId) {
     const c = state.clients[contactId]?.contact;
@@ -293,7 +334,15 @@ const requests: RequestStore = {
     return clone(req);
   },
   async remove(id) {
+    state.deletedRequests = [...(state.deletedRequests ?? []), ...state.requests.filter((r) => r.id === id)];
     state.requests = state.requests.filter((r) => r.id !== id);
+    persist();
+  },
+  async restore(id) {
+    const row = state.deletedRequests?.find((r) => r.id === id);
+    if (!row) throw new Error('That draft can’t be restored');
+    state.deletedRequests = state.deletedRequests!.filter((r) => r.id !== id);
+    state.requests.unshift(row);
     persist();
   },
 };
@@ -310,7 +359,15 @@ const packets: PacketStore = {
     return clone(p);
   },
   async remove(id) {
+    state.deletedPackets = [...(state.deletedPackets ?? []), ...state.packets.filter((p) => p.id === id)];
     state.packets = state.packets.filter((p) => p.id !== id);
+    persist();
+  },
+  async restore(id) {
+    const row = state.deletedPackets?.find((p) => p.id === id);
+    if (!row) throw new Error('That packet can’t be restored');
+    state.deletedPackets = state.deletedPackets!.filter((p) => p.id !== id);
+    state.packets.unshift(row);
     persist();
   },
 };

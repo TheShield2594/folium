@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { prettifyFieldName } from '../../domain/format';
-import { prefillForm } from '../../domain/prefill';
+import { mappingWarnings, prefillForm } from '../../domain/prefill';
 import { carryForward, diffRevision, type FieldChange } from '../../domain/revisions';
 import { roleLabel } from '../../domain/signers';
 import type { Check, ClientRecord, Contact, FieldFormat, FieldMapping, FormTemplate, Placement, PlacementType, TemplateMapping } from '../../domain/types';
@@ -68,6 +68,7 @@ export function TemplateEditor() {
   const pdfNames = new Set(info?.fields.map((f) => f.name) ?? []);
   const unmappedInPdf = template.pdfKind === 'fillable' ? (info?.fields ?? []).filter((f) => !mapping.fields.some((m) => m.pdfField === f.name)) : [];
   const stale = template.pdfKind === 'fillable' && info ? mapping.fields.filter((m) => !pdfNames.has(m.pdfField)) : [];
+  const keyWarnings = mappingWarnings(mapping);
   const changeOf = (name: string) => diff?.find((d) => d.pdfField === name);
   const needsAttention = (m: FieldMapping) => (changeOf(m.pdfField)?.change ?? 'unchanged') !== 'unchanged' || !m.source;
 
@@ -231,6 +232,12 @@ export function TemplateEditor() {
                       </Button>
                     </div>
                   )}
+                  {keyWarnings.map((w) => (
+                    <div key={w} className="banner" style={{ margin: '0 16px 12px' }}>
+                      <Icon name="warning" size={16} />
+                      <span className="t-footnote">{w}</span>
+                    </div>
+                  ))}
                   <div style={{ overflowX: 'auto' }}>
                     <table className="table mapping" style={{ minWidth: 760 }}>
                       <thead>

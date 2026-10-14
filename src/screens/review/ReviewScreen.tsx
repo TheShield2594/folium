@@ -1,17 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { FieldState } from '../../domain/prefill';
-import { inputsNeeded } from '../../domain/prefill';
+import { defaultDraftTitle } from '../../domain/drafts';
+import { inputsNeeded, snapshotDiff } from '../../domain/prefill';
+import type { SignatureRequest } from '../../domain/types';
 import { summarize } from '../../domain/checks';
 import { sourceKind } from '../../domain/paths';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
 import { packetAsOnePdf, saveDraft } from '../../state/actions';
 import { useActingFor, useApp } from '../../state/store';
-import { Button, Empty, IconButton, Menu, Segmented, downloadBytes, openPdf, toast } from '../../ui/controls';
+import { Button, Empty, IconButton, Menu, Segmented, Select, downloadBytes, openPdf, toast } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
 import { NoClient } from '../common/NoClient';
 import { PdfView } from '../common/PdfView';
+import { NameSheet } from '../common/NameSheet';
 import { ShareSheet } from '../common/ShareSheet';
 import { Steps } from '../common/Steps';
 import { usePacketView } from '../common/usePacket';
@@ -28,6 +31,7 @@ export function ReviewScreen() {
   const refreshRequests = useApp((s) => s.refreshRequests);
   const markUsed = useApp((s) => s.markUsed);
   const requests = useApp((s) => s.requests);
+  const setPacketAccount = useApp((s) => s.setPacketAccount);
   const owner = useActingFor();
   const services = useServices();
   const view = usePacketView();
@@ -38,6 +42,7 @@ export function ReviewScreen() {
   const [zoom, setZoom] = useState<'fit' | 'large'>('fit');
   const [busy, setBusy] = useState<string>();
   const [sharing, setSharing] = useState(false);
+  const [naming, setNaming] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
   const [canvasW, setCanvasW] = useState(700);
 
@@ -75,6 +80,15 @@ export function ReviewScreen() {
   const optionalNeeds = needs.filter((n) => !n.required);
   const [showOptional, setShowOptional] = useState(false);
   const sum = view ? summarize(view.checks) : undefined;
+  const changedSince = useMemo(() => (view ? snapshotDiff(packet.snapshot, view.fills) : []), [view, packet.snapshot]);
+  const replaced = packet.items.filter((i) => i.accountReplaced);
+
+  /** Settle one "changed in Dynamics" row: keep the saved value as an override, or take the new one. */
+  function settleChange(key: string, keep: string | undefined) {
+    setValue(key, keep);
+    const { [key]: _done, ...rest } = useApp.getState().packet.snapshot ?? {};
+    setPacket({ snapshot: rest });
+  }
   const selectedField: FieldState | undefined = useMemo(() => fill?.fields.find((f) => f.key === selected) ?? view?.fills.flatMap((f) => f.fields).find((f) => f.key === selected), [fill, view, selected]);
 
   // Jump to the form + field for a key (from checks or the inputs list).
@@ -108,18 +122,33 @@ export function ReviewScreen() {
     );
   }
 
-  async function onSaveDraft() {
+  /** The first save asks for a name; later saves update the same draft. */
+  function onSaveDraft() {
+    if (!packet.requestId) return setNaming(true);
+    writeDraft(packet.title).catch((e) => toast.error(e instanceof Error ? e.message : 'Could not save draft'));
+  }
+
+  async function writeDraft(title: string, into?: SignatureRequest) {
     if (!contactId || !me || !owner || !view) return;
     setBusy('draft');
     try {
-      const existing = packet.requestId ? requests.find((r) => r.id === packet.requestId) : undefined;
-      const saved = await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing, writePdfs: true });
-      setPacket({ requestId: saved.id, title: saved.title });
-      await refreshRequests();
+      const existing = into ?? (packet.requestId ? requests.find((r) => r.id === packet.requestId) : undefined);
+      const saved = await saveDraft({
+        services,
+        packet: { ...packet, title },
+        fills: view.fills,
+        contactId,
+        me,
+        owner,
+        existing,
+        writePdfs: true,
+        // Keep the row's identity even if writing the PDFs fails, so a retry updates it.
+        onSaved: (row) => setPacket({ requestId: row.id, title: row.title, attachments: row.attachments, snapshot: row.prefillSnapshot }),
+      });
+      setPacket({ requestId: saved.id, title: saved.title, attachments: saved.attachments, snapshot: saved.prefillSnapshot });
       toast.ok(`Draft saved to ${client!.contact.firstname}’s SharePoint folder`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not save draft');
     } finally {
+      await refreshRequests().catch(() => undefined);
       setBusy(undefined);
     }
   }
@@ -245,6 +274,56 @@ export function ReviewScreen() {
             />
           )}
 
+          {replaced.map((item) => {
+            const t = view.templates.find((x) => x.id === item.templateId);
+            if (!t) return null;
+            return (
+              <section key={item.templateId} className="banner" role="alert" style={{ alignItems: 'flex-start', flexDirection: 'column', gap: 8 }}>
+                <span className="t-callout">
+                  <Icon name="warning" size={16} /> <strong>{t.name}:</strong> the account this draft used is no longer active. Pick one.
+                </span>
+                <Select aria-label={`Account for ${t.name}`} value={item.accountId ?? ''} onChange={(e) => setPacketAccount(item.templateId, e.target.value)}>
+                  <option value="" disabled>
+                    Choose account…
+                  </option>
+                  {client.accounts.map((a) => (
+                    <option key={a.accountid} value={a.accountid}>
+                      {a.name} · {a.ev_accountno}
+                    </option>
+                  ))}
+                </Select>
+                {item.accountId && (
+                  <Button variant="plain" size="sm" onClick={() => setPacketAccount(item.templateId, item.accountId!)}>
+                    Keep {client.accounts.find((a) => a.accountid === item.accountId)?.name}
+                  </Button>
+                )}
+              </section>
+            );
+          })}
+
+          {changedSince.length > 0 && (
+            <section className="card card-pad stack-3" aria-labelledby="changed-h">
+              <h2 id="changed-h" className="t-headline">Changed in Dynamics since you saved</h2>
+              <p className="t-footnote c3">The forms show today’s values. Keep the value from when you saved if that’s what the client gave you.</p>
+              {changedSince.map((c) => (
+                <div key={c.key} className="stack" style={{ gap: 4 }}>
+                  <span className="t-callout" style={{ fontWeight: 600 }}>{c.label}</span>
+                  <span className="t-footnote c2">
+                    Saved: {c.saved || '(empty)'} · Now: {c.now || '(empty)'}
+                  </span>
+                  <div className="row" style={{ gap: 6 }}>
+                    <Button variant="gray" size="sm" onClick={() => settleChange(c.key, c.saved)}>
+                      Keep saved
+                    </Button>
+                    <Button variant="plain" size="sm" onClick={() => settleChange(c.key, undefined)}>
+                      Use new
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </section>
+          )}
+
           <section className="stack-3" aria-labelledby="needs-h">
             <div className="row">
               <h2 id="needs-h" className="t-title3 grow">Needs your input</h2>
@@ -328,6 +407,20 @@ export function ReviewScreen() {
         </aside>
       </div>
       {sharing && <ShareSheet onClose={() => setSharing(false)} />}
+      {naming && (
+        <NameSheet
+          title="Save draft"
+          noun="draft"
+          initial={packet.title || defaultDraftTitle(view.fills)}
+          existing={requests.filter((r) => r.status === 'Drafted' && r.contactId === contactId).map((r) => ({ id: r.id, name: r.title }))}
+          saveLabel="Save draft"
+          onSave={(title) => writeDraft(title)}
+          replace={{ label: 'Update that draft', allowed: () => true, run: (c) => writeDraft(c.name, requests.find((r) => r.id === c.id)) }}
+          onClose={() => setNaming(false)}
+        >
+          <p className="t-footnote c3">Saved to {client.contact.firstname}’s SharePoint folder. You can rename it later from Drafts.</p>
+        </NameSheet>
+      )}
     </>
   );
 }

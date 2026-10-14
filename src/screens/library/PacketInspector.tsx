@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { findNameClash, nextFreeName } from '../../domain/drafts';
 import type { SavedPacket } from '../../domain/types';
 import { useServices } from '../../services';
 import { useApp } from '../../state/store';
@@ -118,38 +119,53 @@ function SavePacketSheet({ onClose }: { onClose: () => void }) {
   const packet = useApp((s) => s.packet);
   const me = useApp((s) => s.me);
   const groups = useApp((s) => s.groups);
+  const packets = useApp((s) => s.packets);
   const refreshPackets = useApp((s) => s.refreshPackets);
   const services = useServices();
   const [name, setName] = useState(packet.title || '');
   const [desc, setDesc] = useState('');
   const [shared, setShared] = useState(false);
   const [groupIds, setGroupIds] = useState<string[]>(me?.groupIds ?? []);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string>();
+  const [clash, setClash] = useState<SavedPacket>();
   const myGroups = groups.filter((g) => g.memberIds.includes(me?.systemuserid ?? ''));
+  // Your own packets and the shared ones you can see: the names you'd confuse.
+  const mine = new Set(myGroups.map((g) => g.id));
+  const visible = packets.filter((p) => p.owner === me?.fullname || (p.shared && (!p.groupIds?.length || p.groupIds.some((g) => mine.has(g)))));
+  const canReplace = (p: SavedPacket) => p.owner === me?.fullname || me?.role === 'Admin';
+  const alt = nextFreeName(name, visible.map((p) => p.name));
 
-  async function save() {
-    setBusy(true);
+  async function save(finalName: string, replacing?: SavedPacket) {
+    if (busy) return; // one save at a time
+    setBusy(replacing ? 'replace' : 'save');
     const p: SavedPacket = {
-      id: `new-${Date.now()}`,
-      name: name.trim(),
+      ...replacing,
+      id: replacing?.id ?? `new-${Date.now()}`,
+      name: finalName,
       description: desc.trim() || undefined,
       templateIds: packet.items.map((i) => i.templateId),
       shared,
       groupIds: shared ? groupIds : [],
-      owner: me?.fullname ?? '',
-      createdOn: new Date().toISOString(),
-      usedCount: 0,
+      owner: replacing?.owner ?? me?.fullname ?? '',
+      createdOn: replacing?.createdOn ?? new Date().toISOString(),
+      usedCount: replacing?.usedCount ?? 0,
     };
     try {
       await services.packets.save(p);
       await refreshPackets();
-      toast.ok(`Saved “${p.name}”`);
+      toast.ok(replacing ? `Replaced “${p.name}”` : `Saved “${p.name}”`);
       onClose();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not save the packet');
     } finally {
-      setBusy(false);
+      setBusy(undefined);
     }
+  }
+
+  function submit() {
+    const c = findNameClash(name, visible);
+    if (c) setClash(c);
+    else void save(name.trim().replace(/\s+/g, ' '));
   }
 
   return (
@@ -157,21 +173,45 @@ function SavePacketSheet({ onClose }: { onClose: () => void }) {
       title="Save as packet"
       onClose={onClose}
       footer={
-        <>
-          <Button variant="gray" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant="filled" onClick={save} disabled={!name.trim()} busy={busy}>
-            Save packet
-          </Button>
-        </>
+        clash ? (
+          <>
+            <Button variant="gray" disabled={!!busy} onClick={() => setClash(undefined)}>
+              Change name
+            </Button>
+            {canReplace(clash) && (
+              <Button variant="bordered" disabled={!!busy} busy={busy === 'replace'} onClick={() => save(clash.name, clash)}>
+                Replace it
+              </Button>
+            )}
+            <Button variant="filled" disabled={!!busy} busy={busy === 'save'} onClick={() => save(alt)}>
+              Save as “{alt}”
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button variant="gray" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button variant="filled" onClick={submit} disabled={!name.trim()} busy={busy === 'save'}>
+              Save packet
+            </Button>
+          </>
+        )
       }
     >
       <div className="stack-4">
         <p className="t-callout c2">A packet is a reusable list of forms. It always opens with the current revision of each form.</p>
         <Field label="Name" htmlFor="pk-name">
-          <TextInput id="pk-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Retirement income set-up" />
+          <TextInput id="pk-name" value={name} onChange={(e) => (setName(e.target.value), setClash(undefined))} placeholder="e.g. Retirement income set-up" />
         </Field>
+        {clash && (
+          <div className="banner" role="alert">
+            <Icon name="warning" size={16} />
+            <span className="t-callout">
+              {canReplace(clash) ? `You already have a packet called “${clash.name}”. Replace it with these forms?` : `${clash.owner} has a shared packet called “${clash.name}”.`}
+            </span>
+          </div>
+        )}
         <Field label="Description" htmlFor="pk-desc" optional>
           <TextInput id="pk-desc" value={desc} onChange={(e) => setDesc(e.target.value)} />
         </Field>

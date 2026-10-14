@@ -32,6 +32,8 @@ export const SHAREPOINT = {
   /** Site that backs Dynamics 365 document locations for contacts. */
   crmSite: 'https://everence.sharepoint.com/sites/CRM',
   crmLibrary: 'contact',
+  /** Subfolder of the contact's folder for documents attached to drafts. */
+  attachmentsFolder: 'Folium attachments',
 } as const;
 
 export const DOCUSIGN = {

@@ -3,7 +3,7 @@ import { CLIENTS, FIRM, TEMPLATES, USERS } from '../services/demo/seed';
 import { runChecks, summarize } from './checks';
 import { formatValue, validateFormat } from './format';
 import { evaluateCondition, resolvePath } from './paths';
-import { fieldKey, inputsNeeded, prefillForm, prefillPacket } from './prefill';
+import { fieldKey, inputsNeeded, mappingWarnings, migrateAccountValues, prefillForm, prefillPacket } from './prefill';
 import { carryForward, diffRevision } from './revisions';
 import { assignSigners, rolesForPacket, validateSigners } from './signers';
 import { buildEnvelopeDefinition, placementsToTabs } from '../services/docusign/tabs';
@@ -76,6 +76,56 @@ describe('prefill', () => {
     const f = fill.fields[0];
     expect(f.origin).toBe('edited');
     expect(f.crmValue).toBe('Jordan A. Miller');
+  });
+
+  describe('account fields', () => {
+    const acct = (id: string) => client.accounts.find((a) => a.accountid === id)!;
+    const form = (id: string, formNumber: string) => ({
+      ...bene,
+      id,
+      formNumber,
+      mapping: { ...bene.mapping, fields: [{ pdfField: 'AcctNo', source: 'account.ev_accountno', required: false }, { pdfField: 'Name', source: 'contact.fullname', required: false }], checks: [] },
+    });
+    const a = form('tpl-a', 'A-1');
+    const b = form('tpl-b', 'B-1');
+    const acctNo = (fill: ReturnType<typeof prefillForm>) => fill.fields.find((f) => f.mapping.pdfField === 'AcctNo')!;
+
+    it('keeps an override on one account’s form off a form about another account', () => {
+      const [fa] = prefillPacket([{ template: a, account: acct('a-j1') }], scope, {});
+      const values = { [acctNo(fa).key]: 'IRA-22-9999' };
+      const [ra, rb] = prefillPacket([{ template: a, account: acct('a-j1') }, { template: b, account: acct('a-j3') }], scope, values);
+      expect(acctNo(ra).value).toBe('IRA-22-9999');
+      expect(acctNo(ra).origin).toBe('edited');
+      expect(acctNo(rb).value).toBe('PX-7712-0045');
+      // "Use CRM value" clears the one key, and only that form changes.
+      const [ca, cb] = prefillPacket([{ template: a, account: acct('a-j1') }, { template: b, account: acct('a-j3') }], scope, {});
+      expect(acctNo(ca).value).toBe('IRA-22-4471');
+      expect(acctNo(cb).value).toBe('PX-7712-0045');
+      // Contact fields are still entered once.
+      expect(ra.fields[1].key).toBe(rb.fields[1].key);
+    });
+
+    it('shares an override between forms about the same account', () => {
+      const values = { [fieldKey(a.mapping.fields[0], a, 'a-j1')]: 'IRA-22-9999' };
+      const fills = prefillPacket([{ template: a, account: acct('a-j1') }, { template: b, account: acct('a-j1') }], scope, values);
+      expect(fills.map((f) => acctNo(f).value)).toEqual(['IRA-22-9999', 'IRA-22-9999']);
+    });
+
+    it('moves an older draft’s unscoped account value to the first form’s account only', () => {
+      const values = migrateAccountValues({ 'account.ev_accountno': 'IRA-22-9999', 'contact.fullname': 'J Miller' }, 'a-j1');
+      expect(values).toEqual({ 'account[a-j1].ev_accountno': 'IRA-22-9999', 'contact.fullname': 'J Miller' });
+      const [ra, rb] = prefillPacket([{ template: a, account: acct('a-j1') }, { template: b, account: acct('a-j3') }], scope, values);
+      expect(acctNo(ra).value).toBe('IRA-22-9999');
+      expect(acctNo(rb).value).toBe('PX-7712-0045');
+      // Admin-set keys stay shared.
+      expect(migrateAccountValues({ 'account.ev_accountno': 'X' }, 'a-j1', new Set(['account.ev_accountno']))).toEqual({ 'account.ev_accountno': 'X' });
+    });
+
+    it('warns about a fixed key on an account field', () => {
+      expect(mappingWarnings(a.mapping)).toEqual([]);
+      const shared = { ...a.mapping, fields: [{ pdfField: 'AcctNo', source: 'account.ev_accountno', required: false, key: 'acct' }] };
+      expect(mappingWarnings(shared)).toHaveLength(1);
+    });
   });
 
   it('collects inputs once per key', () => {

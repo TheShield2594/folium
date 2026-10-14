@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { create } from 'zustand';
 import type { ResolveScope } from '../domain/paths';
+import { migrateAccountValues } from '../domain/prefill';
 import type {
   Attachment,
   ClientRecord,
@@ -41,6 +42,8 @@ export interface Packet {
   requestId?: string;
   attachments: Attachment[];
   sharedWith: string[];
+  /** CRM values when the open draft was saved; see `snapshotDiff`. */
+  snapshot?: Record<string, string>;
 }
 
 const emptyPacket = (): Packet => ({ items: [], values: {}, title: '', attachments: [], sharedWith: [] });
@@ -218,7 +221,7 @@ export const useApp = create<AppState>((set, get) => ({
   },
   setPacketAccount(templateId, accountId) {
     const { packet } = get();
-    set({ packet: { ...packet, items: packet.items.map((i) => (i.templateId === templateId ? { ...i, accountId } : i)) } });
+    set({ packet: { ...packet, items: packet.items.map((i) => (i.templateId === templateId ? { templateId, accountId } : i)) } });
   },
   setValue(key, value) {
     const values = { ...get().packet.values };
@@ -242,14 +245,28 @@ export const useApp = create<AppState>((set, get) => ({
     set({ packet: { ...emptyPacket(), title: saved.name, items: live.map((t) => ({ templateId: t.id, accountId: suggestAccount(t, client) })) } });
   },
   loadRequest(req) {
+    const { templates, client } = get();
+    const items = req.documents.map((d): PacketItem => {
+      const t = templates.find((x) => x.id === d.templateId);
+      const active = client?.accounts.some((a) => a.accountid === d.accountId);
+      if (d.accountId && active) return { templateId: d.templateId, accountId: d.accountId };
+      // The saved account was closed or moved: suggest one and have Review ask.
+      return { templateId: d.templateId, accountId: t ? suggestAccount(t, client) : undefined, accountReplaced: !!d.accountId || undefined };
+    });
+    // The first form that reads account data gets any pre-scoping `account.*` overrides.
+    const used = items.map((i) => ({ item: i, t: templates.find((t) => t.id === i.templateId) })).filter((x): x is { item: PacketItem; t: FormTemplate } => !!x.t);
+    const first = used.find((x) => x.t.mapping.fields.some((m) => m.source.startsWith('account.'))) ?? used[0];
+    const firstAccountId = first?.item.accountId ?? client?.accounts[0]?.accountid;
+    const sharedKeys = new Set(used.flatMap((x) => x.t.mapping.fields.map((m) => m.key).filter((k): k is string => !!k)));
     set({
       packet: {
-        items: req.documents.map((d) => ({ templateId: d.templateId })),
-        values: { ...req.values },
+        items,
+        values: migrateAccountValues(req.values, firstAccountId, sharedKeys),
         title: req.title,
         requestId: req.id,
         attachments: req.attachments,
         sharedWith: req.sharedWith ?? [],
+        snapshot: req.prefillSnapshot,
       },
     });
   },

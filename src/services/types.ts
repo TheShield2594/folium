@@ -55,6 +55,10 @@ export interface IncomingFile {
 export interface DraftStore {
   saveDraft(contactId: string, fileName: string, pdf: Uint8Array): Promise<{ url: string }>;
   folderUrl(contactId: string): Promise<string>;
+  /** Save an attached document next to the drafts, so the draft can be resumed or shared. */
+  saveAttachment(contactId: string, fileName: string, bytes: Uint8Array): Promise<{ itemId: string; url: string }>;
+  /** Read back a file saved with `saveAttachment`. */
+  getFile(itemId: string): Promise<Uint8Array>;
 }
 
 /** `ev_signaturerequest` rows. */
@@ -63,13 +67,18 @@ export interface RequestStore {
   listMine(): Promise<SignatureRequest[]>;
   get(id: string): Promise<SignatureRequest | undefined>;
   save(req: SignatureRequest): Promise<SignatureRequest>;
+  /** Soft delete: the row is deactivated and drops out of the lists. */
   remove(id: string): Promise<void>;
+  /** Undo `remove`, keeping the same row ID. */
+  restore(id: string): Promise<void>;
 }
 
 export interface PacketStore {
   list(): Promise<SavedPacket[]>;
   save(p: SavedPacket): Promise<SavedPacket>;
+  /** Soft delete, like `RequestStore.remove`. */
   remove(id: string): Promise<void>;
+  restore(id: string): Promise<void>;
 }
 
 export interface EnvelopeStatus {
@@ -122,6 +131,6 @@ export interface Services {
   requests: RequestStore;
   packets: PacketStore;
   signing: SigningProvider;
-  /** Files the advisor attached for an envelope (supporting docs, IDs). Held in memory until send. */
+  /** Bytes of files attached in this session. Saved drafts also store them in SharePoint (`Attachment.storedAt`). */
   attachments: Map<string, { meta: Attachment; bytes: Uint8Array }>;
 }

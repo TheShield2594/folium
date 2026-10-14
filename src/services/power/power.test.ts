@@ -10,13 +10,17 @@ import { CHOICES } from './config';
 const FORMATTED = '@OData.Community.Display.V1.FormattedValue';
 const rows: Record<string, Record<string, unknown>> = {};
 const updates: { table: string; id: string; data: Record<string, unknown> }[] = [];
+const queries: { table: string; filter?: string }[] = [];
 const ok = <T,>(data: T) => ({ success: true, data });
 
 vi.mock('@microsoft/power-apps/app', () => ({ getContext: vi.fn() }));
 vi.mock('@microsoft/power-apps/data', () => ({
   getClient: () => ({
     retrieveRecordAsync: async (_t: string, id: string) => ok({ ...rows[id] }),
-    retrieveMultipleRecordsAsync: async () => ok([]),
+    retrieveMultipleRecordsAsync: async (table: string, opts: { filter?: string }) => (queries.push({ table, filter: opts?.filter }), ok([])),
+    deleteRecordAsync: async () => {
+      throw new Error('Folium never hard-deletes');
+    },
     updateRecordAsync: async (table: string, id: string, data: Record<string, unknown>) => {
       updates.push({ table, id, data });
       const next = { ...rows[id], ...data };
@@ -73,5 +77,28 @@ describe('choice columns', () => {
     expect(decodeChoices({ familystatuscode: 'single' }, contactChoices, 'contact')).toEqual({ familystatuscode: 'single' });
     expect(() => encodeChoices({ familystatuscode: 'engaged' }, contactChoices, 'contact')).toThrow(/Marital status/);
     expect(encodeChoices({ firstname: 'Sam', unrecognisedChoices: {} }, contactChoices, 'contact')).toEqual({ firstname: 'Sam' });
+  });
+});
+
+describe('soft delete', () => {
+  it('deactivates and reactivates the same packet row, so Undo works', async () => {
+    const { packets, requests } = createPowerServices();
+    await packets.remove('pk-1');
+    await packets.restore('pk-1');
+    await requests.remove('rq-1');
+    expect(updates.map((u) => [u.table, u.id, u.data.statecode])).toEqual([
+      ['ev_formpackets', 'pk-1', 1],
+      ['ev_formpackets', 'pk-1', 0],
+      ['ev_signaturerequests', 'rq-1', 1],
+    ]);
+  });
+
+  it('lists active rows only', async () => {
+    const { packets, requests } = createPowerServices();
+    queries.length = 0;
+    await packets.list();
+    await requests.listMine();
+    await requests.listForContact('c-1');
+    expect(queries.every((q) => q.filter?.includes('statecode eq 0'))).toBe(true);
   });
 });
