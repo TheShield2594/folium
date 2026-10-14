@@ -36,6 +36,8 @@ interface DemoState {
   firm: FirmProfile;
   clients: Record<string, ClientRecord>;
   currentUserId: string;
+  /** Simulated DocuSign envelopes: created (a draft) and, once released, when they went out. */
+  envelopes?: Record<string, { createdAt: number; sentAt?: number }>;
 }
 
 function load(): DemoState {
@@ -373,20 +375,34 @@ const packets: PacketStore = {
 };
 
 /** Simulated DocuSign. Envelopes move Sent → Viewed → Signed over a couple of minutes. */
-const sentAt = new Map<string, number>();
+const envelopes = () => (state.envelopes ??= {});
+/** When an envelope went out, for envelopes this demo created. */
+const sentAtOf = (id: string) => envelopes()[id]?.sentAt;
 const sentDocs = new Map<string, SendRequest>();
+
 
 const signing: SigningProvider = {
   name: 'DocuSign (demo)',
-  async send(req) {
-    await wait(700);
+  async create(req) {
+    await wait(500);
     const id = crypto.randomUUID();
-    sentAt.set(id, Date.now());
+    envelopes()[id] = { createdAt: Date.now() };
+    persist();
     sentDocs.set(id, req);
     return { envelopeId: id };
   },
+  async release(envelopeId) {
+    await wait(200);
+    const env = envelopes()[envelopeId];
+    if (!env) throw new Error('Envelope not found');
+    // Like DocuSign, releasing an envelope that already went out doesn't send it again.
+    env.sentAt ??= Date.now();
+    persist();
+  },
   async getStatus(envelopeId): Promise<EnvelopeStatus> {
-    const t = sentAt.get(envelopeId);
+    const env = envelopes()[envelopeId];
+    if (env && !env.sentAt) return { status: 'Drafted', recipients: [] };
+    const t = sentAtOf(envelopeId);
     const req = state.requests.find((r) => r.envelopeId === envelopeId);
     if (!t) {
       return { status: req?.status ?? 'Sent', viewedOn: req?.viewedOn, signedOn: req?.signedOn, recipients: [] };

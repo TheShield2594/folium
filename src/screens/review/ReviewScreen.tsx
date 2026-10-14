@@ -149,9 +149,9 @@ export function ReviewScreen() {
         existing,
         writePdfs: true,
         // Keep the row's identity even if writing the PDFs fails, so a retry updates it.
-        onSaved: (row) => setPacket({ requestId: row.id, title: row.title, attachments: row.attachments, snapshot: row.prefillSnapshot }),
+        onSaved: (row) => setPacket({ requestId: row.id, title: row.title, attachments: row.attachments, snapshot: row.prefillSnapshot, dirty: false }),
       });
-      setPacket({ requestId: saved.id, title: saved.title, attachments: saved.attachments, snapshot: saved.prefillSnapshot });
+      setPacket({ requestId: saved.id, title: saved.title, attachments: saved.attachments, snapshot: saved.prefillSnapshot, dirty: false });
       toast.ok(`Draft saved to ${client!.contact.firstname}’s SharePoint folder`);
     } finally {
       await refreshRequests().catch(() => undefined);

@@ -62,7 +62,11 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     const pk: Cmd[] = packets
       .filter((p) => !q || p.name.toLowerCase().includes(q.toLowerCase()))
       .slice(0, 4)
-      .map((p) => ({ id: `p-${p.id}`, icon: 'tray', title: `Start “${p.name}”`, detail: `${p.templateIds.length} forms`, run: () => (loadPacket(p), navigate('/')) }));
+      .map((p) => ({ id: `p-${p.id}`, icon: 'tray', title: `Start “${p.name}”`, detail: `${p.templateIds.length} forms`, run: async () => {
+        if (!(await useApp.getState().confirmReplacePacket('open-draft'))) return;
+        loadPacket(p);
+        navigate('/');
+      } }));
     const s = q.toLowerCase();
     return [...(q ? forms : []), ...pk, ...nav.filter((n) => !s || n.title.toLowerCase().includes(s))];
   }, [q, me, groups, templates, packets, navigate, addToPacket, loadPacket, client]);

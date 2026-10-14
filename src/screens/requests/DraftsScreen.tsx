@@ -54,7 +54,9 @@ export function DraftsScreen() {
 
   async function open(r: SignatureRequest) {
     try {
-      if (r.contactId !== contactId) await openContact(r.contactId);
+      // Opening a draft replaces the packet on screen: ask first if it has unsaved work.
+      if (!(await useApp.getState().confirmReplacePacket('open-draft'))) return;
+      if (r.contactId !== contactId && !(await openContact(r.contactId))) return;
       loadRequest(r);
       navigate('/review');
     } catch {

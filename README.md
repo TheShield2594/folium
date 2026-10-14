@@ -23,7 +23,7 @@ npm test           # domain and PDF tests
 npm run build
 ```
 
-Demo mode needs nothing else: sample clients, a template library of generated AcroForm PDFs, and a simulated DocuSign that moves envelopes from Sent to Viewed to Signed over a couple of minutes. In **Settings › Demo mode** you can switch between an advisor, an assistant and an administrator. Add `?contactId=c-priya` (or `c-eli`, `c-grace`) to open a different client, the way the Contact form will.
+Demo mode needs nothing else: sample clients, a template library of generated AcroForm PDFs, and a simulated DocuSign that moves envelopes from Sent to Viewed to Signed over a couple of minutes. In **Settings › Demo mode** you can switch between an advisor, an assistant and an administrator. Add `?contactId=c-priya` (or `c-eli`, `c-grace`) to open a different client, the way the Contact form will. To try the recovery paths, add `?fail=offline`, `slow`, `auth` or `server` (failures start 10 seconds after launch; change with `&failAfter=`), or `?fail=send` / `?fail=release` to lose DocuSign's reply to the first envelope.
 
 ## What's in it
 

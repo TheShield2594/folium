@@ -129,7 +129,9 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
 
   async function openDraft(asNew?: boolean) {
     try {
-      if (r.contactId !== contactId) await openContact(r.contactId);
+      // Opening a draft replaces the packet on screen: ask first if it has unsaved work.
+      if (!(await useApp.getState().confirmReplacePacket('open-draft'))) return;
+      if (r.contactId !== contactId && !(await openContact(r.contactId))) return;
       loadRequest(asNew ? { ...r, id: '', values: r.values } : r);
       if (asNew) useApp.getState().setPacket({ requestId: undefined, sharedWith: [], snapshot: undefined });
       navigate('/review');

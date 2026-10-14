@@ -42,8 +42,9 @@ export function PacketsScreen() {
   }
 
   /** Start a fresh packet from a saved one and go straight to review. */
-  function start(p: SavedPacket) {
+  async function start(p: SavedPacket) {
     if (!client) return toast.error('Choose a client first.');
+    if (!(await useApp.getState().confirmReplacePacket('open-draft'))) return;
     loadPacket(p);
     countUse(p);
     navigate('/review');

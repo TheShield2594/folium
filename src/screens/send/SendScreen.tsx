@@ -4,9 +4,10 @@ import { outputGate, summarize } from '../../domain/checks';
 import { assignSigners, roleLabel, rolesForPacket, validateSigners } from '../../domain/signers';
 import type { SignatureRequest, SignerAssignment, VerificationMethod } from '../../domain/types';
 import { useServices } from '../../services';
+import { classifyError } from '../../services/errors';
 import { Toolbar } from '../../shell/Shell';
-import { attachmentBytes, audit, fillPacket, packetAsOnePdf, saveDraft, unreachableAttachments, type SendSetup } from '../../state/actions';
-import { useActingFor, useApp, useScope } from '../../state/store';
+import { attachmentBytes, audit, fillPacket, packetAsOnePdf, releaseEnvelope, saveDraft, unreachableAttachments, type SendSetup } from '../../state/actions';
+import { useActingFor, useApp, useScope, type SendState } from '../../state/store';
 import { Avatar, Button, Empty, Field, IconButton, Menu, Select, SwitchRow, TextArea, TextInput, downloadBytes, toast } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
 import { NoClient } from '../common/NoClient';
@@ -44,8 +45,12 @@ export function SendScreen() {
   const [expires, setExpires] = useState('60');
   const [busy, setBusy] = useState<string>();
   const [sharing, setSharing] = useState(false);
-  /** Set the moment DocuSign accepts the envelope, so a failed save can never lead to a second send. */
-  const [sentEnvelopeId, setSentEnvelopeId] = useState<string>();
+  /**
+   * Where a send got to. Kept on the packet (and so in the session journal), not in this
+   * screen, so a reload or a trip to another screen can never lead to a second envelope.
+   */
+  const sendState = packet.send;
+  const setSend = (send: SendState | undefined) => setPacket({ send });
   /** The draft row saved for this envelope, so a retry updates it instead of adding another. */
   const savedDraft = useRef<SignatureRequest>(undefined);
 
@@ -113,15 +118,33 @@ export function SendScreen() {
     });
   }
 
+  /** The request row this packet is saved as, if any, read fresh so a retry never adds a second row. */
+  async function currentRow(): Promise<SignatureRequest | undefined> {
+    if (savedDraft.current) return savedDraft.current;
+    if (existing) return existing;
+    return packet.requestId ? services.requests.get(packet.requestId) : undefined;
+  }
+
+  /**
+   * Step 1: create the envelope as a DocuSign draft (nothing reaches the signers yet) and
+   * note its ID on the request row. Step 2 (`finishSend`) releases it.
+   */
   async function send() {
-    if (!contactId || !me || !owner || !view || sentEnvelopeId) return;
+    if (!contactId || !me || !owner || !view || sendState) return;
     setBusy('send');
+    let docs: Awaited<ReturnType<typeof fillPacket>>;
+    const attachments: { name: string; pdf: Uint8Array }[] = [];
+    try {
+      docs = await fillPacket(services, view.fills, 'flatten');
+      for (const a of packet.attachments) attachments.push({ name: a.name, pdf: await attachmentBytes(services, a) });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not prepare the PDFs');
+      setBusy(undefined);
+      return;
+    }
     let envelopeId: string;
     try {
-      const docs = await fillPacket(services, view.fills, 'flatten');
-      const attachments: { name: string; pdf: Uint8Array }[] = [];
-      for (const a of packet.attachments) attachments.push({ name: a.name, pdf: await attachmentBytes(services, a) });
-      ({ envelopeId } = await services.signing.send({
+      ({ envelopeId } = await services.signing.create({
         documents: docs.map((d) => ({ name: d.fileName, pdf: d.pdf, placements: d.placements })),
         signers: ordered,
         ccs: ccList(),
@@ -132,11 +155,36 @@ export function SendScreen() {
         attachments,
       }));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'DocuSign didn’t accept the envelope');
+      const kind = classifyError(e);
+      // A lost reply may still have created a (draft) envelope. Don't invite a second one.
+      if (kind === 'timeout' || kind === 'offline' || kind === 'server') setSend({ phase: 'unknown', at: new Date().toISOString() });
+      else toast.error(e instanceof Error ? e.message : 'DocuSign didn’t accept the envelope');
       setBusy(undefined);
       return;
     }
-    setSentEnvelopeId(envelopeId);
+    setSend({ phase: 'created', envelopeId, at: new Date().toISOString() });
+    try {
+      const row = await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing: await currentRow(), sendSetup: sendSetup() });
+      const marked = await services.requests.save({ ...row, envelopeId, envelopePhase: 'created', audit: [...row.audit, audit(me, 'Envelope created in DocuSign', 'Not sent yet')] });
+      savedDraft.current = marked;
+      setPacket({ requestId: marked.id, dirty: false });
+    } catch {
+      // The envelope ID is on the packet and in the session journal; carry on.
+    }
+    await finishSend(envelopeId, false);
+  }
+
+  /** Step 2: release the draft envelope. When resuming, ask DocuSign first so it never goes twice. */
+  async function finishSend(envelopeId: string, resuming: boolean) {
+    setBusy('send');
+    try {
+      await releaseEnvelope(services.signing, envelopeId, resuming);
+    } catch (e) {
+      toast.error(`DocuSign has the envelope but didn’t confirm sending it${e instanceof Error ? ` (${e.message})` : ''}. Use “Finish sending”: it checks first, so it won’t send twice.`);
+      setBusy(undefined);
+      return;
+    }
+    setSend({ phase: 'sent', envelopeId, at: new Date().toISOString() });
     await recordSent(envelopeId);
   }
 
@@ -156,13 +204,14 @@ export function SendScreen() {
     if (!contactId || !me || !owner || !view) return;
     setBusy('send');
     try {
-      const draft = savedDraft.current ?? (await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing }));
+      const draft = savedDraft.current ?? (await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing: await currentRow() }));
       savedDraft.current = draft;
       setPacket({ requestId: draft.id });
       const sent: SignatureRequest = {
         ...draft,
         status: 'Sent',
         envelopeId,
+        envelopePhase: undefined,
         sentOn: new Date().toISOString(),
         sentBy: me.fullname,
         signers: ordered.map((s) => ({ ...s, status: s.order === Math.min(...ordered.map((x) => x.order)) ? 'sent' : 'pending' })),
@@ -188,14 +237,14 @@ export function SendScreen() {
   }
 
   async function inPerson() {
-    if (!contactId || !me || !owner || !view || !inPersonGate.allowed) return;
+    if (!contactId || !me || !owner || !view || !inPersonGate.allowed || sendState) return;
     setBusy('print');
     try {
       const bytes = await packetAsOnePdf(services, view.fills, 'flatten');
       downloadBytes(bytes, `${client!.contact.lastname} - sign in person.pdf`);
       const draft = await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing, sendSetup: sendSetup() });
       await services.requests.save({ ...draft, inPerson: true, audit: [...draft.audit, audit(me, 'Downloaded to sign in person')] });
-      setPacket({ requestId: draft.id });
+      setPacket({ requestId: draft.id, dirty: false });
       markUsed(view.templates.map((t) => t.id));
       await refreshRequests();
       toast.ok('Downloaded. Upload the wet-signed copy to OnBase when it’s back.');
@@ -334,16 +383,43 @@ export function SendScreen() {
                     ))}
                   </ul>
                 )}
-                {sentEnvelopeId ? (
+                {sendState?.phase === 'sent' && sendState.envelopeId ? (
                   <>
                     <div className="banner" role="alert">
                       <Icon name="warning" size={18} />
                       <span className="t-footnote">
-                        DocuSign already has this envelope (<span className="mono">{sentEnvelopeId.slice(0, 8)}</span>). Folium just needs to save the record.
+                        DocuSign already sent this envelope (<span className="mono">{sendState.envelopeId.slice(0, 8)}</span>). Folium just needs to save the record.
                       </span>
                     </div>
-                    <Button variant="filled" size="lg" block icon="refresh" busy={busy === 'send'} onClick={() => recordSent(sentEnvelopeId)}>
+                    <Button variant="filled" size="lg" block icon="refresh" busy={busy === 'send'} onClick={() => recordSent(sendState.envelopeId!)}>
                       Record it again
+                    </Button>
+                  </>
+                ) : sendState?.phase === 'created' && sendState.envelopeId ? (
+                  <>
+                    <div className="banner" role="alert">
+                      <Icon name="warning" size={18} />
+                      <span className="t-footnote">
+                        DocuSign has this envelope (<span className="mono">{sendState.envelopeId.slice(0, 8)}</span>) but hasn’t confirmed sending it. Finishing checks with DocuSign first, so it won’t go twice.
+                      </span>
+                    </div>
+                    <Button variant="filled" size="lg" block icon="send" busy={busy === 'send'} onClick={() => finishSend(sendState.envelopeId!, true)}>
+                      Finish sending
+                    </Button>
+                  </>
+                ) : sendState?.phase === 'unknown' ? (
+                  <>
+                    <div className="banner" role="alert">
+                      <Icon name="warning" size={18} />
+                      <span className="t-footnote">
+                        We couldn’t confirm the send. Check {client.contact.firstname}’s Signature requests (and DocuSign’s Drafts) before sending again. An unconfirmed envelope stays a draft in DocuSign and never reaches the signers.
+                      </span>
+                    </div>
+                    <Button variant="tinted" block onClick={() => navigate('/requests')}>
+                      Check Signature requests
+                    </Button>
+                    <Button variant="bordered" block onClick={() => setSend(undefined)}>
+                      I’ve checked. Let me send again
                     </Button>
                   </>
                 ) : (
@@ -356,7 +432,7 @@ export function SendScreen() {
                     Fix in review
                   </Button>
                 )}
-                <Button variant="bordered" block icon="printer" busy={busy === 'print'} disabled={!inPersonGate.allowed} onClick={inPerson}>
+                <Button variant="bordered" block icon="printer" busy={busy === 'print'} disabled={!inPersonGate.allowed || !!sendState} onClick={inPerson}>
                   Download to sign in person
                 </Button>
               </section>

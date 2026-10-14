@@ -297,6 +297,8 @@ export interface SignatureRequest {
   createdOn: string;
   provider: 'DocuSign';
   envelopeId?: string;
+  /** `created` while the envelope is a DocuSign draft that Folium hasn't released yet. */
+  envelopePhase?: 'created';
   status: SignatureStatus;
   documents: RequestDocument[];
   signers: SignerAssignment[];

@@ -64,7 +64,7 @@
       },
       "put": {
         "operationId": "UpdateEnvelope",
-        "summary": "Void or resend an envelope",
+        "summary": "Send a draft envelope, void it, or resend it",
         "parameters": [
           { "$ref": "#/parameters/accountId" },
           { "$ref": "#/parameters/envelopeId" },

@@ -39,7 +39,7 @@ export function ShareSheet({ onClose, sendSetup }: { onClose: () => void; sendSe
       const next = { ...packet, sharedWith: picked };
       const existing = packet.requestId ? requests.find((r) => r.id === packet.requestId) : undefined;
       const saved = await saveDraft({ services, packet: next, fills: view.fills, contactId, me, owner, existing, sendSetup });
-      setPacket({ sharedWith: picked, requestId: saved.id, attachments: saved.attachments, snapshot: saved.prefillSnapshot });
+      setPacket({ sharedWith: picked, requestId: saved.id, attachments: saved.attachments, snapshot: saved.prefillSnapshot, dirty: false });
       await refreshRequests();
       const names = users.filter((u) => picked.includes(u.systemuserid)).map((u) => u.fullname.split(' ')[0]);
       toast.ok(picked.length ? `Shared with ${names.join(', ')}` : 'Sharing turned off');

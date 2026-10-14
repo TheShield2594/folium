@@ -2,7 +2,7 @@ import { defaultDraftTitle, shortDraftId } from '../domain/drafts';
 import { prefillSnapshot, type FormFill } from '../domain/prefill';
 import type { Attachment, AuditEvent, SignatureRequest, UserProfile } from '../domain/types';
 import { fillPdf, mergePdfs } from '../pdf/fill';
-import type { Services } from '../services/types';
+import type { Services, SigningProvider } from '../services/types';
 import type { Packet } from './store';
 
 export interface FilledDoc {
@@ -37,6 +37,18 @@ export async function fillPacket(services: Services, fills: FormFill[], mode: 'f
 export async function packetAsOnePdf(services: Services, fills: FormFill[], mode: 'fillable' | 'flatten', draftMark = false) {
   const docs = await fillPacket(services, fills, mode, draftMark);
   return docs.length === 1 ? docs[0].pdf : mergePdfs(docs.map((d) => d.pdf));
+}
+
+/**
+ * Step 2 of a send: release the envelope DocuSign holds as a draft. When resuming after
+ * a lost reply, ask DocuSign first, so an envelope that already went out never goes twice.
+ * If the status can't be read, release anyway: releasing a sent envelope doesn't resend it.
+ */
+export async function releaseEnvelope(signing: SigningProvider, envelopeId: string, resuming: boolean): Promise<'released' | 'already sent'> {
+  const status = resuming ? (await signing.getStatus(envelopeId).catch(() => undefined))?.status : 'Drafted';
+  if (status !== 'Drafted' && status !== undefined) return 'already sent';
+  await signing.release(envelopeId);
+  return 'released';
 }
 
 export function audit(actor: UserProfile | undefined, action: string, detail?: string): AuditEvent {

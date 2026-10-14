@@ -99,10 +99,17 @@ export interface SendRequest {
   attachments?: { name: string; pdf: Uint8Array }[];
 }
 
-/** Provider-neutral e-signature interface (see brief). Only DocuSign is implemented in v1. */
+/**
+ * Provider-neutral e-signature interface (see brief). Only DocuSign is implemented in v1.
+ *
+ * Sending is two steps so it's safe to resume: `create` makes the envelope as a
+ * DocuSign draft (nothing reaches the signers), then `release` sends it. If `release`
+ * times out, `getStatus` says whether it went out (status other than `Drafted`).
+ */
 export interface SigningProvider {
   readonly name: string;
-  send(req: SendRequest): Promise<{ envelopeId: string }>;
+  create(req: SendRequest): Promise<{ envelopeId: string }>;
+  release(envelopeId: string): Promise<void>;
   getStatus(envelopeId: string): Promise<EnvelopeStatus>;
   downloadCompleted(envelopeId: string): Promise<{ pdf: Uint8Array; certificate: Uint8Array }>;
   void(envelopeId: string, reason: string): Promise<void>;

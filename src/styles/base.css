@@ -838,6 +838,13 @@ a.list-row:hover {
 .banner.ok svg {
   color: var(--success);
 }
+/* App-level banners (connection, restore) sit flush across the top of the main column. */
+.app-banner {
+  flex: none;
+  flex-wrap: wrap;
+  border-radius: 0;
+  border-bottom: 1px solid var(--separator);
+}
 
 /* Tables */
 .table {
