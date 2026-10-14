@@ -20,6 +20,8 @@ const settingRows: Record<string, Record<string, unknown>> = {};
 /** What the SharePoint connector answers to a file lookup, and the files it was asked to delete. */
 let fileLookup: { success: boolean; data?: { Id: string }; error?: Record<string, unknown> } = { success: true, data: { Id: 'item-1' } };
 const deletedFiles: string[] = [];
+/** DocuSign connector operations Folium called, with their parameters. */
+const docuSignCalls: { operationName: string; parameters: Record<string, unknown> }[] = [];
 /** `ev_foliumprofile` rows by ID, and `systemuser` rows (as Dataverse returns them). */
 const profileRows: Record<string, Record<string, unknown>> = {};
 const systemUserRows: Record<string, unknown>[] = [];
@@ -47,8 +49,13 @@ vi.mock('@microsoft/power-apps/data', () => ({
       }
       return ok(table === 'connections' ? (connectionRows[opts?.filter?.split(' ')[0] ?? ''] ?? []) : []);
     },
-    executeAsync: async (req: { connectorOperation: { operationName: string; parameters: { id?: string } } }) => {
-      const { operationName, parameters } = req.connectorOperation;
+    executeAsync: async (req: { connectorOperation: { tableName: string; operationName: string; parameters: { id?: string } } }) => {
+      const { tableName, operationName, parameters } = req.connectorOperation;
+      if (tableName === 'foliumdocusign') {
+        docuSignCalls.push({ operationName, parameters });
+        if (operationName === 'GetAccount') return ok({ accountName: 'Everence Financial', accountIdGuid: (parameters as { accountId?: string }).accountId });
+        return ok({ envelopeId: 'env-1' });
+      }
       if (operationName === 'GetFileMetadataByPath') return fileLookup;
       if (operationName === 'DeleteFile') return deletedFiles.push(parameters.id ?? ''), ok({});
       throw new Error(`Unexpected connector call ${operationName}`);
@@ -267,5 +274,38 @@ describe('directory', () => {
   it('looks people up by sign-in email', async () => {
     const found = await createPowerServices().directory.lookupDirectory(['RILEY@example.org', '', 'nobody@example.org']);
     expect(found).toEqual([{ systemuserid: 'su-2', fullname: 'Riley Kauffman', email: 'riley@example.org', disabled: true }]);
+  });
+});
+
+describe('DocuSign setup', () => {
+  const ACCOUNT = '0f1e2d3c-4b5a-4978-8a9b-0c1d2e3f4a5b';
+  beforeEach(() => {
+    for (const k of Object.keys(settingRows)) delete settingRows[k];
+    docuSignCalls.length = 0;
+  });
+
+  it('won’t call DocuSign until an administrator names the account', async () => {
+    const { signing } = createPowerServices();
+    await expect(signing.release('env-1')).rejects.toThrow(/Administration › Settings/);
+    expect(docuSignCalls).toHaveLength(0);
+  });
+
+  it('saves the setup in its own row and sends every call to that account', async () => {
+    const { directory, signing } = createPowerServices();
+    await expect(signing.release('env-1')).rejects.toThrow();
+    await directory.saveDocuSign({ environment: 'demo', accountId: ACCOUNT, idv: { sms: ACCOUNT } });
+    expect(Object.values(settingRows).map((r) => r.ev_name)).toEqual(['DocuSign']);
+    // Saving clears the cached setup, so the same session picks it up.
+    await signing.release('env-1');
+    await signing.void('env-1', 'Wrong form');
+    expect(docuSignCalls.map((c) => c.parameters.accountId)).toEqual([ACCOUNT, ACCOUNT]);
+    expect((await directory.getDocuSign()).idv.sms).toBe(ACCOUNT);
+  });
+
+  it('tests settings before they’re saved', async () => {
+    const { signing } = createPowerServices();
+    const a = await signing.checkConnection({ environment: 'demo', accountId: ACCOUNT, idv: {} });
+    expect(a).toEqual({ accountId: ACCOUNT, accountName: 'Everence Financial' });
+    expect(docuSignCalls).toEqual([{ operationName: 'GetAccount', parameters: { accountId: ACCOUNT } }]);
   });
 });

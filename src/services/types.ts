@@ -16,6 +16,7 @@ import type {
   VerificationMethod,
 } from '../domain/types';
 import type { DirectoryUser } from '../domain/advisor';
+import type { DocuSignSetup } from '../domain/docusign';
 
 /** Dataverse reads for the client the advisor is working on. */
 export interface CrmService {
@@ -148,6 +149,16 @@ export interface SigningProvider {
    * `cancel`, `ttl_expired`, …).
    */
   signingUrl(envelopeId: string, role: string, returnUrl: string): Promise<string>;
+  /**
+   * Whether the signed-in person's DocuSign connection reaches the firm's account:
+   * the account's name when it does. Pass `setup` to try settings before they're saved.
+   */
+  checkConnection(setup?: DocuSignSetup): Promise<DocuSignAccount>;
+}
+
+export interface DocuSignAccount {
+  accountId: string;
+  accountName: string;
 }
 
 /** Folium users, groups and the firm profile (Admin-managed; users edit their own profile). */
@@ -176,6 +187,9 @@ export interface DirectoryService {
   /** Firm-wide rules, with defaults filled in when nothing is saved yet. */
   getPolicy(): Promise<FirmPolicy>;
   savePolicy(p: FirmPolicy): Promise<FirmPolicy>;
+  /** The firm's DocuSign account and verification workflows, with defaults when nothing is saved. */
+  getDocuSign(): Promise<DocuSignSetup>;
+  saveDocuSign(s: DocuSignSetup): Promise<DocuSignSetup>;
 }
 
 export interface Services {

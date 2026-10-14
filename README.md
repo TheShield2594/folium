@@ -33,7 +33,7 @@ Demo mode needs nothing else: sample clients, a template library of generated Ac
 - **Signature requests** — Drafted → Sent → Viewed → Signed → In OnBase with audit trail, resend, correct signer, void, download signed PDF + certificate.
 - **Contact & accounts** — fix the client's Dynamics 365 record in place.
 - **Settings** — your own profile (from your Microsoft profile, with Folium overrides), sending defaults, appearance.
-- **Administration** — template library with revision diff and carry-over, signature tab placement, check rules, test with a real contact, publish on an effective date; users (status and last sign-in, bulk changes, CSV import and export), groups (role, region) and the firm profile.
+- **Administration** — template library with revision diff and carry-over, signature tab placement, check rules, test with a real contact, publish on an effective date; users (status and last sign-in, bulk changes, CSV import and export), groups (role, region), the firm profile and the DocuSign account (each person sends from their own DocuSign login).
 - **Roles** — User, Assistant (works on behalf of the Users in their groups, like LaserApp Anywhere) and Admin.
 
 See [docs/PARITY.md](docs/PARITY.md) for the feature-by-feature comparison with LaserApp Anywhere.

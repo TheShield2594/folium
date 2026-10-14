@@ -51,6 +51,7 @@ Folium finds each row by `ev_name`; changing them needs no release, and Datavers
 
 - `ev_name` = "Firm", `ev_payload` (`FirmProfile`): firm data for `firm.*` fields, the envelope disclosure, Send screen defaults (`sending`: `defaultAnyOrder`, `subjectTemplate`, `messageTemplate`), `blockFillableWhenIncomplete`, `idleAutoSave`. Administration › Firm profile. (#26 turns this into one row per Everence entity.)
 - `ev_name` = "Policy", `ev_payload` (`FirmPolicy`): firm-wide rules shared by every firm profile: `sharing` (`off` · `groups` · `anyone`, default `groups`), `repDataVisibility` (`assistants` · `groupMembers`, default `assistants`), `pdfDownload` (`all` · `signedOnly` · `none`, default `all`), `draftRetentionDays` (90 default, 60, 30, 10, 7 or 0), `lockMessage`, `maxAttachments`, `maxAttachmentsMB`. Administration › Settings. A missing row means every default.
+- `ev_name` = "DocuSign", `ev_payload` (`DocuSignSetup`): `environment` (`demo` · `production`), `accountId` (API Account ID), `integrationKey` (client ID, for the consent link only), `redirectUrl`, `idv` (`sms`, `phone`, `kba` workflow IDs). Administration › Settings › DocuSign. No secrets: the client secret stays in the custom connector. A missing row means DocuSign isn't set up and nothing can be sent.
 
 ## ev_formrequest
 

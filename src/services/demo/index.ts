@@ -2,6 +2,7 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import type { ClientRecord, FirmPolicy, FirmProfile, FormTemplate, SavedPacket, SignatureRequest, UserGroup, UserProfile } from '../../domain/types';
 import { mergeAdvisor, profileToSave } from '../../domain/advisor';
 import { withPolicyDefaults } from '../../domain/policy';
+import { withDocuSignDefaults, type DocuSignSetup } from '../../domain/docusign';
 import { needsSeenStamp } from '../../domain/users';
 import { mapDocuSignStatus } from '../../domain/requests';
 import { generateTemplatePdf } from '../../pdf/generate';
@@ -44,6 +45,8 @@ interface DemoState {
   envelopes?: Record<string, DemoEnvelope>;
   /** Missing in demo data saved before policies existed: defaults apply. */
   policy?: FirmPolicy;
+  /** Missing in demo data saved before DocuSign setup existed: the demo setup applies. */
+  docuSign?: DocuSignSetup;
   /** Deactivated profiles (`statecode` 1 in Dataverse). */
   inactiveUserIds?: string[];
 }
@@ -180,6 +183,14 @@ const directory: DirectoryService = {
     state.policy = clone(p);
     persist();
     return clone(p);
+  },
+  async getDocuSign() {
+    return withDocuSignDefaults(clone(state.docuSign ?? DEMO_DOCUSIGN));
+  },
+  async saveDocuSign(s) {
+    state.docuSign = clone(s);
+    persist();
+    return clone(s);
   },
 };
 
@@ -462,8 +473,21 @@ const sentAtOf = (id: string) => envelopes()[id]?.sentAt;
 const sentDocs = new Map<string, SendRequest>();
 
 
+/** Sample sandbox setup, so the demo's Administration › Settings shows a working account. */
+const DEMO_DOCUSIGN: DocuSignSetup = {
+  environment: 'demo',
+  accountId: '0f1e2d3c-4b5a-4978-8a9b-0c1d2e3f4a5b',
+  idv: { sms: '11111111-2222-4333-8444-555555555555', phone: '22222222-3333-4444-8555-666666666666', kba: '33333333-4444-4555-8666-777777777777' },
+};
+
 const signing: SigningProvider = {
   name: 'DocuSign (demo)',
+  async checkConnection(setup) {
+    await wait(400);
+    const s = setup ?? (await directory.getDocuSign());
+    if (!s.accountId) throw new Error('No DocuSign account is set up. An administrator adds it in Administration › Settings.');
+    return { accountId: s.accountId, accountName: 'Everence Financial (demo sandbox)' };
+  },
   async create(req) {
     await wait(500);
     const id = crypto.randomUUID();

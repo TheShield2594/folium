@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import { upgradeAuditDetail, upgradePacketItems, type UpgradeReport } from '../domain/drafts';
 import type { ResolveScope } from '../domain/paths';
 import { actableUsers, DEFAULT_POLICY } from '../domain/policy';
+import { withDocuSignDefaults, type DocuSignSetup } from '../domain/docusign';
 import { carryVariantValues, copyScope, migrateAccountValues, seedCopyValues, type PersonPick } from '../domain/prefill';
 import { currentTemplates, latestLive } from '../domain/revisions';
 import { normalizeState, pickVariant } from '../domain/states';
@@ -95,6 +96,8 @@ interface AppState {
   firm?: FirmProfile;
   /** Firm-wide rules (sharing, rep data, downloads, retention). Defaults until boot loads them. */
   policy: FirmPolicy;
+  /** The firm's DocuSign account and verification workflows (Administration › Settings). */
+  docuSign: DocuSignSetup;
   /**
    * The User whose book and rep data the work is for: the User an Assistant works for,
    * or (when the policy allows) another User in a User's groups. Usually `me` for Users.
@@ -231,6 +234,7 @@ let openSeq = 0;
 export const useApp = create<AppState>((set, get) => ({
   ready: false,
   policy: DEFAULT_POLICY,
+  docuSign: withDocuSignDefaults(undefined),
   users: [],
   groups: [],
   templates: [],
@@ -248,16 +252,17 @@ export const useApp = create<AppState>((set, get) => ({
     applyTheme(get().theme);
     set({ services });
     try {
-      const [me, users, groups, firm, policy, templates, packets] = await Promise.all([
+      const [me, users, groups, firm, policy, docuSign, templates, packets] = await Promise.all([
         services.directory.currentUser(),
         services.directory.listUsers(),
         services.directory.listGroups(),
         services.directory.getFirm(),
         services.directory.getPolicy(),
+        services.directory.getDocuSign(),
         services.templates.list(),
         services.packets.list(),
       ]);
-      set({ me, users, groups, firm, policy, templates, packets, actingForId: actingForFor(me, users, groups, policy), ready: true });
+      set({ me, users, groups, firm, policy, docuSign, templates, packets, actingForId: actingForFor(me, users, groups, policy), ready: true });
       const journal = readJournal(me.systemuserid);
       if (journal && worthKeeping(journal.packet)) set({ pendingRestore: journal });
       const start = contactId ?? readLocal<string | undefined>('folium.lastContact', undefined);
@@ -278,10 +283,17 @@ export const useApp = create<AppState>((set, get) => ({
 
   async reloadDirectory() {
     const s = get().services!;
-    const [me, users, groups, firm, policy] = await Promise.all([s.directory.currentUser(), s.directory.listUsers(), s.directory.listGroups(), s.directory.getFirm(), s.directory.getPolicy()]);
+    const [me, users, groups, firm, policy, docuSign] = await Promise.all([
+      s.directory.currentUser(),
+      s.directory.listUsers(),
+      s.directory.listGroups(),
+      s.directory.getFirm(),
+      s.directory.getPolicy(),
+      s.directory.getDocuSign(),
+    ]);
     // A policy change can take away someone the user was working as.
     const keep = actableUsers(me, users, groups, policy).some((u) => u.systemuserid === get().actingForId);
-    set({ me, users, groups, firm, policy, ...(keep ? {} : { actingForId: actingForFor(me, users, groups, policy) }) });
+    set({ me, users, groups, firm, policy, docuSign, ...(keep ? {} : { actingForId: actingForFor(me, users, groups, policy) }) });
   },
 
   setActingFor(userId) {
