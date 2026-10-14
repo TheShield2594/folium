@@ -1,6 +1,6 @@
 # 009 — Shorten the packet list item entrance
 
-- **Status**: TODO
+- **Status**: DONE
 - **Commit**: 2606b69
 - **Severity**: LOW
 - **Category**: Cohesion / duration

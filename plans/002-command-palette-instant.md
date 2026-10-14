@@ -1,6 +1,6 @@
 # 002 — Open the ⌘K command palette instantly
 
-- **Status**: TODO
+- **Status**: DONE
 - **Commit**: 2606b69
 - **Severity**: HIGH
 - **Category**: Purpose & frequency

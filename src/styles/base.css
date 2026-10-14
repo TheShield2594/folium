@@ -176,6 +176,9 @@ a:hover {
   -webkit-backdrop-filter: saturate(180%) blur(30px);
   border-right: 0.5px solid var(--separator-strong);
 }
+.scrim {
+  display: none;
+}
 .sidebar-head {
   display: flex;
   align-items: center;
@@ -684,6 +687,27 @@ a.list-row:hover {
   background: var(--surface);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
 }
+.segmented {
+  position: relative;
+}
+.segmented button {
+  position: relative;
+  z-index: 1;
+}
+.segmented-thumb {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  transition: transform var(--dur-2) var(--ease), width var(--dur-2) var(--ease);
+}
+.segmented.has-thumb button[aria-pressed='true'] {
+  background: transparent;
+  box-shadow: none;
+}
 
 /* Chips (filter tokens) */
 .chip {
@@ -772,10 +796,9 @@ a.list-row:hover {
 }
 .meter > i {
   position: absolute;
-  inset: 0 auto 0 0;
-  border-radius: 3px;
+  inset: 0;
   background: var(--accent);
-  transition: width var(--dur-3) var(--ease);
+  transition: clip-path var(--dur-3) var(--ease);
 }
 
 .steps {
@@ -900,6 +923,18 @@ a.list-row:hover {
 .sheet.wide {
   width: min(820px, 100%);
 }
+.sheet-backdrop.closing {
+  animation: fade-out 150ms var(--ease) forwards;
+  pointer-events: none;
+}
+.sheet-backdrop.closing .sheet {
+  animation: sheet-out 150ms var(--ease) forwards;
+}
+/* Keyboard-summoned overlays (the ⌘K palette) appear at once. */
+.sheet-backdrop.instant,
+.sheet-backdrop.instant .sheet {
+  animation: none;
+}
 .sheet-head {
   display: flex;
   align-items: center;
@@ -1005,6 +1040,10 @@ a.list-row:hover {
 .toast.error svg {
   color: var(--danger);
 }
+.toast.leaving {
+  animation: toast-out 200ms var(--ease) forwards;
+  pointer-events: none;
+}
 
 .spinner {
   width: 18px;
@@ -1041,18 +1080,31 @@ a.list-row:hover {
 }
 
 @keyframes fade-in { from { opacity: 0; } }
+@keyframes fade-out { to { opacity: 0; } }
 @keyframes sheet-in { from { opacity: 0; transform: translateY(18px) scale(0.98); } }
+@keyframes sheet-out { to { opacity: 0; transform: scale(0.98); } }
 @keyframes pop-in { from { opacity: 0; transform: scale(0.96) translateY(-4px); } }
 @keyframes toast-in { from { opacity: 0; transform: translateY(16px) scale(0.96); } }
+@keyframes toast-out { to { opacity: 0; transform: translateY(8px) scale(0.96); } }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes shimmer { to { background-position: -200% 0; } }
+@keyframes busy-fade { 50% { opacity: 0.45; } }
 
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 1ms !important;
+  }
+  /* Busy indicators keep a slow fade so the page still reads as working. */
+  .spinner,
+  .skeleton {
+    animation: busy-fade 1.6s ease-in-out infinite !important;
+  }
+  .hl-need {
+    animation: none !important;
   }
 }
 
@@ -1083,6 +1135,20 @@ a.list-row:hover {
   }
   .app[data-sidebar='open'] .sidebar {
     transform: none;
+  }
+  .scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgba(0, 0, 0, 0.25);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--dur-3) var(--ease);
+  }
+  .app[data-sidebar='open'] .scrim {
+    opacity: 1;
+    pointer-events: auto;
   }
   .page {
     padding: var(--sp-4) var(--sp-4) var(--sp-8);

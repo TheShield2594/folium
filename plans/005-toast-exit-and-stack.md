@@ -1,6 +1,6 @@
 # 005 — Animate toast exits and the stack shifting
 
-- **Status**: TODO
+- **Status**: DONE
 - **Commit**: 2606b69
 - **Severity**: MEDIUM
 - **Category**: Interruptibility

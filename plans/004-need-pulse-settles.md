@@ -1,6 +1,6 @@
 # 004 — Let the "needs input" pulse settle instead of looping forever
 
-- **Status**: TODO
+- **Status**: DONE
 - **Commit**: 2606b69
 - **Severity**: MEDIUM
 - **Category**: Purpose & performance

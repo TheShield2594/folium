@@ -51,13 +51,13 @@
   background: var(--fill-2);
   color: var(--accent-text);
   cursor: pointer;
-  transition: background var(--dur-1), color var(--dur-1), transform var(--dur-2) var(--ease);
+  transition: background var(--dur-1), color var(--dur-1), transform var(--dur-1) var(--ease);
 }
 .form-row .add:hover {
   background: var(--accent-tint-2);
 }
 .form-row .add:active {
-  transform: scale(0.9);
+  transform: scale(0.95);
 }
 .form-row .add[aria-pressed='true'] {
   background: var(--accent);
@@ -149,7 +149,7 @@
   border-radius: var(--r-md);
   background: var(--surface-2);
   box-shadow: inset 0 0 0 0.5px var(--separator);
-  animation: pop-in var(--dur-3) var(--ease);
+  animation: pop-in var(--dur-2) var(--ease);
 }
 .packet-list .num {
   display: grid;
@@ -236,7 +236,7 @@
 .hl-need {
   background: var(--hl-need);
   box-shadow: inset 0 0 0 1.25px var(--hl-need-line);
-  animation: need-pulse 2.4s var(--ease-in-out) infinite;
+  animation: need-pulse 2.4s var(--ease-in-out) 2;
 }
 .hl-edit {
   background: var(--hl-edit);
@@ -684,4 +684,19 @@ details .disclosure {
 }
 details[open] .disclosure {
   transform: rotate(90deg);
+}
+@supports (interpolate-size: allow-keywords) {
+  details {
+    interpolate-size: allow-keywords;
+  }
+  details::details-content {
+    block-size: 0;
+    overflow-y: clip;
+    opacity: 0;
+    transition: block-size var(--dur-2) var(--ease), opacity var(--dur-2) var(--ease), content-visibility var(--dur-2) allow-discrete;
+  }
+  details[open]::details-content {
+    block-size: auto;
+    opacity: 1;
+  }
 }

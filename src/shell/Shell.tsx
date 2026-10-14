@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { FoliumMark } from '../brand/FoliumMark';
 import { useServices } from '../services';
@@ -190,15 +190,10 @@ export function Shell({ children }: { children: ReactNode }) {
     document.querySelector('.scroll')?.scrollTo({ top: 0 });
   }, [location.pathname]);
 
-  const scrim = useMemo(
-    () => sidebarOpen && <div onClick={() => setSidebar(false)} style={{ position: 'fixed', inset: 0, zIndex: 55, background: 'rgba(0,0,0,.25)' }} aria-hidden="true" />,
-    [sidebarOpen, setSidebar],
-  );
-
   return (
     <div className="app" data-sidebar={sidebarOpen ? 'open' : undefined}>
       <Sidebar />
-      {scrim}
+      <div className="scrim" onClick={() => setSidebar(false)} aria-hidden="true" />
       <div className="main">
         <ConnectionBanner />
         <RestoreBanner />

@@ -1,6 +1,6 @@
 # 001 — Stop reduced-motion from strobing infinite animations
 
-- **Status**: TODO
+- **Status**: DONE
 - **Commit**: 2606b69
 - **Severity**: HIGH
 - **Category**: Accessibility

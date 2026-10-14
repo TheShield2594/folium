@@ -1,6 +1,6 @@
 # 007 — Give dialogs a short exit
 
-- **Status**: TODO
+- **Status**: DONE
 - **Commit**: 2606b69
 - **Severity**: LOW
 - **Category**: Missed exit

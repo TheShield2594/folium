@@ -1,6 +1,6 @@
 # 012 — Expand disclosure content smoothly
 
-- **Status**: TODO
+- **Status**: DONE
 - **Commit**: 2606b69
 - **Severity**: LOW (missed opportunity)
 - **Category**: Missed opportunities

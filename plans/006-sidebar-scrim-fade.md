@@ -1,6 +1,6 @@
 # 006 — Fade the compact sidebar's scrim with the sidebar
 
-- **Status**: TODO
+- **Status**: DONE
 - **Commit**: 2606b69
 - **Severity**: MEDIUM
 - **Category**: Cohesion

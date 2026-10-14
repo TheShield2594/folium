@@ -1,6 +1,6 @@
 # 003 — Scale menus from their trigger, not their centre
 
-- **Status**: TODO
+- **Status**: DONE
 - **Commit**: 2606b69
 - **Severity**: MEDIUM
 - **Category**: Physicality & origin

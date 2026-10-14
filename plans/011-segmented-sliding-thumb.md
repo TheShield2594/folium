@@ -1,6 +1,6 @@
 # 011 — Slide the segmented control's selection
 
-- **Status**: TODO
+- **Status**: DONE
 - **Commit**: 2606b69
 - **Severity**: LOW (missed opportunity)
 - **Category**: Missed opportunities

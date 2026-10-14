@@ -1,6 +1,6 @@
 # 008 — Soften the add button's press
 
-- **Status**: TODO
+- **Status**: DONE
 - **Commit**: 2606b69
 - **Severity**: LOW
 - **Category**: Physicality

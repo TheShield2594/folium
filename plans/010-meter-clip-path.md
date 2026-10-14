@@ -1,6 +1,6 @@
 # 010 — Animate the meter without layout
 
-- **Status**: TODO
+- **Status**: DONE
 - **Commit**: 2606b69
 - **Severity**: LOW
 - **Category**: Performance
