@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useServices } from '../../services';
+import { canShareWith } from '../../domain/policy';
 import { retentionDays } from '../../domain/requests';
 import { saveDraft, type SendSetup } from '../../state/actions';
 import { useActingFor, useApp } from '../../state/store';
@@ -8,8 +9,9 @@ import { usePacketView } from './usePacket';
 
 /**
  * Share the packet in progress with colleagues: it's saved as a draft they can open from
- * "Drafts & shared", with every value entered so far. Folium lists people in your groups
- * first; anyone with Folium can be added.
+ * "Drafts & shared", with every value entered so far. Who can be added follows the firm's
+ * sharing policy (`canShareWith`): people in your groups, or anyone with Folium. People in
+ * your groups are listed first.
  */
 export function ShareSheet({ onClose, sendSetup }: { onClose: () => void; sendSetup?: SendSetup }) {
   const users = useApp((s) => s.users);
@@ -28,8 +30,10 @@ export function ShareSheet({ onClose, sendSetup }: { onClose: () => void; sendSe
   const [busy, setBusy] = useState(false);
 
   const myGroupIds = new Set(groups.filter((g) => g.memberIds.includes(me?.systemuserid ?? '')).map((g) => g.id));
+  const policy = useApp((s) => s.policy);
+  // Who the firm's sharing policy allows, plus anyone already on the draft so they can be taken off.
   const people = users
-    .filter((u) => u.systemuserid !== me?.systemuserid)
+    .filter((u) => !!me && (canShareWith(me, u, groups, policy) || (packet.sharedWith.includes(u.systemuserid) && u.systemuserid !== me.systemuserid)))
     .filter((u) => !q || u.fullname.toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => Number(b.groupIds.some((g) => myGroupIds.has(g))) - Number(a.groupIds.some((g) => myGroupIds.has(g))) || a.fullname.localeCompare(b.fullname));
 
@@ -39,7 +43,7 @@ export function ShareSheet({ onClose, sendSetup }: { onClose: () => void; sendSe
     try {
       const next = { ...packet, sharedWith: picked };
       const existing = packet.requestId ? requests.find((r) => r.id === packet.requestId) : undefined;
-      const saved = await saveDraft({ services, packet: next, fills: view.fills, contactId, me, owner, existing, sendSetup, retentionDays: retentionDays(useApp.getState().firm) });
+      const saved = await saveDraft({ services, packet: next, fills: view.fills, contactId, me, owner, existing, sendSetup, retentionDays: retentionDays(useApp.getState().policy) });
       setPacket({ sharedWith: picked, requestId: saved.id, attachments: saved.attachments, snapshot: saved.prefillSnapshot, formsUpdated: undefined, dirty: false });
       await refreshRequests();
       const names = users.filter((u) => picked.includes(u.systemuserid)).map((u) => u.fullname.split(' ')[0]);
@@ -67,7 +71,10 @@ export function ShareSheet({ onClose, sendSetup }: { onClose: () => void; sendSe
       }
     >
       <div className="stack-4">
-        <p className="t-callout c2">They’ll find it in Drafts & shared with everything filled in so far, and can review, change or send it.</p>
+        <p className="t-callout c2">
+          They’ll find it in Drafts & shared with everything filled in so far, and can review, change or send it.
+          {policy.sharing === 'groups' ? ' You can share with people in your groups.' : ''}
+        </p>
         <SearchField value={q} onChange={setQ} placeholder="Search people" label="Search people" />
         <div className="list">
           {people.map((u) => (
@@ -87,6 +94,7 @@ export function ShareSheet({ onClose, sendSetup }: { onClose: () => void; sendSe
               </span>
             </label>
           ))}
+          {people.length === 0 && <div className="list-row t-callout c3">{q ? 'Nobody matches.' : 'Nobody in your groups uses Folium yet.'}</div>}
         </div>
       </div>
     </Sheet>

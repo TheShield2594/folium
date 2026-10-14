@@ -39,9 +39,12 @@ Later: `ev_onbasehandle` (phase 2).
 
 `ev_name`, `ev_region`, `ev_payload` (`UserGroup`: members, source/category limits).
 
-## ev_foliumsetting — single row
+## ev_foliumsetting — one row per kind of setting
 
-`ev_name` = "Firm", `ev_payload` (`FirmProfile`): firm data for `firm.*` fields, the envelope disclosure, and firm-wide settings: `draftRetentionDays` (90 default, 60, 30, 10, 7 or 0), `sending` (`defaultAnyOrder`, `subjectTemplate`, `messageTemplate`, `lockMessage`, `maxAttachments`, `maxAttachmentsMB`), `blockFillableWhenIncomplete`, `idleAutoSave`. Changing them needs no release. (#28 may move the firm-wide policy settings into their own "Policy" row.)
+Folium finds each row by `ev_name`; changing them needs no release, and Dataverse auditing on the table records who changed what.
+
+- `ev_name` = "Firm", `ev_payload` (`FirmProfile`): firm data for `firm.*` fields, the envelope disclosure, Send screen defaults (`sending`: `defaultAnyOrder`, `subjectTemplate`, `messageTemplate`), `blockFillableWhenIncomplete`, `idleAutoSave`. Administration › Firm profile. (#26 turns this into one row per Everence entity.)
+- `ev_name` = "Policy", `ev_payload` (`FirmPolicy`): firm-wide rules shared by every firm profile: `sharing` (`off` · `groups` · `anyone`, default `groups`), `repDataVisibility` (`assistants` · `groupMembers`, default `assistants`), `pdfDownload` (`all` · `signedOnly` · `none`, default `all`), `draftRetentionDays` (90 default, 60, 30, 10, 7 or 0), `lockMessage`, `maxAttachments`, `maxAttachmentsMB`. Administration › Settings. A missing row means every default.
 
 ## ev_formrequest
 

@@ -57,7 +57,7 @@ Import `connectors/folium-docusign.swagger.json` as a custom connector (Power Ap
 4. In DocuSign Admin › Identity Verification, note the workflow IDs for **SMS**, **Phone authentication** and **ID Check (KBA)** and put them in `DOCUSIGN.idv` in `config.ts`. A method whose ID is blank can't be sent (Folium says so instead of sending with weaker verification).
 5. In-session signing needs embedded signing on the DocuSign plan. DocuSign sends the signer back to Folium's `#/signing-return` route with `event=…`; that URL is built from where the app runs, so check it once the hosting decision (#3) is made.
 6. Optional: set `DOCUSIGN.consentUrl` to the DocuSign consent link for the Folium app, so a `consent_required` answer offers it to the advisor instead of a generic error.
-7. Size limits: Folium caps supporting documents at 10 per envelope and 30 MB in total by default (Administration › Firm profile › Sending), and shows the envelope's size on the Send screen. The bytes are base64-encoded into one `CreateEnvelope` request, about a third larger than the files. Before relying on 30 MB, confirm DocuSign's per-document and per-envelope limits and the custom connector's request size limit for Everence's plan, and lower the firm limit if either is smaller.
+7. Size limits: Folium caps supporting documents at 10 per envelope and 30 MB in total by default (Administration › Settings › Envelopes), and shows the envelope's size on the Send screen. The bytes are base64-encoded into one `CreateEnvelope` request, about a third larger than the files. Before relying on 30 MB, confirm DocuSign's per-document and per-envelope limits and the custom connector's request size limit for Everence's plan, and lower the firm limit if either is smaller.
 8. One DocuSign account. Folium uses a single connection (`CONNECTORS.docuSign`), whose account ID is fixed in the connector. If Everence ever needs a second account (Laser App lets a user pick between two), add a second connection and choose it by group behind the same `SigningProvider`; no screen changes are needed. Ask whether anyone needs one before building it.
 
 Access codes need no setup. Folium sends the code with the envelope and saves only that one was set (`accessCodeSet`), never the code.
@@ -78,7 +78,7 @@ Add the flow's URL as a Connect configuration in DocuSign Admin. Until it exists
 
 ## 5a. Draft retention (clean-up flow)
 
-Drafts hold SSNs, account numbers and beneficiary details, so Folium deletes unsent drafts a set time after their last save (Administration › Firm profile › Draft retention: 90 days by default, or 60, 30, 10, 7, or 0 for no drafts at all). Every save restarts the clock, and Folium writes the date to `ev_expireson`. Ask Compliance for the period, and whether 0 should be allowed.
+Drafts hold SSNs, account numbers and beneficiary details, so Folium deletes unsent drafts a set time after their last save (Administration › Settings › Draft retention: 90 days by default, or 60, 30, 10, 7, or 0 for no drafts at all). Every save restarts the clock, and Folium writes the date to `ev_expireson`. Ask Compliance for the period, and whether 0 should be allowed.
 
 Create a scheduled Power Automate flow, run daily as a service account with delete rights on `ev_signaturerequest` and the CRM SharePoint site (Users don't have them; see #1):
 
@@ -104,6 +104,16 @@ Spike 1 decides which of these you use:
 - **Standalone:** a ribbon-free *Forms* button or link on the Contact form that opens the play URL with `contactId`.
 - **Fallback:** a custom page or PCF control hosting the same bundle.
 
+## 6a. Firm policy and privacy
+
+Administration › Settings holds the firm-wide rules (the "Policy" row in `ev_foliumsetting`): who can share drafts (off, within groups, anyone), whether advisors can work as another advisor in their groups (rep data), which PDFs can leave Folium (all, signed envelopes only, none), draft retention and envelope limits. Ask Compliance for the `pdfDownload` default and whether sharing with "anyone" should be offered at all. Everence's Laser App setup matches the defaults: sharing within groups, rep data for assistants only, downloads allowed.
+
+The screens apply these rules straight away. Dataverse enforces them with #1: sharing through `GrantAccess` only to members of the owner's group teams, and profile rep fields readable through group teams rather than by every user. Until then every profile is loaded into the browser at sign-in.
+
+Turning sharing off doesn't take back drafts already shared: they stay with those people until they're sent, deleted or expire under retention.
+
+**Location data is not collected.** Laser App can collect end-user location (never, opt-in or opt-out; Everence uses never). Folium has no such setting and doesn't ask the browser for location anywhere: nothing in the forms workflow needs it. Note this for the privacy review.
+
 ## 7. Build and publish
 
 ```bash
@@ -111,7 +121,7 @@ npm run build
 pac code push
 ```
 
-Share the app with the Folium security group. Admins then: set the Firm profile, create groups, give each person a role, and map the first templates (Template library › New from Marketing).
+Share the app with the Folium security group. Admins then: set the Firm profile and Settings (sharing, downloads, retention), create groups, give each person a role, and map the first templates (Template library › New from Marketing).
 
 ## Fonts
 

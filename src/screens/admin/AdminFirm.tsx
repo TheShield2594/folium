@@ -1,6 +1,4 @@
 import { useEffect, useState } from 'react';
-import { DEFAULT_ATTACHMENT_LIMITS } from '../../domain/checks';
-import { RETENTION_OPTIONS, retentionDays } from '../../domain/requests';
 import type { FirmProfile, SendingDefaults } from '../../domain/types';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
@@ -37,7 +35,6 @@ export function AdminFirm() {
   const sending = f.sending ?? {};
   /** Set one Send screen setting; an empty value goes back to the default. */
   const setSending = (patch: Partial<SendingDefaults>) => setF({ ...f, sending: { ...sending, ...patch } });
-  const keep = retentionDays(f);
 
   return (
     <>
@@ -114,22 +111,6 @@ export function AdminFirm() {
             </section>
           )}
 
-          <section className="card card-pad stack-3" aria-labelledby="ret-h">
-            <h2 id="ret-h" className="t-title3">Draft retention</h2>
-            <p className="t-footnote c3">
-              Drafts hold client SSNs and account numbers. Folium deletes an unsent draft, and its PDFs in SharePoint, this long after it was last saved. Opening and saving a draft starts the clock again. Packets printed to sign in person and sent requests aren’t affected.
-            </p>
-            <Field label="Keep unsent drafts for" htmlFor="f-ret" help={keep === 0 ? 'Save draft and Share are hidden. Send and “sign in person” still work.' : 'Shortening it applies from each draft’s next save.'}>
-              <Select id="f-ret" value={String(keep)} onChange={(e) => setF({ ...f, draftRetentionDays: Number(e.target.value) })}>
-                {RETENTION_OPTIONS.map((d) => (
-                  <option key={d} value={d}>
-                    {d === 0 ? 'Don’t keep drafts' : `${d} days${d === 90 ? ' (default)' : ''}`}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          </section>
-
           <section className="card card-pad stack-4" aria-labelledby="send-h">
             <div>
               <h2 id="send-h" className="t-title3">Sending</h2>
@@ -141,17 +122,9 @@ export function AdminFirm() {
             <Field label="Email subject" htmlFor="f-subj" help="Blank: “Forms to sign: …”. Cut to 100 characters.">
               <TextInput id="f-subj" value={sending.subjectTemplate ?? ''} placeholder="Forms to sign: {forms}" onChange={(e) => setSending({ subjectTemplate: e.target.value || undefined })} />
             </Field>
-            <Field label="Email note" htmlFor="f-msg" help="Blank: Folium’s standard note with the advisor’s sign-off. The disclosure above is always added.">
+            <Field label="Email note" htmlFor="f-msg" help="Blank: Folium’s standard note with the advisor’s sign-off. The disclosure above is always added. Administration › Settings can lock it.">
               <TextArea id="f-msg" rows={6} value={sending.messageTemplate ?? ''} placeholder={'Hi {client.firstname},\n\nHere are the forms we talked about…\n\n{advisor.signature}'} onChange={(e) => setSending({ messageTemplate: e.target.value || undefined })} />
             </Field>
-            <div className="grid-2">
-              <Field label="Most supporting documents" htmlFor="f-maxn">
-                <TextInput id="f-maxn" type="number" min={1} max={50} value={sending.maxAttachments ?? ''} placeholder={String(DEFAULT_ATTACHMENT_LIMITS.maxFiles)} onChange={(e) => setSending({ maxAttachments: Number(e.target.value) || undefined })} />
-              </Field>
-              <Field label="Most MB of supporting documents" htmlFor="f-maxmb" help="Check DocuSign’s and the connector’s request limits before raising it.">
-                <TextInput id="f-maxmb" type="number" min={1} max={100} value={sending.maxAttachmentsMB ?? ''} placeholder={String(DEFAULT_ATTACHMENT_LIMITS.maxMB)} onChange={(e) => setSending({ maxAttachmentsMB: Number(e.target.value) || undefined })} />
-              </Field>
-            </div>
           </section>
           <div className="list">
             <SwitchRow
@@ -159,12 +132,6 @@ export function AdminFirm() {
               detail="Off: DocuSign routes envelopes in the order on the Send screen. Advisors can set their own default in Settings and change it on each envelope."
               checked={!!sending.defaultAnyOrder}
               onChange={(v) => setSending({ defaultAnyOrder: v || undefined })}
-            />
-            <SwitchRow
-              label="Lock the email note"
-              detail="Users and Assistants send the note above as written. Admins can still edit it, and the disclosure is still added."
-              checked={!!sending.lockMessage}
-              onChange={(v) => setSending({ lockMessage: v || undefined })}
             />
           </div>
         </div>

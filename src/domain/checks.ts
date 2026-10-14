@@ -300,9 +300,9 @@ export const DEFAULT_ATTACHMENT_LIMITS: AttachmentLimits = { maxFiles: 10, maxMB
 
 export const MB = 1024 * 1024;
 
-/** The firm's limits over the defaults. */
-export function attachmentLimits(sending?: { maxAttachments?: number; maxAttachmentsMB?: number }): AttachmentLimits {
-  return { maxFiles: sending?.maxAttachments || DEFAULT_ATTACHMENT_LIMITS.maxFiles, maxMB: sending?.maxAttachmentsMB || DEFAULT_ATTACHMENT_LIMITS.maxMB };
+/** The firm policy's limits over the defaults. */
+export function attachmentLimits(policy?: { maxAttachments?: number; maxAttachmentsMB?: number }): AttachmentLimits {
+  return { maxFiles: policy?.maxAttachments || DEFAULT_ATTACHMENT_LIMITS.maxFiles, maxMB: policy?.maxAttachmentsMB || DEFAULT_ATTACHMENT_LIMITS.maxMB };
 }
 
 /** Total size of a list of attachments, in MB. */

@@ -1,5 +1,6 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
-import type { ClientRecord, FirmProfile, FormTemplate, SavedPacket, SignatureRequest, UserGroup, UserProfile } from '../../domain/types';
+import type { ClientRecord, FirmPolicy, FirmProfile, FormTemplate, SavedPacket, SignatureRequest, UserGroup, UserProfile } from '../../domain/types';
+import { withPolicyDefaults } from '../../domain/policy';
 import { mapDocuSignStatus } from '../../domain/requests';
 import { generateTemplatePdf } from '../../pdf/generate';
 import type {
@@ -39,6 +40,8 @@ interface DemoState {
   currentUserId: string;
   /** Simulated DocuSign envelopes: created (a draft) and, once released, when they went out. */
   envelopes?: Record<string, DemoEnvelope>;
+  /** Missing in demo data saved before policies existed: defaults apply. */
+  policy?: FirmPolicy;
 }
 
 function load(): DemoState {
@@ -135,6 +138,14 @@ const directory: DirectoryService = {
     state.firm = clone(f);
     persist();
     return clone(f);
+  },
+  async getPolicy() {
+    return withPolicyDefaults(clone(state.policy));
+  },
+  async savePolicy(p) {
+    state.policy = clone(p);
+    persist();
+    return clone(p);
   },
 };
 

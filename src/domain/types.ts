@@ -463,16 +463,11 @@ export interface FirmProfile {
   idleAutoSave?: boolean;
   /** Minutes idle before the 2-minute countdown to the auto-save starts. Default 25. */
   idleAutoSaveMinutes?: number;
-  /**
-   * Days an unsent draft is kept after its last save: 90 (default), 60, 30, 10, 7 or 0.
-   * 0 turns off saving and sharing drafts.
-   */
-  draftRetentionDays?: number;
-  /** Defaults and limits for the Send screen. */
+  /** Send screen defaults: what a new envelope starts with. The rules are in `FirmPolicy`. */
   sending?: SendingDefaults;
 }
 
-/** Firm-wide Send screen settings (Administration › Firm profile). */
+/** Send screen defaults for the firm (Administration › Firm profile). */
 export interface SendingDefaults {
   /** New envelopes start with "Signers can sign in any order" on. A user's own default wins. */
   defaultAnyOrder?: boolean;
@@ -480,7 +475,36 @@ export interface SendingDefaults {
   subjectTemplate?: string;
   /** Email note with tokens such as `{client.firstname}`, `{forms}` and `{advisor.signature}`. */
   messageTemplate?: string;
-  /** Users and Assistants can't edit the note; Admins can. The disclosure is still added. */
+}
+
+/**
+ * - `off`: nobody shares drafts. `groups`: only with people in a group you're in.
+ * - `anyone`: with anyone who uses Folium.
+ */
+export type SharingPolicy = 'off' | 'groups' | 'anyone';
+/**
+ * Whose rep data (rep code, phone, branch) can prefill a form besides your own.
+ * - `assistants`: only Assistants work as the Users in their groups.
+ * - `groupMembers`: Users can also work as another User in their groups.
+ */
+export type RepDataVisibility = 'assistants' | 'groupMembers';
+/** `signedOnly`: only the completed envelope; `none`: e-signature is the only way out. */
+export type PdfDownloadPolicy = 'all' | 'signedOnly' | 'none';
+
+/**
+ * Firm-wide rules (Administration › Settings), kept in their own `ev_foliumsetting` row
+ * ("Policy") so several firm profiles (#26) share one set.
+ */
+export interface FirmPolicy {
+  sharing: SharingPolicy;
+  repDataVisibility: RepDataVisibility;
+  pdfDownload: PdfDownloadPolicy;
+  /**
+   * Days an unsent draft is kept after its last save: 90 (default), 60, 30, 10, 7 or 0.
+   * 0 turns off saving and sharing drafts.
+   */
+  draftRetentionDays?: number;
+  /** Users and Assistants can't edit the envelope note; Admins can. The disclosure is still added. */
   lockMessage?: boolean;
   /** Most supporting documents on one envelope. Default 10. */
   maxAttachments?: number;

@@ -3,6 +3,7 @@ import type {
   Attachment,
   ClientRecord,
   Contact,
+  FirmPolicy,
   FirmProfile,
   FormTemplate,
   Placement,
@@ -158,6 +159,9 @@ export interface DirectoryService {
   removeGroup(id: string): Promise<void>;
   getFirm(): Promise<FirmProfile>;
   saveFirm(f: FirmProfile): Promise<FirmProfile>;
+  /** Firm-wide rules, with defaults filled in when nothing is saved yet. */
+  getPolicy(): Promise<FirmPolicy>;
+  savePolicy(p: FirmPolicy): Promise<FirmPolicy>;
 }
 
 export interface Services {

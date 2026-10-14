@@ -11,7 +11,7 @@ const MAX = 10 * 1024 * 1024;
 export function AttachmentsCard() {
   const packet = useApp((s) => s.packet);
   const setPacket = useApp((s) => s.setPacket);
-  const limits = attachmentLimits(useApp((s) => s.firm)?.sending);
+  const limits = attachmentLimits(useApp((s) => s.policy));
   const services = useServices();
   const input = useRef<HTMLInputElement>(null);
   const totalMB = attachmentsMB(packet.attachments);

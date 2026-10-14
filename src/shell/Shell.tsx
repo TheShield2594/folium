@@ -36,7 +36,10 @@ export function Sidebar() {
   const waiting = requests.filter((r) => r.status === 'Sent' || r.status === 'Viewed').length;
   const toFile = requests.filter((r) => r.status === 'Signed' && !r.uploadedToOnBase).length;
   const drafts = requests.filter((r) => r.status === 'Drafted').length;
-  const canAct = me ? actableUsers(me, users, groups) : [];
+  const policy = useApp((s) => s.policy);
+  const canAct = me ? actableUsers(me, users, groups, policy) : [];
+  // Assistants always pick a User; Users do when the firm lets them work as a colleague in their groups.
+  const picker = me?.role === 'Assistant' || canAct.length > 1;
 
   return (
     <nav className="sidebar" aria-label="Folium">
@@ -51,7 +54,7 @@ export function Sidebar() {
       </div>
 
       <div className="sidebar-scroll">
-        {me?.role === 'Assistant' && (
+        {picker && (
           <div className="field" style={{ marginBottom: 12, padding: '0 2px' }}>
             <label htmlFor="acting-for" className="t-caption c3" style={{ paddingLeft: 8 }}>
               Working for
@@ -59,7 +62,7 @@ export function Sidebar() {
             <Select id="acting-for" value={actingFor?.systemuserid} onChange={(e) => setActingFor(e.target.value)}>
               {canAct.map((u) => (
                 <option key={u.systemuserid} value={u.systemuserid}>
-                  {u.fullname}
+                  {u.systemuserid === me?.systemuserid ? `${u.fullname} (you)` : u.fullname}
                 </option>
               ))}
             </Select>
@@ -120,6 +123,9 @@ export function Sidebar() {
             </NavItem>
             <NavItem to="/admin/firm" icon="building">
               Firm profile
+            </NavItem>
+            <NavItem to="/admin/settings" icon="lock">
+              Settings
             </NavItem>
           </div>
         )}

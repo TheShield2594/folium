@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { createHashRouter, Navigate, Outlet, RouterProvider } from 'react-router-dom';
 import { FoliumAppIcon } from './brand/FoliumMark';
 import { AdminFirm } from './screens/admin/AdminFirm';
+import { AdminSettings } from './screens/admin/AdminSettings';
 import { AdminPeople } from './screens/admin/AdminPeople';
 import { AdminTemplates } from './screens/admin/AdminTemplates';
 import { TemplateEditor } from './screens/admin/TemplateEditor';
@@ -96,6 +97,7 @@ const router = createHashRouter([
       { path: '/admin/templates/:id', element: <TemplateEditor /> },
       { path: '/admin/people', element: <AdminPeople /> },
       { path: '/admin/firm', element: <AdminFirm /> },
+      { path: '/admin/settings', element: <AdminSettings /> },
       { path: '*', element: <Navigate to="/" replace /> },
     ],
   },

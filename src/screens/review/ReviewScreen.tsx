@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { FieldState } from '../../domain/prefill';
 import { defaultDraftTitle, upgradePacketItems, type UpgradeReport } from '../../domain/drafts';
+import { canDownload, sharingAllowed } from '../../domain/policy';
 import { draftsAllowed, retentionDays } from '../../domain/requests';
 import { blockKey, choiceOptions, copyScope, fillBlockFromPerson, inputsNeeded, personBlocks, relatedPeople, snapshotDiff } from '../../domain/prefill';
 import type { SignatureRequest } from '../../domain/types';
@@ -61,7 +62,9 @@ export function ReviewScreen() {
   /** The changes "Update" would make, shown before they're made. */
   const [upgrade, setUpgrade] = useState<UpgradeReport>();
   // With retention set to 0 the firm keeps no drafts: no Save draft, no Share.
-  const canSaveDrafts = draftsAllowed(firm);
+  const policy = useApp((s) => s.policy);
+  const canSaveDrafts = draftsAllowed(policy);
+  const canShare = sharingAllowed(policy);
   /** Set when an output was refused, to list what's blocking it. */
   const [blocked, setBlocked] = useState<{ title: string; blockers: CheckResult[] }>();
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -169,7 +172,7 @@ export function ReviewScreen() {
         owner,
         existing,
         writePdfs: true,
-        retentionDays: retentionDays(firm),
+        retentionDays: retentionDays(policy),
         // Keep the row's identity even if writing the PDFs fails, so a retry updates it.
         onSaved: (row) => setPacket({ requestId: row.id, title: row.title, attachments: row.attachments, snapshot: row.prefillSnapshot, formsUpdated: undefined, dirty: false }),
       });
@@ -182,7 +185,7 @@ export function ReviewScreen() {
   }
 
   async function download(mode: 'fillable' | 'flatten' | 'print') {
-    if (!view) return;
+    if (!view || !canDownload(mode, policy)) return;
     // Anything a client could wet-sign needs every blocking check cleared first.
     const gate = outputGate(view.checks, mode, { blockFillable: firm?.blockFillableWhenIncomplete });
     if (!gate.allowed) {
@@ -255,37 +258,44 @@ export function ReviewScreen() {
     );
   }
 
+  // The firm decides which PDFs can leave Folium (`pdfDownload`); e-signature always can.
+  const downloads = [
+    ...(canDownload('fillable', policy) ? [{ label: sum?.blocking ? 'Fillable PDF (marked draft)' : 'Fillable PDF (editable)', icon: 'doc' as const, onSelect: () => download('fillable') }] : []),
+    ...(canDownload('flatten', policy)
+      ? [{ label: sum?.blocking ? `Flattened PDF to sign in person (${sum.blocking} to fix)` : 'Flattened PDF to sign in person', icon: 'lock' as const, onSelect: () => download('flatten') }]
+      : []),
+    ...(canDownload('print', policy) ? [{ label: sum?.blocking ? `Print… (${sum.blocking} to fix)` : 'Print…', icon: 'printer' as const, onSelect: () => download('print') }] : []),
+  ];
+
   const width = zoom === 'fit' ? Math.min(Math.max(canvasW - 48, 320), 860) : 980;
 
   return (
     <>
       <Toolbar title="Prefill & review" subtitle={`${client.contact.fullname} · ${view.fills.length} ${view.fills.length === 1 ? 'form' : 'forms'}`} back={{ label: 'Forms', to: '/' }}>
         <Steps current={1} />
-        <Menu
-          trigger={(p) => (
-            <Button variant="gray" icon="download" busy={busy === 'download'} {...p}>
-              Download
-            </Button>
-          )}
-          items={[
-            { label: sum?.blocking ? 'Fillable PDF (marked draft)' : 'Fillable PDF (editable)', icon: 'doc', onSelect: () => download('fillable') },
-            { label: sum?.blocking ? `Flattened PDF to sign in person (${sum.blocking} to fix)` : 'Flattened PDF to sign in person', icon: 'lock', onSelect: () => download('flatten') },
-            { label: sum?.blocking ? `Print… (${sum.blocking} to fix)` : 'Print…', icon: 'printer', onSelect: () => download('print') },
-          ]}
-        />
+        {downloads.length > 0 && (
+          <Menu
+            trigger={(p) => (
+              <Button variant="gray" icon="download" busy={busy === 'download'} {...p}>
+                Download
+              </Button>
+            )}
+            items={downloads}
+          />
+        )}
+        {(canSaveDrafts || canShare) && (
+          <Menu
+            trigger={(p) => <IconButton icon="ellipsis" label="More" {...p} />}
+            items={[
+              ...(canSaveDrafts ? [{ label: 'Save draft to SharePoint', icon: 'folder' as const, onSelect: onSaveDraft }] : []),
+              ...(canShare ? [{ label: 'Share with a colleague…', icon: 'share' as const, onSelect: () => setSharing(true) }] : []),
+            ]}
+          />
+        )}
         {canSaveDrafts && (
-          <>
-            <Menu
-              trigger={(p) => <IconButton icon="ellipsis" label="More" {...p} />}
-              items={[
-                { label: 'Save draft to SharePoint', icon: 'folder', onSelect: onSaveDraft },
-                { label: 'Share with a colleague…', icon: 'share', onSelect: () => setSharing(true) },
-              ]}
-            />
-            <Button variant="gray" icon="folder" busy={busy === 'draft'} onClick={onSaveDraft} className="hide-narrow">
-              Save draft
-            </Button>
-          </>
+          <Button variant="gray" icon="folder" busy={busy === 'draft'} onClick={onSaveDraft} className="hide-narrow">
+            Save draft
+          </Button>
         )}
         <Button variant="filled" iconAfter="chevronRight" onClick={() => navigate('/send')}>
           Signers
@@ -534,7 +544,7 @@ export function ReviewScreen() {
           )}
         </aside>
       </div>
-      {sharing && <ShareSheet onClose={() => setSharing(false)} />}
+      {sharing && canShare && <ShareSheet onClose={() => setSharing(false)} />}
       {blocked && <BlockersSheet title={blocked.title} blockers={blocked.blockers} fills={view.fills} onJump={(c) => focusKey(c.fieldKey, c.itemId ?? c.templateId)} onClose={() => setBlocked(undefined)} />}
       {upgrade && (
         <UpgradeSheet

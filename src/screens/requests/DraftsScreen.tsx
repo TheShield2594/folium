@@ -21,7 +21,7 @@ export function DraftsScreen() {
   const actingForId = useApp((s) => s.actingForId);
   const requests = useApp((s) => s.requests);
   const templates = useApp((s) => s.templates);
-  const keepDays = retentionDays(useApp((s) => s.firm));
+  const keepDays = retentionDays(useApp((s) => s.policy));
   const [tab, setTab] = useState<Tab>('mine');
   const [list, setList] = useState<SignatureRequest[]>();
   const [names, setNames] = useState<Record<string, string>>({});

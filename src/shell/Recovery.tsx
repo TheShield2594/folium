@@ -133,7 +133,7 @@ function useSaveOpenPacket() {
       existing,
       writePdfs: true,
       auditNote,
-      retentionDays: retentionDays(useApp.getState().firm),
+      retentionDays: retentionDays(useApp.getState().policy),
       // Keep the row's identity even if the PDFs fail, so the next save updates it.
       onSaved: (row) => setPacket({ requestId: row.id, title: row.title, attachments: row.attachments, snapshot: row.prefillSnapshot, formsUpdated: undefined, dirty: false }),
     });
@@ -153,7 +153,8 @@ export function IdleAutoSave() {
   const firm = useApp((s) => s.firm);
   const dirty = useApp((s) => !!s.packet.dirty && s.packet.items.length > 0 && !s.packet.send);
   // No auto-save when the firm keeps no drafts (retention 0).
-  const enabled = !!firm?.idleAutoSave && draftsAllowed(firm) && dirty;
+  const policy = useApp((s) => s.policy);
+  const enabled = !!firm?.idleAutoSave && draftsAllowed(policy) && dirty;
   const idleMs = (firm?.idleAutoSaveMinutes ?? DEFAULT_IDLE_MINUTES) * 60_000;
   const { save, ready } = useSaveOpenPacket();
   const saveRef = useRef(save);
@@ -228,7 +229,7 @@ export function IdleAutoSave() {
 
 function LeavePacketSheet({ reason, onChoice }: { reason: 'switch' | 'open-draft' | 'navigate'; onChoice: (c: LeaveChoice) => void }) {
   const client = useApp((s) => s.client);
-  const canSave = draftsAllowed(useApp((s) => s.firm));
+  const canSave = draftsAllowed(useApp((s) => s.policy));
   const { save: saveOpen, ready } = useSaveOpenPacket();
   const [busy, setBusy] = useState(false);
 

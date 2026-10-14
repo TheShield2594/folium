@@ -335,3 +335,12 @@ describe('draft retention', () => {
     expect(first.missing).toMatchObject({ formNumber: 'PX-310' });
   });
 });
+
+describe('firm policy (demo)', () => {
+  it('starts from the defaults and round-trips', async () => {
+    const services = createDemoServices();
+    expect(await services.directory.getPolicy()).toEqual({ sharing: 'groups', repDataVisibility: 'assistants', pdfDownload: 'all' });
+    await services.directory.savePolicy({ sharing: 'anyone', repDataVisibility: 'groupMembers', pdfDownload: 'none', draftRetentionDays: 7 });
+    expect(await services.directory.getPolicy()).toEqual({ sharing: 'anyone', repDataVisibility: 'groupMembers', pdfDownload: 'none', draftRetentionDays: 7 });
+  });
+});

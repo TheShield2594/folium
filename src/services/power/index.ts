@@ -1,6 +1,7 @@
 import { getContext } from '@microsoft/power-apps/app';
 import { getClient, type DataClient } from '@microsoft/power-apps/data';
-import type { Account, Connection, Contact, FirmProfile, FormTemplate, SavedPacket, SignatureRequest, TemplateMapping, UserGroup, UserProfile } from '../../domain/types';
+import type { Account, Connection, Contact, FirmPolicy, FirmProfile, FormTemplate, SavedPacket, SignatureRequest, TemplateMapping, UserGroup, UserProfile } from '../../domain/types';
+import { withPolicyDefaults } from '../../domain/policy';
 import { mapDocuSignStatus } from '../../domain/requests';
 import { buildEnvelopeDefinition, ROLE_SEPARATOR } from '../docusign/tabs';
 import { classifyError, FoliumError } from '../errors';
@@ -42,6 +43,24 @@ export function createPowerServices(): Services {
   async function loadProfiles(): Promise<{ row: ProfileRow; profile: UserProfile }[]> {
     const rows = unwrap(await client.retrieveMultipleRecordsAsync<ProfileRow>(DATAVERSE.profile, {}), 'Load users');
     return rows.map((row) => ({ row, profile: payloadRow<UserProfile>(row) }));
+  }
+
+  // `ev_foliumsetting` holds one row per kind of setting, named by `ev_name`: "Firm"
+  // (the firm profile) and "Policy" (firm-wide rules).
+  type SettingRow = { ev_foliumsettingid: string; ev_payload?: string };
+  async function settingRow(name: string, what: string): Promise<SettingRow | undefined> {
+    const rows = unwrap(await client.retrieveMultipleRecordsAsync<SettingRow>(DATAVERSE.settings, { filter: `ev_name eq '${name}'`, top: 1 }), what);
+    return rows[0];
+  }
+  async function readSetting<T>(name: string, what: string): Promise<T | undefined> {
+    const row = await settingRow(name, what);
+    return row ? payloadRow<T>(row) : undefined;
+  }
+  async function writeSetting(name: string, value: unknown, what: string) {
+    const existing = await settingRow(name, what);
+    const row = { ev_name: name, ev_payload: JSON.stringify(value) };
+    if (existing) unwrap(await client.updateRecordAsync(DATAVERSE.settings, existing.ev_foliumsettingid, row), what);
+    else unwrap(await client.createRecordAsync(DATAVERSE.settings, row), what);
   }
 
   const directory: DirectoryService = {
@@ -97,15 +116,18 @@ export function createPowerServices(): Services {
       unwrap(await client.deleteRecordAsync(DATAVERSE.group, id), 'Delete group');
     },
     async getFirm() {
-      const rows = unwrap(await client.retrieveMultipleRecordsAsync<{ ev_payload: string }>(DATAVERSE.settings, { top: 1 }), 'Load firm');
-      return payloadRow<FirmProfile>(rows[0] ?? {});
+      return (await readSetting<FirmProfile>('Firm', 'Load firm')) ?? ({} as FirmProfile);
     },
     async saveFirm(f) {
-      const rows = unwrap(await client.retrieveMultipleRecordsAsync<{ ev_foliumsettingid: string }>(DATAVERSE.settings, { top: 1 }), 'Load firm');
-      const row = { ev_name: 'Firm', ev_payload: JSON.stringify(f) };
-      if (rows[0]) unwrap(await client.updateRecordAsync(DATAVERSE.settings, rows[0].ev_foliumsettingid, row), 'Save firm');
-      else unwrap(await client.createRecordAsync(DATAVERSE.settings, row), 'Create firm');
+      await writeSetting('Firm', f, 'Save firm');
       return f;
+    },
+    async getPolicy() {
+      return withPolicyDefaults(await readSetting<Partial<FirmPolicy>>('Policy', 'Load settings'));
+    },
+    async savePolicy(p) {
+      await writeSetting('Policy', p, 'Save settings');
+      return p;
     },
   };
 

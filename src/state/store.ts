@@ -2,12 +2,14 @@ import { useMemo } from 'react';
 import { create } from 'zustand';
 import { upgradeAuditDetail, upgradePacketItems, type UpgradeReport } from '../domain/drafts';
 import type { ResolveScope } from '../domain/paths';
+import { actableUsers, DEFAULT_POLICY } from '../domain/policy';
 import { carryVariantValues, copyScope, migrateAccountValues, seedCopyValues, type PersonPick } from '../domain/prefill';
 import { currentTemplates, latestLive } from '../domain/revisions';
 import { normalizeState, pickVariant } from '../domain/states';
 import type {
   Attachment,
   ClientRecord,
+  FirmPolicy,
   FirmProfile,
   FormTemplate,
   PacketItem,
@@ -91,7 +93,12 @@ interface AppState {
   users: UserProfile[];
   groups: UserGroup[];
   firm?: FirmProfile;
-  /** The User an Assistant is working for; equals `me` for Users. */
+  /** Firm-wide rules (sharing, rep data, downloads, retention). Defaults until boot loads them. */
+  policy: FirmPolicy;
+  /**
+   * The User whose book and rep data the work is for: the User an Assistant works for,
+   * or (when the policy allows) another User in a User's groups. Usually `me` for Users.
+   */
   actingForId?: string;
 
   templates: FormTemplate[];
@@ -223,6 +230,7 @@ let openSeq = 0;
 
 export const useApp = create<AppState>((set, get) => ({
   ready: false,
+  policy: DEFAULT_POLICY,
   users: [],
   groups: [],
   templates: [],
@@ -240,17 +248,16 @@ export const useApp = create<AppState>((set, get) => ({
     applyTheme(get().theme);
     set({ services });
     try {
-      const [me, users, groups, firm, templates, packets] = await Promise.all([
+      const [me, users, groups, firm, policy, templates, packets] = await Promise.all([
         services.directory.currentUser(),
         services.directory.listUsers(),
         services.directory.listGroups(),
         services.directory.getFirm(),
+        services.directory.getPolicy(),
         services.templates.list(),
         services.packets.list(),
       ]);
-      const savedActing = readLocal<string | undefined>('folium.actingFor', undefined);
-      const actingForId = me.role === 'Assistant' ? (actableUsers(me, users, groups).some((u) => u.systemuserid === savedActing) ? savedActing : actableUsers(me, users, groups)[0]?.systemuserid) : me.systemuserid;
-      set({ me, users, groups, firm, templates, packets, actingForId, ready: true });
+      set({ me, users, groups, firm, policy, templates, packets, actingForId: actingForFor(me, users, groups, policy), ready: true });
       const journal = readJournal(me.systemuserid);
       if (journal && worthKeeping(journal.packet)) set({ pendingRestore: journal });
       const start = contactId ?? readLocal<string | undefined>('folium.lastContact', undefined);
@@ -271,8 +278,10 @@ export const useApp = create<AppState>((set, get) => ({
 
   async reloadDirectory() {
     const s = get().services!;
-    const [me, users, groups, firm] = await Promise.all([s.directory.currentUser(), s.directory.listUsers(), s.directory.listGroups(), s.directory.getFirm()]);
-    set({ me, users, groups, firm });
+    const [me, users, groups, firm, policy] = await Promise.all([s.directory.currentUser(), s.directory.listUsers(), s.directory.listGroups(), s.directory.getFirm(), s.directory.getPolicy()]);
+    // A policy change can take away someone the user was working as.
+    const keep = actableUsers(me, users, groups, policy).some((u) => u.systemuserid === get().actingForId);
+    set({ me, users, groups, firm, policy, ...(keep ? {} : { actingForId: actingForFor(me, users, groups, policy) }) });
   },
 
   setActingFor(userId) {
@@ -547,12 +556,15 @@ export function startJournal(): () => void {
 
 // ------------------------------------------------------------------ selectors
 
-/** Users an Assistant can act for: every User in a group they belong to. */
-export function actableUsers(me: UserProfile, users: UserProfile[], groups: UserGroup[]): UserProfile[] {
-  if (me.role !== 'Assistant') return [me];
-  const mine = groups.filter((g) => g.memberIds.includes(me.systemuserid));
-  const ids = new Set(mine.flatMap((g) => g.memberIds));
-  return users.filter((u) => u.role === 'User' && ids.has(u.systemuserid));
+// Moved to the domain with the firm policy; re-exported for existing callers.
+export { actableUsers } from '../domain/policy';
+
+/** Who to work as after sign-in: the last choice if it's still allowed, else an Assistant's first User, else yourself. */
+function actingForFor(me: UserProfile, users: UserProfile[], groups: UserGroup[], policy: FirmPolicy): string | undefined {
+  const can = actableUsers(me, users, groups, policy);
+  const saved = readLocal<string | undefined>('folium.actingFor', undefined);
+  if (can.some((u) => u.systemuserid === saved)) return saved;
+  return me.role === 'Assistant' ? can[0]?.systemuserid : me.systemuserid;
 }
 
 /** The advisor whose details prefill `rep.*` fields and who owns the work. */

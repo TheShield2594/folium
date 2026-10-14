@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { draftFreshness } from '../../domain/drafts';
+import { canDownload } from '../../domain/policy';
 import { applyEnvelopeStatus, draftExpiryInfo, expiryInfo } from '../../domain/requests';
 import { roleLabel } from '../../domain/signers';
 import type { SignatureRequest } from '../../domain/types';
@@ -61,6 +62,7 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
   const client = useApp((s) => s.client);
   const drafts = useDraftActions();
   const opener = useOpenDraft();
+  const canDownloadSigned = canDownload('signed', useApp((s) => s.policy));
   const [busy, setBusy] = useState<string>();
   const [sheet, setSheet] = useState<'void' | 'correct'>();
   const r = req;
@@ -220,13 +222,17 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
               <>
                 Filed in OnBase by {r.uploadedBy} on {fmtDay(r.uploadedOn)}.
               </>
-            ) : (
+            ) : canDownloadSigned ? (
               <>Download the completed envelope (forms + certificate) and upload it to OnBase.</>
+            ) : (
+              <>Your firm doesn’t allow PDF downloads from Folium. File the completed envelope in OnBase from DocuSign.</>
             )}
           </span>
-          <Button variant={r.uploadedToOnBase ? 'gray' : 'filled'} icon="download" busy={busy === 'dl'} onClick={download}>
-            Download signed PDF
-          </Button>
+          {canDownloadSigned && (
+            <Button variant={r.uploadedToOnBase ? 'gray' : 'filled'} icon="download" busy={busy === 'dl'} onClick={download}>
+              Download signed PDF
+            </Button>
+          )}
           <label className="row t-callout" style={{ minHeight: 44, cursor: 'pointer', fontWeight: 600 }}>
             <input type="checkbox" className="check" checked={r.uploadedToOnBase} disabled={busy === 'onbase'} onChange={(e) => markOnBase(e.target.checked)} />
             Uploaded to OnBase

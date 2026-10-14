@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { attachmentLimits, attachmentsMB, checkAttachments, MB, outputGate, summarize } from '../../domain/checks';
 import { fillSubject, fillTokens, listForms, SUBJECT_MAX } from '../../domain/format';
 import { relatedPeople } from '../../domain/prefill';
-import { draftsAllowed, expiresOnFrom, retentionDays } from '../../domain/requests';
+import { canDownload, sharingAllowed } from '../../domain/policy';
+import { expiresOnFrom, retentionDays } from '../../domain/requests';
 import { accessCodeWarnings, assignSigners, envelopeSigners, generateAccessCode, recordedSigners, roleLabel, rolesForPacket, validateSigners } from '../../domain/signers';
 import type { SignatureRequest, SignerAssignment, VerificationMethod } from '../../domain/types';
 import { useServices } from '../../services';
@@ -29,6 +30,7 @@ export function SendScreen() {
   const clearPacket = useApp((s) => s.clearPacket);
   const me = useApp((s) => s.me);
   const firm = useApp((s) => s.firm);
+  const policy = useApp((s) => s.policy);
   const requests = useApp((s) => s.requests);
   const refreshRequests = useApp((s) => s.refreshRequests);
   const markUsed = useApp((s) => s.markUsed);
@@ -127,13 +129,13 @@ export function SendScreen() {
   // Wet signing needs the same clean bill as DocuSign: no PDF and no request while checks are open.
   const inPersonGate = outputGate(view.checks, 'flatten');
   const tabCount = view.templates.reduce((n, t) => n + t.mapping.placements.filter((p) => ordered.some((s) => s.role === p.role)).length, 0);
-  const limits = attachmentLimits(firm?.sending);
+  const limits = attachmentLimits(policy);
   const attachmentChecks = checkAttachments(packet.attachments, limits);
   const attachedMB = attachmentsMB(packet.attachments);
   const envelopeMB = formBytes === undefined ? undefined : formBytes / MB + attachedMB;
   // Users and Assistants can't edit a locked note; Admins can. The disclosure is still added.
-  const messageLocked = !!firm?.sending?.lockMessage && me?.role !== 'Admin';
-  const canShare = draftsAllowed(firm);
+  const messageLocked = !!policy.lockMessage && me?.role !== 'Admin';
+  const canShare = sharingAllowed(policy);
   const blockers = [
     ...(sum.blocking ? [`${sum.blocking} pre-send ${sum.blocking === 1 ? 'check needs' : 'checks need'} attention`] : []),
     ...attachmentChecks.map((c) => `${c.title}. ${c.detail}`),
@@ -202,7 +204,7 @@ export function SendScreen() {
     }
     setSend({ phase: 'created', envelopeId, at: new Date().toISOString() });
     try {
-      const row = await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing: await currentRow(), sendSetup: sendSetup(), retentionDays: retentionDays(firm) });
+      const row = await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing: await currentRow(), sendSetup: sendSetup(), retentionDays: retentionDays(policy) });
       // Mid-send: retention never deletes it (DocuSign holds the envelope), so no draft expiry.
       const marked = await services.requests.save({ ...row, envelopeId, envelopePhase: 'created', expiresOn: undefined, audit: [...row.audit, audit(me, 'Envelope created in DocuSign', 'Not sent yet')] });
       savedDraft.current = marked;
@@ -248,7 +250,7 @@ export function SendScreen() {
     if (!contactId || !me || !owner || !view) return;
     setBusy('send');
     try {
-      const draft = savedDraft.current ?? (await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing: await currentRow(), retentionDays: retentionDays(firm) }));
+      const draft = savedDraft.current ?? (await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing: await currentRow(), retentionDays: retentionDays(policy) }));
       savedDraft.current = draft;
       setPacket({ requestId: draft.id });
       const sentOn = new Date().toISOString();
@@ -284,12 +286,12 @@ export function SendScreen() {
   }
 
   async function inPerson() {
-    if (!contactId || !me || !owner || !view || !inPersonGate.allowed || sendState) return;
+    if (!contactId || !me || !owner || !view || !inPersonGate.allowed || sendState || !canDownload('inPerson', policy)) return;
     setBusy('print');
     try {
       const bytes = await packetAsOnePdf(services, view.fills, 'flatten');
       downloadBytes(bytes, `${client!.contact.lastname} - sign in person.pdf`);
-      const draft = await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing, sendSetup: sendSetup(), retentionDays: retentionDays(firm) });
+      const draft = await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing, sendSetup: sendSetup(), retentionDays: retentionDays(policy) });
       // A record of a printed packet, not abandoned work: retention doesn't delete it.
       await services.requests.save({ ...draft, inPerson: true, expiresOn: undefined, audit: [...draft.audit, audit(me, 'Downloaded to sign in person')] });
       setPacket({ requestId: draft.id, formsUpdated: undefined, dirty: false });
@@ -537,9 +539,11 @@ export function SendScreen() {
                     Fix in review
                   </Button>
                 )}
-                <Button variant="bordered" block icon="printer" busy={busy === 'print'} disabled={!inPersonGate.allowed || !!sendState} onClick={inPerson}>
-                  Download to sign in person
-                </Button>
+                {canDownload('inPerson', policy) && (
+                  <Button variant="bordered" block icon="printer" busy={busy === 'print'} disabled={!inPersonGate.allowed || !!sendState} onClick={inPerson}>
+                    Download to sign in person
+                  </Button>
+                )}
               </section>
               <section className="banner info" style={{ alignItems: 'flex-start' }}>
                 <Icon name="info" size={18} />
