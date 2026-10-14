@@ -142,6 +142,8 @@ export interface Contact {
   ev_region?: string;
   /** Owning advisor (systemuser). */
   ownerid?: string;
+  /** Choice columns whose stored option Folium couldn't map to a word (column → label and the value Dataverse showed). */
+  unrecognisedChoices?: Record<string, { label: string; value: string }>;
   [key: string]: unknown;
 }
 

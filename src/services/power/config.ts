@@ -38,3 +38,24 @@ export const DOCUSIGN = {
   /** Identity-verification workflow IDs from DocuSign Admin › Identity Verification. */
   idv: { sms: '', kba: '' },
 } as const;
+
+/**
+ * Dataverse choice (option set) columns Folium reads or writes, keyed by table and
+ * column. Dataverse stores option numbers; the domain uses the words on the right,
+ * so conditions like `contact.familystatuscode == married` stay readable. The
+ * numbers are the out-of-box `contact` values. Confirm them against Everence's
+ * environment (Power Apps › Tables › Contact › Columns) and add any other choice
+ * column a template or condition reads here.
+ */
+export const CHOICES: ChoiceMap = {
+  contact: {
+    familystatuscode: { label: 'Marital status', options: { 1: 'single', 2: 'married', 3: 'divorced', 4: 'widowed' } },
+  },
+};
+
+export interface ChoiceColumn {
+  /** Shown to the advisor when a stored option has no mapping. */
+  label: string;
+  options: Record<number, string>;
+}
+export type ChoiceMap = Record<string, Record<string, ChoiceColumn>>;
