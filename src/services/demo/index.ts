@@ -1,5 +1,6 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import type { ClientRecord, FirmProfile, FormTemplate, SavedPacket, SignatureRequest, UserGroup, UserProfile } from '../../domain/types';
+import { mapDocuSignStatus } from '../../domain/requests';
 import { generateTemplatePdf } from '../../pdf/generate';
 import type {
   CrmService,
@@ -374,6 +375,8 @@ const packets: PacketStore = {
   },
 };
 
+const forceExpiry = () => typeof location !== 'undefined' && /[?&]expire=1(&|$)/.test(location.search + location.hash);
+
 /** Simulated DocuSign. Envelopes move Sent → Viewed → Signed over a couple of minutes. */
 const envelopes = () => (state.envelopes ??= {});
 /** When an envelope went out, for envelopes this demo created. */
@@ -404,14 +407,28 @@ const signing: SigningProvider = {
     if (env && !env.sentAt) return { status: 'Drafted', recipients: [] };
     const t = sentAtOf(envelopeId);
     const req = state.requests.find((r) => r.envelopeId === envelopeId);
+    // Like DocuSign, an envelope still open past its expiry comes back voided with an
+    // expiry reason. `?demo=1&expire=1` makes every open envelope lapse now.
+    const expiresOn = req?.expiresOn ?? (t && sentDocs.get(envelopeId)?.expiresInDays ? new Date(t + sentDocs.get(envelopeId)!.expiresInDays! * 86_400_000).toISOString() : undefined);
+    const open = !req || req.status === 'Sent' || req.status === 'Viewed';
+    if (open && (forceExpiry() || (expiresOn && new Date(expiresOn).getTime() <= Date.now()))) {
+      return {
+        status: mapDocuSignStatus('voided', 'Envelope has expired.'),
+        voidedReason: 'Envelope has expired.',
+        expiresOn: expiresOn ?? new Date().toISOString(),
+        viewedOn: req?.viewedOn,
+        recipients: (req?.signers ?? []).map((s) => ({ role: s.role, email: s.email, status: s.status === 'signed' ? 'completed' : s.status === 'viewed' ? 'delivered' : 'sent', at: s.signedOn })),
+      };
+    }
     if (!t) {
-      return { status: req?.status ?? 'Sent', viewedOn: req?.viewedOn, signedOn: req?.signedOn, recipients: [] };
+      return { status: req?.status ?? 'Sent', viewedOn: req?.viewedOn, signedOn: req?.signedOn, expiresOn, recipients: [] };
     }
     const age = (Date.now() - t) / 1000;
     const status = age > 90 ? 'Signed' : age > 30 ? 'Viewed' : 'Sent';
     const now = new Date().toISOString();
     return {
       status,
+      expiresOn,
       viewedOn: age > 30 ? new Date(t + 30_000).toISOString() : undefined,
       signedOn: age > 90 ? now : undefined,
       recipients: (sentDocs.get(envelopeId)?.signers ?? []).map((s) => ({ role: s.role, email: s.email, status: status === 'Signed' ? 'completed' : status === 'Viewed' ? 'delivered' : 'sent' })),

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { outputGate, summarize } from '../../domain/checks';
+import { expiresOnFrom } from '../../domain/requests';
 import { assignSigners, roleLabel, rolesForPacket, validateSigners } from '../../domain/signers';
 import type { SignatureRequest, SignerAssignment, VerificationMethod } from '../../domain/types';
 import { useServices } from '../../services';
@@ -207,12 +208,14 @@ export function SendScreen() {
       const draft = savedDraft.current ?? (await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing: await currentRow() }));
       savedDraft.current = draft;
       setPacket({ requestId: draft.id });
+      const sentOn = new Date().toISOString();
       const sent: SignatureRequest = {
         ...draft,
         status: 'Sent',
         envelopeId,
         envelopePhase: undefined,
-        sentOn: new Date().toISOString(),
+        sentOn,
+        expiresOn: expiresOnFrom(sentOn, Number(expires)),
         sentBy: me.fullname,
         signers: ordered.map((s) => ({ ...s, status: s.order === Math.min(...ordered.map((x) => x.order)) ? 'sent' : 'pending' })),
         ccs: ccList(),

@@ -248,7 +248,8 @@ export interface SavedPacket {
   usedCount: number;
 }
 
-export type SignatureStatus = 'Drafted' | 'Sent' | 'Viewed' | 'Signed' | 'Declined' | 'Voided';
+/** `Expired`: DocuSign voided the envelope because it lapsed before everyone signed. */
+export type SignatureStatus = 'Drafted' | 'Sent' | 'Viewed' | 'Signed' | 'Declined' | 'Voided' | 'Expired';
 
 export type VerificationMethod = 'email' | 'sms' | 'kba';
 
@@ -316,6 +317,8 @@ export interface SignatureRequest {
   message: string;
   reminderDays?: number;
   expiresInDays?: number;
+  /** When the envelope lapses (ISO): worked out on send, then DocuSign's `expireDateTime` once status is read. */
+  expiresOn?: string;
   anyOrder: boolean;
   draftFolderUrl?: string;
   /** Draft PDFs written to SharePoint, so a later cleanup can find them. */

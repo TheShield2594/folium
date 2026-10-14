@@ -64,7 +64,9 @@ Create a Power Automate flow:
 
 1. Trigger: *When an HTTP request is received* (or the DocuSign connector's *When an envelope status changes (Connect)*).
 2. Find the `ev_signaturerequest` row by `ev_envelopeid`.
-3. Update `ev_status` (`sent`→Sent, `delivered`→Viewed, `completed`→Signed, `declined`→Declined, `voided`→Voided), `ev_signedon`, and append to the audit in `ev_payload`.
+3. Update `ev_status` (`sent`→Sent, `delivered`→Viewed, `completed`→Signed, `declined`→Declined, `voided`→Voided, or **Expired** when `voidedReason` mentions expiry), `ev_signedon`, `ev_expireson` (from `expireDateTime`), and append to the audit in `ev_payload` (set `status`, `expiresOn` and `voidedReason` there too). Write the option values from `SIGNATURE_STATUS_OPTIONS` in `config.ts`, the same ones `mapDocuSignStatus` in `src/domain/requests.ts` implies. Confirm DocuSign's expiry wording in the sandbox before relying on it.
+
+Optional: a scheduled flow that emails (or messages in Teams) the owning advisor when an open request's `ev_expireson` is 7 days away, with the client's name and a link.
 
 Add the flow's URL as a Connect configuration in DocuSign Admin. Until it exists, **Check status** on each request polls DocuSign, which is the brief's acceptable v1 fallback.
 

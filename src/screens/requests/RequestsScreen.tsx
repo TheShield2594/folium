@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { expiryInfo, isFinished } from '../../domain/requests';
 import type { SignatureRequest } from '../../domain/types';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
@@ -7,7 +8,10 @@ import { Empty, Segmented, Spinner, toast } from '../../ui/controls';
 import { RequestCard } from './RequestCard';
 
 type Scope = 'client' | 'all';
-type Filter = 'open' | 'waiting' | 'onbase' | 'done' | 'all';
+type Filter = 'open' | 'waiting' | 'expiring' | 'onbase' | 'done' | 'all';
+
+/** Open requests within DocuSign's 7-day warning, or already past their expiry date. */
+const expiring = (r: SignatureRequest) => { const e = expiryInfo(r); return !!e && (e.soon || e.pastDue); };
 
 export function RequestsScreen() {
   const client = useApp((s) => s.client);
@@ -48,12 +52,14 @@ export function RequestsScreen() {
     switch (filter) {
       case 'waiting':
         return l.filter((r) => r.status === 'Sent' || r.status === 'Viewed');
+      case 'expiring':
+        return l.filter(expiring);
       case 'onbase':
         return l.filter((r) => r.status === 'Signed' && !r.uploadedToOnBase);
       case 'done':
-        return l.filter((r) => (r.status === 'Signed' && r.uploadedToOnBase) || r.status === 'Voided' || r.status === 'Declined');
+        return l.filter(isFinished);
       case 'open':
-        return l.filter((r) => !((r.status === 'Signed' && r.uploadedToOnBase) || r.status === 'Voided' || r.status === 'Declined'));
+        return l.filter((r) => !isFinished(r));
       default:
         return l;
     }
@@ -64,6 +70,7 @@ export function RequestsScreen() {
     return {
       waiting: l.filter((r) => r.status === 'Sent' || r.status === 'Viewed').length,
       onbase: l.filter((r) => r.status === 'Signed' && !r.uploadedToOnBase).length,
+      expiring: l.filter(expiring).length,
     };
   }, [source]);
 
@@ -111,6 +118,7 @@ export function RequestsScreen() {
               [
                 ['open', 'Open'],
                 ['waiting', 'Waiting on client'],
+                ['expiring', counts.expiring ? `Expiring soon (${counts.expiring})` : 'Expiring soon'],
                 ['onbase', 'Needs OnBase'],
                 ['done', 'Finished'],
                 ['all', 'All'],
@@ -127,7 +135,7 @@ export function RequestsScreen() {
               <Spinner />
             </div>
           ) : list.length === 0 ? (
-            <Empty icon="signature" title={filter === 'onbase' ? 'Nothing waiting to file' : 'No requests here'}>
+            <Empty icon="signature" title={filter === 'onbase' ? 'Nothing waiting to file' : filter === 'expiring' ? 'Nothing expiring this week' : 'No requests here'}>
               {filter === 'open' ? 'Requests you send show up here until they’re signed and filed.' : 'Try another filter.'}
             </Empty>
           ) : (

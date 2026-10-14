@@ -54,6 +54,8 @@
               "type": "object",
               "properties": {
                 "status": { "type": "string" },
+                "voidedReason": { "type": "string", "description": "Why the envelope was voided; DocuSign gives an expiry reason when it lapsed" },
+                "expireDateTime": { "type": "string", "description": "When the envelope expires (or expired)" },
                 "deliveredDateTime": { "type": "string" },
                 "completedDateTime": { "type": "string" },
                 "recipients": { "type": "object" }

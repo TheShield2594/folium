@@ -82,7 +82,12 @@ export interface PacketStore {
 }
 
 export interface EnvelopeStatus {
-  status: SignatureStatus;
+  /** Undefined when DocuSign reports a status Folium doesn't know: keep the stored one. */
+  status?: SignatureStatus;
+  /** Why DocuSign voided it (an expiry reason maps to `Expired`). */
+  voidedReason?: string;
+  /** DocuSign's `expireDateTime`. */
+  expiresOn?: string;
   viewedOn?: string;
   signedOn?: string;
   recipients: { role: string; email: string; status: 'sent' | 'delivered' | 'completed' | 'declined'; at?: string; authMethod?: string }[];
