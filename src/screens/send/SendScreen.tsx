@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { outputGate, summarize } from '../../domain/checks';
+import { attachmentLimits, attachmentsMB, checkAttachments, MB, outputGate, summarize } from '../../domain/checks';
+import { fillSubject, fillTokens, listForms, SUBJECT_MAX } from '../../domain/format';
 import { relatedPeople } from '../../domain/prefill';
-import { expiresOnFrom } from '../../domain/requests';
+import { draftsAllowed, expiresOnFrom, retentionDays } from '../../domain/requests';
 import { accessCodeWarnings, assignSigners, envelopeSigners, generateAccessCode, recordedSigners, roleLabel, rolesForPacket, validateSigners } from '../../domain/signers';
 import type { SignatureRequest, SignerAssignment, VerificationMethod } from '../../domain/types';
 import { useServices } from '../../services';
@@ -41,7 +42,9 @@ export function SendScreen() {
   const needs = useMemo(() => (view && scope ? rolesForPacket(view.templates, scope) : []), [view, scope]);
   const people = useMemo(() => (scope ? relatedPeople(scope.client) : []), [scope]);
   const [signers, setSigners] = useState<SignerAssignment[]>([]);
-  const [anyOrder, setAnyOrder] = useState(false);
+  // The sender's own default, else the advisor's they work for, else the firm's. The switch still decides per envelope.
+  const defaultAnyOrder = me?.defaultAnyOrder ?? owner?.defaultAnyOrder ?? firm?.sending?.defaultAnyOrder ?? false;
+  const [anyOrder, setAnyOrder] = useState(defaultAnyOrder);
   const [ccMe, setCcMe] = useState(true);
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
@@ -58,6 +61,20 @@ export function SendScreen() {
    */
   const sendState = packet.send;
   const setSend = (send: SendState | undefined) => setPacket({ send });
+  /** Bytes of the packet's forms (the blank PDFs; filling adds little), for the envelope size. */
+  const [formBytes, setFormBytes] = useState<number>();
+  const templateIds = view?.templates.map((t) => t.id).join('|');
+  useEffect(() => {
+    if (!view) return;
+    let live = true;
+    Promise.all(view.templates.map((t) => services.templates.getPdf(t).then((b) => b.byteLength)))
+      .then((sizes) => live && setFormBytes(sizes.reduce((a, b) => a + b, 0)))
+      .catch(() => live && setFormBytes(undefined));
+    return () => {
+      live = false;
+    };
+    // Only when the forms change, not on every keystroke.
+  }, [templateIds, services]);
   /** The draft row saved for this envelope, so a retry updates it instead of adding another. */
   const savedDraft = useRef<SignatureRequest>(undefined);
 
@@ -79,12 +96,16 @@ export function SendScreen() {
       return;
     }
     setSigners(assigned);
-    const names = view.templates.map((t) => t.name.toLowerCase());
-    setSubject(`Forms to sign: ${names.length <= 2 ? names.join(' and ') : `${names.slice(0, 2).join(', ')} and more`}`.slice(0, 100));
+    setAnyOrder(defaultAnyOrder);
+    const ctx = { client: scope.client.contact, advisor: owner ?? {}, firm, forms: view.templates.map((t) => t.name) };
+    const sending = firm?.sending;
+    setSubject(sending?.subjectTemplate ? fillSubject(sending.subjectTemplate, ctx) : `Forms to sign: ${listForms(view.templates.map((t) => t.name.toLowerCase()))}`.slice(0, SUBJECT_MAX));
     setMessage(
-      `Hi ${scope.client.contact.firstname},\n\nHere ${view.templates.length === 1 ? 'is the form' : `are the ${view.templates.length} forms`} we talked about. They’re already filled in from what we have on file — please look them over and sign. Call me with any questions.\n\n${owner?.emailSignature ?? `${owner?.fullname ?? ''}\n${owner?.phone ?? ''}`}`,
+      sending?.messageTemplate
+        ? fillTokens(sending.messageTemplate, ctx)
+        : `Hi ${scope.client.contact.firstname},\n\nHere ${view.templates.length === 1 ? 'is the form' : `are the ${view.templates.length} forms`} we talked about. They’re already filled in from what we have on file — please look them over and sign. Call me with any questions.\n\n${owner?.emailSignature ?? `${owner?.fullname ?? ''}\n${owner?.phone ?? ''}`}`,
     );
-  }, [scope, view, needs, owner, existing, signers.length]);
+  }, [scope, view, needs, owner, existing, signers.length, firm, defaultAnyOrder]);
 
   if (!client) return <NoClient />;
   if (!view || !packet.items.length) {
@@ -106,8 +127,16 @@ export function SendScreen() {
   // Wet signing needs the same clean bill as DocuSign: no PDF and no request while checks are open.
   const inPersonGate = outputGate(view.checks, 'flatten');
   const tabCount = view.templates.reduce((n, t) => n + t.mapping.placements.filter((p) => ordered.some((s) => s.role === p.role)).length, 0);
+  const limits = attachmentLimits(firm?.sending);
+  const attachmentChecks = checkAttachments(packet.attachments, limits);
+  const attachedMB = attachmentsMB(packet.attachments);
+  const envelopeMB = formBytes === undefined ? undefined : formBytes / MB + attachedMB;
+  // Users and Assistants can't edit a locked note; Admins can. The disclosure is still added.
+  const messageLocked = !!firm?.sending?.lockMessage && me?.role !== 'Admin';
+  const canShare = draftsAllowed(firm);
   const blockers = [
     ...(sum.blocking ? [`${sum.blocking} pre-send ${sum.blocking === 1 ? 'check needs' : 'checks need'} attention`] : []),
+    ...attachmentChecks.map((c) => `${c.title}. ${c.detail}`),
     ...problems.map((p) => p.message),
     ...(!subject.trim() ? ['Add an email subject'] : []),
     ...unreachable.map((a) => `Re-attach ${a.name}`),
@@ -173,10 +202,11 @@ export function SendScreen() {
     }
     setSend({ phase: 'created', envelopeId, at: new Date().toISOString() });
     try {
-      const row = await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing: await currentRow(), sendSetup: sendSetup() });
-      const marked = await services.requests.save({ ...row, envelopeId, envelopePhase: 'created', audit: [...row.audit, audit(me, 'Envelope created in DocuSign', 'Not sent yet')] });
+      const row = await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing: await currentRow(), sendSetup: sendSetup(), retentionDays: retentionDays(firm) });
+      // Mid-send: retention never deletes it (DocuSign holds the envelope), so no draft expiry.
+      const marked = await services.requests.save({ ...row, envelopeId, envelopePhase: 'created', expiresOn: undefined, audit: [...row.audit, audit(me, 'Envelope created in DocuSign', 'Not sent yet')] });
       savedDraft.current = marked;
-      setPacket({ requestId: marked.id, dirty: false });
+      setPacket({ requestId: marked.id, formsUpdated: undefined, dirty: false });
     } catch {
       // The envelope ID is on the packet and in the session journal; carry on.
     }
@@ -218,7 +248,7 @@ export function SendScreen() {
     if (!contactId || !me || !owner || !view) return;
     setBusy('send');
     try {
-      const draft = savedDraft.current ?? (await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing: await currentRow() }));
+      const draft = savedDraft.current ?? (await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing: await currentRow(), retentionDays: retentionDays(firm) }));
       savedDraft.current = draft;
       setPacket({ requestId: draft.id });
       const sentOn = new Date().toISOString();
@@ -259,9 +289,10 @@ export function SendScreen() {
     try {
       const bytes = await packetAsOnePdf(services, view.fills, 'flatten');
       downloadBytes(bytes, `${client!.contact.lastname} - sign in person.pdf`);
-      const draft = await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing, sendSetup: sendSetup() });
-      await services.requests.save({ ...draft, inPerson: true, audit: [...draft.audit, audit(me, 'Downloaded to sign in person')] });
-      setPacket({ requestId: draft.id, dirty: false });
+      const draft = await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing, sendSetup: sendSetup(), retentionDays: retentionDays(firm) });
+      // A record of a printed packet, not abandoned work: retention doesn't delete it.
+      await services.requests.save({ ...draft, inPerson: true, expiresOn: undefined, audit: [...draft.audit, audit(me, 'Downloaded to sign in person')] });
+      setPacket({ requestId: draft.id, formsUpdated: undefined, dirty: false });
       markUsed(view.templates.map((t) => t.id));
       await refreshRequests();
       toast.ok('Downloaded. Upload the wet-signed copy to OnBase when it’s back.');
@@ -276,9 +307,11 @@ export function SendScreen() {
     <>
       <Toolbar title="Signers & send" subtitle={`${client.contact.fullname} · ${view.templates.length} ${view.templates.length === 1 ? 'form' : 'forms'}`} back={{ label: 'Review', to: '/review' }}>
         <Steps current={2} />
-        <Button variant="gray" icon="share" onClick={() => setSharing(true)}>
-          Share
-        </Button>
+        {canShare && (
+          <Button variant="gray" icon="share" onClick={() => setSharing(true)}>
+            Share
+          </Button>
+        )}
       </Toolbar>
       <div className="scroll">
         <div className="page">
@@ -401,8 +434,12 @@ export function SendScreen() {
                 <Field label="Email subject" htmlFor="subj" help={`${subject.length}/100`}>
                   <TextInput id="subj" value={subject} maxLength={100} onChange={(e) => setSubject(e.target.value)} />
                 </Field>
-                <Field label="Note" htmlFor="note" help={firm?.disclosure ? `Folium adds the firm disclosure: “${firm.disclosure}”` : undefined}>
-                  <TextArea id="note" rows={7} value={message} onChange={(e) => setMessage(e.target.value)} />
+                <Field
+                  label="Note"
+                  htmlFor="note"
+                  help={[messageLocked ? 'Set by your firm.' : '', firm?.disclosure ? `Folium adds the firm disclosure: “${firm.disclosure}”` : ''].filter(Boolean).join(' ') || undefined}
+                >
+                  <TextArea id="note" rows={7} value={message} readOnly={messageLocked} aria-readonly={messageLocked || undefined} onChange={(e) => setMessage(e.target.value)} />
                 </Field>
                 <div className="grid-2">
                   <Field label="Remind if unsigned after" htmlFor="rem">
@@ -432,7 +469,16 @@ export function SendScreen() {
                   <div className="row"><span className="grow">Forms</span><strong className="tabular">{view.templates.length}</strong></div>
                   <div className="row"><span className="grow">Signers</span><strong className="tabular">{ordered.length}</strong></div>
                   <div className="row"><span className="grow">Signature tabs</span><strong className="tabular">{tabCount}</strong></div>
-                  <div className="row"><span className="grow">Attachments</span><strong className={unreachable.length ? 'c-warn tabular' : 'tabular'}>{packet.attachments.length - unreachable.length}</strong></div>
+                  <div className="row">
+                    <span className="grow">Attachments</span>
+                    <strong className={unreachable.length || attachmentChecks.length ? 'c-warn tabular' : 'tabular'}>
+                      {packet.attachments.length - unreachable.length} of {limits.maxFiles} · {attachedMB.toFixed(1)} of {limits.maxMB} MB
+                    </strong>
+                  </div>
+                  <div className="row" title="Forms and supporting documents together. DocuSign receives about a third more once they’re encoded.">
+                    <span className="grow">Envelope size</span>
+                    <strong className="tabular">{envelopeMB === undefined ? '—' : `${envelopeMB < 0.1 ? '< 0.1' : envelopeMB.toFixed(1)} MB`}</strong>
+                  </div>
                   <div className="row"><span className="grow">Checks</span><strong className={sum.blocking ? 'c-warn' : 'c-accent'}>{sum.blocking ? `${sum.blocking} to fix` : 'All passed'}</strong></div>
                 </div>
                 {blockers.length > 0 && (
@@ -505,7 +551,7 @@ export function SendScreen() {
           </div>
         </div>
       </div>
-      {sharing && <ShareSheet onClose={() => setSharing(false)} sendSetup={sendSetup()} />}
+      {sharing && canShare && <ShareSheet onClose={() => setSharing(false)} sendSetup={sendSetup()} />}
       {codeFor && (
         <AccessCodeSheet
           name={ordered.find((s) => s.role === codeFor)?.name || roleLabel(codeFor)}

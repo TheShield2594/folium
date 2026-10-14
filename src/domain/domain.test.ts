@@ -758,5 +758,6 @@ describe('envelope email templates', () => {
     expect(s).toHaveLength(100);
     expect(s.startsWith('Forms for Jordan A. Miller: ')).toBe(true);
     expect(fillSubject('  {client.middlename}  Forms  ', { ...ctx, client: { ...client.contact, middlename: undefined } })).toBe('Forms');
+    expect(fillSubject('For {client.firstname} {client.nosuch}: {forms}', { ...ctx, forms: ['Transfer'] })).toBe('For Jordan: transfer');
   });
 });

@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import type { SignatureRequest } from '../../domain/types';
 import { useServices } from '../../services';
-import { audit } from '../../state/actions';
+import { audit, deleteDraft } from '../../state/actions';
 import { useApp } from '../../state/store';
 import { ConfirmSheet, toast } from '../../ui/controls';
 import { NameSheet } from './NameSheet';
@@ -26,7 +26,8 @@ export function useDraftActions(onChanged?: () => void) {
         confirmLabel="Delete draft"
         onClose={close}
         onConfirm={async () => {
-          await services.requests.remove(r.id);
+          const failed = await deleteDraft(services, r);
+          if (failed.length) toast.error(`Couldn’t delete ${failed.length === 1 ? failed[0].name : `${failed.length} draft PDFs`} from SharePoint. Delete ${failed.length === 1 ? 'it' : 'them'} from the client’s folder.`);
           const wasOpen = useApp.getState().packet.requestId === r.id;
           if (wasOpen) useApp.getState().setPacket({ requestId: undefined, dirty: true });
           await changed();
@@ -45,7 +46,8 @@ export function useDraftActions(onChanged?: () => void) {
           toast.ok(wasOpen ? 'This draft was deleted. Your forms are still open; Save draft to keep them.' : `Deleted “${r.title}”`, undo);
         }}
       >
-        Delete draft “{r.title}”{clientName ? ` for ${clientName}` : ''}? Values you entered will be gone.
+        Delete draft “{r.title}”{clientName ? ` for ${clientName}` : ''}? Values you entered will be gone
+        {r.draftFiles?.length ? `, and its ${r.draftFiles.length === 1 ? 'PDF' : `${r.draftFiles.length} PDFs`} in SharePoint will be deleted` : ''}.
       </ConfirmSheet>,
     );
   }

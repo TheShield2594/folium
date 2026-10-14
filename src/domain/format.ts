@@ -282,4 +282,10 @@ export function fillTokens(text: string, ctx: MessageContext): string {
 export const SUBJECT_MAX = 100;
 
 /** The email subject from a template: tokens filled, whitespace tidied, cut to DocuSign's 100 characters. */
-export const fillSubject = (template: string, ctx: MessageContext) => fillTokens(template, ctx).replace(/\s+/g, ' ').trim().slice(0, SUBJECT_MAX);
+export const fillSubject = (template: string, ctx: MessageContext) =>
+  fillTokens(template, ctx)
+    .replace(/\s+/g, ' ')
+    // An empty token can leave "Priya : forms"; close the gap before punctuation.
+    .replace(/ ([,.:;!?])/g, '$1')
+    .trim()
+    .slice(0, SUBJECT_MAX);

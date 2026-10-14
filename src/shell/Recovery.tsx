@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useBlocker } from 'react-router-dom';
 import { defaultDraftTitle } from '../domain/drafts';
+import { draftsAllowed, retentionDays } from '../domain/requests';
 import { usePacketView } from '../screens/common/usePacket';
 import { useServices } from '../services';
 import { connectionProblem, subscribeConnection } from '../services/errors';
@@ -132,10 +133,11 @@ function useSaveOpenPacket() {
       existing,
       writePdfs: true,
       auditNote,
+      retentionDays: retentionDays(useApp.getState().firm),
       // Keep the row's identity even if the PDFs fail, so the next save updates it.
-      onSaved: (row) => setPacket({ requestId: row.id, title: row.title, attachments: row.attachments, snapshot: row.prefillSnapshot, dirty: false }),
+      onSaved: (row) => setPacket({ requestId: row.id, title: row.title, attachments: row.attachments, snapshot: row.prefillSnapshot, formsUpdated: undefined, dirty: false }),
     });
-    setPacket({ requestId: saved.id, title: saved.title, attachments: saved.attachments, snapshot: saved.prefillSnapshot, dirty: false });
+    setPacket({ requestId: saved.id, title: saved.title, attachments: saved.attachments, snapshot: saved.prefillSnapshot, formsUpdated: undefined, dirty: false });
     await refreshRequests().catch(() => undefined);
     return saved;
   }
@@ -150,7 +152,8 @@ function useSaveOpenPacket() {
 export function IdleAutoSave() {
   const firm = useApp((s) => s.firm);
   const dirty = useApp((s) => !!s.packet.dirty && s.packet.items.length > 0 && !s.packet.send);
-  const enabled = !!firm?.idleAutoSave && dirty;
+  // No auto-save when the firm keeps no drafts (retention 0).
+  const enabled = !!firm?.idleAutoSave && draftsAllowed(firm) && dirty;
   const idleMs = (firm?.idleAutoSaveMinutes ?? DEFAULT_IDLE_MINUTES) * 60_000;
   const { save, ready } = useSaveOpenPacket();
   const saveRef = useRef(save);
@@ -225,6 +228,7 @@ export function IdleAutoSave() {
 
 function LeavePacketSheet({ reason, onChoice }: { reason: 'switch' | 'open-draft' | 'navigate'; onChoice: (c: LeaveChoice) => void }) {
   const client = useApp((s) => s.client);
+  const canSave = draftsAllowed(useApp((s) => s.firm));
   const { save: saveOpen, ready } = useSaveOpenPacket();
   const [busy, setBusy] = useState(false);
 
@@ -242,8 +246,9 @@ function LeavePacketSheet({ reason, onChoice }: { reason: 'switch' | 'open-draft
   }
 
   const who = client?.contact.firstname ? `${client.contact.firstname}’s` : 'this';
-  const body =
-    reason === 'navigate'
+  const body = !canSave
+    ? `You have unsaved changes to ${who} packet. Your firm doesn’t keep drafts, so they’ll be lost if you ${reason === 'navigate' ? 'close Folium' : 'go on'}.`
+    : reason === 'navigate'
       ? `You have unsaved changes to ${who} packet. It stays open while you’re away, but save a draft if you might close Folium.`
       : reason === 'switch'
         ? `Opening another client closes ${who} packet. Save it as a draft first?`
@@ -261,9 +266,11 @@ function LeavePacketSheet({ reason, onChoice }: { reason: 'switch' | 'open-draft
           <Button variant="bordered" disabled={busy} onClick={() => onChoice('discard')}>
             {reason === 'navigate' ? 'Leave without saving' : 'Discard'}
           </Button>
-          <Button variant="filled" busy={busy} disabled={!ready} onClick={save}>
-            Save draft
-          </Button>
+          {canSave && (
+            <Button variant="filled" busy={busy} disabled={!ready} onClick={save}>
+              Save draft
+            </Button>
+          )}
         </>
       }
     >

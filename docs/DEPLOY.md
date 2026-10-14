@@ -57,6 +57,8 @@ Import `connectors/folium-docusign.swagger.json` as a custom connector (Power Ap
 4. In DocuSign Admin › Identity Verification, note the workflow IDs for **SMS**, **Phone authentication** and **ID Check (KBA)** and put them in `DOCUSIGN.idv` in `config.ts`. A method whose ID is blank can't be sent (Folium says so instead of sending with weaker verification).
 5. In-session signing needs embedded signing on the DocuSign plan. DocuSign sends the signer back to Folium's `#/signing-return` route with `event=…`; that URL is built from where the app runs, so check it once the hosting decision (#3) is made.
 6. Optional: set `DOCUSIGN.consentUrl` to the DocuSign consent link for the Folium app, so a `consent_required` answer offers it to the advisor instead of a generic error.
+7. Size limits: Folium caps supporting documents at 10 per envelope and 30 MB in total by default (Administration › Firm profile › Sending), and shows the envelope's size on the Send screen. The bytes are base64-encoded into one `CreateEnvelope` request, about a third larger than the files. Before relying on 30 MB, confirm DocuSign's per-document and per-envelope limits and the custom connector's request size limit for Everence's plan, and lower the firm limit if either is smaller.
+8. One DocuSign account. Folium uses a single connection (`CONNECTORS.docuSign`), whose account ID is fixed in the connector. If Everence ever needs a second account (Laser App lets a user pick between two), add a second connection and choose it by group behind the same `SigningProvider`; no screen changes are needed. Ask whether anyone needs one before building it.
 
 Access codes need no setup. Folium sends the code with the envelope and saves only that one was set (`accessCodeSet`), never the code.
 
@@ -73,6 +75,26 @@ Create a Power Automate flow:
 Optional: a scheduled flow that emails (or messages in Teams) the owning advisor when an open request's `ev_expireson` is 7 days away, with the client's name and a link.
 
 Add the flow's URL as a Connect configuration in DocuSign Admin. Until it exists, **Check status** on each request polls DocuSign, which is the brief's acceptable v1 fallback.
+
+## 5a. Draft retention (clean-up flow)
+
+Drafts hold SSNs, account numbers and beneficiary details, so Folium deletes unsent drafts a set time after their last save (Administration › Firm profile › Draft retention: 90 days by default, or 60, 30, 10, 7, or 0 for no drafts at all). Every save restarts the clock, and Folium writes the date to `ev_expireson`. Ask Compliance for the period, and whether 0 should be allowed.
+
+Create a scheduled Power Automate flow, run daily as a service account with delete rights on `ev_signaturerequest` and the CRM SharePoint site (Users don't have them; see #1):
+
+1. **List rows** on `ev_signaturerequests`: `ev_status eq <Drafted option value> and ev_expireson lt @{utcNow()} and ev_envelopeid eq null`. Read `statecode` 0 and 1, so drafts already deleted in Folium (soft-deleted, waiting on Undo) are removed for good too.
+2. For each row, parse `ev_payload`. Skip it if `inPerson` is true (a printed packet is a record, not abandoned work). Delete each file in `draftFiles[].url` and each `attachments[].storedAt.itemId` from the contact's SharePoint folder (*Delete file*; a file that's already gone is fine), then delete the row.
+3. **Reminder:** a second branch lists the same rows with `ev_expireson` between 6 and 7 days from now and emails the owner (`ownerId`), the preparer (`preparedById`) and anyone in `sharedWith`: "Your draft “{title}” for {client} will be deleted on {date}. Open and save it to keep it," with a link to Folium's Drafts screen (`…/#/drafts`). Opening and saving the draft renews it.
+
+**Backfill, once at rollout.** Drafts saved before retention shipped have no `ev_expireson`. Run the flow once with a step that sets it to the last-saved date (the last audit entry's `at`) plus the retention period, but never less than 14 days after rollout, so nothing disappears without a warning email first. Shortening the period later applies at each draft's next save, never to drafts already past their date.
+
+**Backstops.** A Dataverse bulk-delete job on the same filter catches rows the flow misses, and a Purview retention label with auto-delete on files named `DRAFT *` in the CRM library catches stray PDFs. Signed requests aren't affected: their retention stays with OnBase.
+
+Deleting a draft in Folium already removes its DRAFT PDFs (`DraftStore.removeFile`) and soft-deletes the row so Undo works; its attachments stay until this flow deletes the row.
+
+## 5b. Out-of-date drafts (optional notification)
+
+Folium marks drafts whose forms have a newer Live revision ("1 of 3 forms updated", "Out of date") and offers **Update to current forms** when one is opened. To tell advisors sooner, add a flow triggered when an `ev_formtemplate` row's `ev_status` changes to Live: list Drafted `ev_signaturerequest` rows whose `ev_payload` contains the superseded template's ID (the new row's `supersedesId`), group them by owner, and send each a Teams or Outlook note: "2 of your drafts use a form that changed." No app change is needed.
 
 ## 6. Put it on the Contact form
 

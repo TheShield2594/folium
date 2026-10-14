@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { draftFreshness } from '../../domain/drafts';
+import { draftExpiryInfo, retentionDays } from '../../domain/requests';
 import type { SignatureRequest } from '../../domain/types';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
 import { useApp } from '../../state/store';
 import { Avatar, Badge, Button, Empty, IconButton, Menu, Segmented, Spinner, toast } from '../../ui/controls';
+import { FreshnessBadge } from '../common/UpgradeSheet';
 import { useDraftActions } from '../common/useDraftActions';
+import { useOpenDraft } from '../common/useOpenDraft';
 import { fmtDay } from './RequestCard';
 
 type Tab = 'mine' | 'shared';
@@ -17,15 +20,14 @@ export function DraftsScreen() {
   const users = useApp((s) => s.users);
   const actingForId = useApp((s) => s.actingForId);
   const requests = useApp((s) => s.requests);
-  const openContact = useApp((s) => s.openContact);
-  const loadRequest = useApp((s) => s.loadRequest);
-  const contactId = useApp((s) => s.contactId);
-  const navigate = useNavigate();
+  const templates = useApp((s) => s.templates);
+  const keepDays = retentionDays(useApp((s) => s.firm));
   const [tab, setTab] = useState<Tab>('mine');
   const [list, setList] = useState<SignatureRequest[]>();
   const [names, setNames] = useState<Record<string, string>>({});
   const [reload, setReload] = useState(0);
   const drafts = useDraftActions(() => setReload((n) => n + 1));
+  const opener = useOpenDraft();
 
   useEffect(() => {
     let live = true;
@@ -52,18 +54,6 @@ export function DraftsScreen() {
   const shared = (list ?? []).filter((r) => r.sharedWith?.includes(meId) && !mine.includes(r));
   const shown = tab === 'mine' ? mine : shared;
 
-  async function open(r: SignatureRequest) {
-    try {
-      // Opening a draft replaces the packet on screen: ask first if it has unsaved work.
-      if (!(await useApp.getState().confirmReplacePacket('open-draft'))) return;
-      if (r.contactId !== contactId && !(await openContact(r.contactId))) return;
-      loadRequest(r);
-      navigate('/review');
-    } catch {
-      toast.error('That client isn’t available to you.');
-    }
-  }
-
   return (
     <>
       <Toolbar title="Drafts & shared">
@@ -82,7 +72,9 @@ export function DraftsScreen() {
           <div>
             <h1 className="t-large">{tab === 'mine' ? 'Drafts' : 'Shared with you'}</h1>
             <p className="t-callout c2" style={{ marginTop: 4 }}>
-              {tab === 'mine' ? 'Packets saved before sending. Everything you entered is kept.' : 'Packets colleagues handed to you to review, finish or send.'}
+              {tab === 'mine'
+                ? `Packets saved before sending. Everything you entered is kept${keepDays ? ` for ${keepDays} days after the last save, then the draft and its PDFs are deleted` : ''}.`
+                : 'Packets colleagues handed to you to review, finish or send.'}
             </p>
           </div>
           {!list ? (
@@ -97,6 +89,7 @@ export function DraftsScreen() {
             <div className="list">
               {shown.map((r) => {
                 const by = users.find((u) => u.systemuserid === r.preparedById);
+                const expiry = draftExpiryInfo(r);
                 const owner = users.find((u) => u.systemuserid === r.ownerId);
                 return (
                   <div key={r.id} className="list-row" style={{ padding: '14px 16px' }}>
@@ -111,8 +104,10 @@ export function DraftsScreen() {
                       </div>
                     </div>
                     {r.inPerson && <Badge>Printed</Badge>}
+                    <FreshnessBadge f={draftFreshness(r, templates)} />
+                    {expiry && <Badge tone={expiry.soon ? 'warn' : undefined}>{expiry.daysLeft <= 0 ? 'Expiring today' : `Expires ${fmtDay(expiry.expiresOn)}`}</Badge>}
                     {r.sharedWith?.length ? <Badge tone="info" icon="share">{r.sharedWith.length}</Badge> : null}
-                    <Button variant="tinted" onClick={() => open(r)}>
+                    <Button variant="tinted" onClick={() => opener.open(r)}>
                       Open
                     </Button>
                     <Menu
@@ -134,6 +129,7 @@ export function DraftsScreen() {
         </div>
       </div>
       {drafts.sheet}
+      {opener.sheet}
     </>
   );
 }

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useServices } from '../../services';
+import { retentionDays } from '../../domain/requests';
 import { saveDraft, type SendSetup } from '../../state/actions';
 import { useActingFor, useApp } from '../../state/store';
 import { Avatar, Button, SearchField, Sheet, toast } from '../../ui/controls';
@@ -38,8 +39,8 @@ export function ShareSheet({ onClose, sendSetup }: { onClose: () => void; sendSe
     try {
       const next = { ...packet, sharedWith: picked };
       const existing = packet.requestId ? requests.find((r) => r.id === packet.requestId) : undefined;
-      const saved = await saveDraft({ services, packet: next, fills: view.fills, contactId, me, owner, existing, sendSetup });
-      setPacket({ sharedWith: picked, requestId: saved.id, attachments: saved.attachments, snapshot: saved.prefillSnapshot, dirty: false });
+      const saved = await saveDraft({ services, packet: next, fills: view.fills, contactId, me, owner, existing, sendSetup, retentionDays: retentionDays(useApp.getState().firm) });
+      setPacket({ sharedWith: picked, requestId: saved.id, attachments: saved.attachments, snapshot: saved.prefillSnapshot, formsUpdated: undefined, dirty: false });
       await refreshRequests();
       const names = users.filter((u) => picked.includes(u.systemuserid)).map((u) => u.fullname.split(' ')[0]);
       toast.ok(picked.length ? `Shared with ${names.join(', ')}` : 'Sharing turned off');
