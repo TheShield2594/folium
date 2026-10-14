@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { DEFAULT_ATTACHMENT_LIMITS } from '../../domain/checks';
-import { consentUrl, DEFAULT_REDIRECT_URL, docuSignProblems, DOCUSIGN_ENVIRONMENTS, type DocuSignEnvironment, type DocuSignSetup } from '../../domain/docusign';
+import { consentUrl, DEFAULT_REDIRECT_URL, docuSignProblems, DOCUSIGN_ENVIRONMENTS, withDocuSignDefaults, type DocuSignEnvironment, type DocuSignSetup } from '../../domain/docusign';
 import { RETENTION_OPTIONS, retentionDays } from '../../domain/requests';
 import { dormantDays } from '../../domain/users';
 import type { FirmPolicy, PdfDownloadPolicy, RepDataVisibility, SharingPolicy } from '../../domain/types';
@@ -44,7 +44,7 @@ export function AdminSettings() {
   useEffect(() => setP(policy), [policy]);
   useEffect(() => setD(docuSign), [docuSign]);
   const policyDirty = JSON.stringify(p) !== JSON.stringify(policy);
-  const docuSignDirty = JSON.stringify(d) !== JSON.stringify(docuSign);
+  const docuSignDirty = JSON.stringify(withDocuSignDefaults(d)) !== JSON.stringify(withDocuSignDefaults(docuSign));
   const problems = docuSignProblems(d);
   const dirty = policyDirty || docuSignDirty;
   const set = (patch: Partial<FirmPolicy>) => setP({ ...p, ...patch });
@@ -58,7 +58,7 @@ export function AdminSettings() {
     setBusy(true);
     try {
       if (policyDirty) await services.directory.savePolicy(p);
-      if (docuSignDirty) await services.directory.saveDocuSign(d);
+      if (docuSignDirty) await services.directory.saveDocuSign(withDocuSignDefaults(d));
       await reloadDirectory();
       toast.ok('Settings saved');
     } catch (e) {

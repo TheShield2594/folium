@@ -142,6 +142,7 @@ export function SendScreen() {
     ...(sum.blocking ? [`${sum.blocking} pre-send ${sum.blocking === 1 ? 'check needs' : 'checks need'} attention`] : []),
     ...attachmentChecks.map((c) => `${c.title}. ${c.detail}`),
     ...problems.map((p) => p.message),
+    ...ordered.filter((s) => !methodSetUp(docuSign, s.auth)).map((s) => `${AUTH_LABEL[s.auth]} isn’t set up in DocuSign: choose another way to verify ${roleLabel(s.role)}`),
     ...(!subject.trim() ? ['Add an email subject'] : []),
     ...unreachable.map((a) => `Re-attach ${a.name}`),
   ];

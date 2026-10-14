@@ -258,7 +258,8 @@ export const useApp = create<AppState>((set, get) => ({
         services.directory.listGroups(),
         services.directory.getFirm(),
         services.directory.getPolicy(),
-        services.directory.getDocuSign(),
+        // Only sending needs it: a failed read leaves DocuSign "not set up" instead of stopping Folium.
+        services.directory.getDocuSign().catch(() => withDocuSignDefaults(undefined)),
         services.templates.list(),
         services.packets.list(),
       ]);
@@ -289,7 +290,7 @@ export const useApp = create<AppState>((set, get) => ({
       s.directory.listGroups(),
       s.directory.getFirm(),
       s.directory.getPolicy(),
-      s.directory.getDocuSign(),
+      s.directory.getDocuSign().catch(() => withDocuSignDefaults(undefined)),
     ]);
     // A policy change can take away someone the user was working as.
     const keep = actableUsers(me, users, groups, policy).some((u) => u.systemuserid === get().actingForId);

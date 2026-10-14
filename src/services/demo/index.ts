@@ -2,7 +2,7 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import type { ClientRecord, FirmPolicy, FirmProfile, FormTemplate, SavedPacket, SignatureRequest, UserGroup, UserProfile } from '../../domain/types';
 import { mergeAdvisor, profileToSave } from '../../domain/advisor';
 import { withPolicyDefaults } from '../../domain/policy';
-import { withDocuSignDefaults, type DocuSignSetup } from '../../domain/docusign';
+import { docuSignReady, withDocuSignDefaults, type DocuSignSetup } from '../../domain/docusign';
 import { needsSeenStamp } from '../../domain/users';
 import { mapDocuSignStatus } from '../../domain/requests';
 import { generateTemplatePdf } from '../../pdf/generate';
@@ -485,8 +485,8 @@ const signing: SigningProvider = {
   async checkConnection(setup) {
     await wait(400);
     const s = setup ?? (await directory.getDocuSign());
-    if (!s.accountId) throw new Error('No DocuSign account is set up. An administrator adds it in Administration › Settings.');
-    return { accountId: s.accountId, accountName: 'Everence Financial (demo sandbox)' };
+    if (!docuSignReady(s)) throw new Error('No DocuSign account is set up. An administrator adds it in Administration › Settings.');
+    return { accountId: s.accountId!, accountName: 'Everence Financial (demo sandbox)' };
   },
   async create(req) {
     await wait(500);
