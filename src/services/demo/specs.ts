@@ -31,7 +31,7 @@ export interface FormSpec {
 
 const owner = (prefix = 'Owner'): SpecField[] => [
   { name: `${prefix}_Name_Full`, label: 'Owner name', span: 6, source: 'contact.fullname', required: true },
-  { name: `${prefix}_DOB`, label: 'Date of birth', span: 3, source: 'contact.birthdate', required: true, format: 'date' },
+  { name: `${prefix}_DOB`, label: 'Date of birth', span: 3, source: 'contact.birthdate', required: true, format: 'date', limits: { dateMin: '-120y', dateMax: 'today' } },
   { name: `${prefix}_SSN`, label: 'Social Security number', span: 3, source: 'contact.ev_ssn', required: true, format: 'ssn' },
   { name: `${prefix}_Address`, label: 'Street address', span: 6, source: 'computed.streetAddress', required: true },
   { name: `${prefix}_City`, label: 'City', span: 3, source: 'contact.address1_city', required: true },
@@ -60,8 +60,8 @@ const bene = (kind: 'Prim' | 'Cont', n: number, fromConn?: string): SpecField[] 
   return [
     { name: `${p}_Name`, label: 'Beneficiary name', uiLabel: `${who} · name`, span: 4, source: conn ? `${conn}.fullname` : 'advisor', required: n === 1 && kind === 'Prim', key: `bene.${kind}.${n}.name` },
     { name: `${p}_Relationship`, label: 'Relationship', uiLabel: `${who} · relationship`, span: 2, source: conn ? `${conn}.role` : 'advisor', key: `bene.${kind}.${n}.rel` },
-    { name: `${p}_DOB`, label: 'Date of birth', uiLabel: `${who} · date of birth`, span: 2, source: conn ? `${conn}.birthdate` : 'advisor', format: 'date', key: `bene.${kind}.${n}.dob` },
-    { name: `${p}_SSN`, label: 'SSN / Tax ID', uiLabel: `${who} · SSN / Tax ID`, span: 2, source: conn ? `${conn}.ev_ssn` : 'advisor', format: 'ssn', key: `bene.${kind}.${n}.ssn` },
+    { name: `${p}_DOB`, label: 'Date of birth', uiLabel: `${who} · date of birth`, span: 2, source: conn ? `${conn}.birthdate` : 'advisor', format: 'date', limits: { dateMin: '-120y', dateMax: 'today' }, key: `bene.${kind}.${n}.dob` },
+    { name: `${p}_SSN`, label: 'SSN / Tax ID', uiLabel: `${who} · SSN / Tax ID`, span: 2, source: conn ? `${conn}.ev_ssn` : 'advisor', format: 'ssnOrTin', key: `bene.${kind}.${n}.ssn` },
     { name: `${p}_Pct`, label: 'Share %', uiLabel: `${who} · share %`, span: 2, source: conn ? `${conn}.ev_sharepct` : 'advisor', format: 'percent', required: n === 1 && kind === 'Prim', key: `bene.${kind}.${n}.pct` },
   ];
 };
@@ -250,7 +250,7 @@ export const SPECS: FormSpec[] = [
         title: 'Section 1 · IRA owner',
         fields: [
           { name: 'Owner_FullName', label: 'Owner name', span: 6, source: 'contact.fullname', required: true },
-          { name: 'Owner_DOB', label: 'Date of birth', span: 3, source: 'contact.birthdate', format: 'date' },
+          { name: 'Owner_DOB', label: 'Date of birth', span: 3, source: 'contact.birthdate', format: 'date', limits: { dateMin: '-120y', dateMax: 'today' } },
           { name: 'Owner_SSN', label: 'SSN', span: 3, source: 'contact.ev_ssn', format: 'ssn' },
           { name: 'Owner_Address', label: 'Street address', span: 6, source: 'computed.streetAddress' },
           { name: 'Owner_City', label: 'City', span: 3, source: 'contact.address1_city' },
@@ -327,7 +327,7 @@ export const SPECS: FormSpec[] = [
         title: 'Section 2 · Joint owner',
         fields: [
           { name: 'Joint_Name', label: 'Joint owner name', span: 6, source: 'connection[Joint owner].fullname' },
-          { name: 'Joint_DOB', label: 'Date of birth', span: 3, source: 'connection[Joint owner].birthdate', format: 'date' },
+          { name: 'Joint_DOB', label: 'Date of birth', span: 3, source: 'connection[Joint owner].birthdate', format: 'date', limits: { dateMin: '-120y', dateMax: 'today' } },
           { name: 'Joint_SSN', label: 'SSN', span: 3, source: 'connection[Joint owner].ev_ssn', format: 'ssn' },
         ],
       },
@@ -448,7 +448,7 @@ export const SPECS: FormSpec[] = [
         fields: [
           { name: 'RMD_Monthly', label: 'Monthly', span: 3, source: 'advisor', type: 'checkbox', format: 'checkbox', key: 'rmd.monthly' },
           { name: 'RMD_Annual', label: 'Once a year', span: 3, source: 'advisor', type: 'checkbox', format: 'checkbox', key: 'rmd.annual' },
-          { name: 'RMD_Date', label: 'Distribution date', span: 6, source: 'advisor', format: 'date', required: true, key: 'rmd.date' },
+          { name: 'RMD_Date', label: 'Distribution date', span: 6, source: 'advisor', format: 'date', limits: { dateMin: 'today' }, required: true, key: 'rmd.date' },
         ],
       },
       { title: 'Section 3 · Tax withholding', fields: withholding },
@@ -476,8 +476,8 @@ export const SPECS: FormSpec[] = [
         title: 'Section 2 · New owner',
         fields: [
           { name: 'NewOwner_Name', label: 'New owner or trust name', span: 8, source: 'advisor', required: true, key: 'own.name' },
-          { name: 'NewOwner_TIN', label: 'SSN / TIN', span: 4, source: 'advisor', required: true, key: 'own.tin' },
-          { name: 'Trust_Date', label: 'Trust date (if a trust)', span: 4, source: 'advisor', format: 'date', key: 'own.trustdate' },
+          { name: 'NewOwner_TIN', label: 'SSN / TIN', span: 4, source: 'advisor', required: true, format: 'ssnOrTin', key: 'own.tin' },
+          { name: 'Trust_Date', label: 'Trust date (if a trust)', span: 4, source: 'advisor', format: 'date', limits: { dateMax: 'today' }, key: 'own.trustdate' },
         ],
       },
       { title: 'Section 3 · Signatures', signatures: [ownerSig, { role: 'JointOwner', label: 'Joint owner', optional: true }] },

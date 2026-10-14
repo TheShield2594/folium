@@ -144,6 +144,7 @@ export function specToTemplate(spec: FormSpec): FormTemplate {
               label: field.uiLabel ?? field.label,
               key: field.key,
               format: field.format ?? (field.type === 'checkbox' ? 'checkbox' : undefined),
+              limits: field.limits,
               help: field.help,
               requiredWhen: field.requiredWhen,
               rect: spec.pdfKind === 'flat' ? rectByName.get(field.name) : undefined,

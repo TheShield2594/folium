@@ -1,3 +1,4 @@
+import { fitsBox } from '../pdf/layout';
 import { toNumber } from './format';
 import { evaluateCondition, type ResolveScope } from './paths';
 import { valuesForAccount, type FormFill } from './prefill';
@@ -136,6 +137,13 @@ export function runChecks(fills: FormFill[], ctx: CheckContext): CheckResult[] {
   // 5. Flat / XFA PDFs need overlay fields before they can be filled.
   for (const fill of fills) {
     if (fill.template.pdfKind !== 'fillable') {
+      // Overlay text shrinks to fit; past 6pt it runs out of the box. Warn, don't block:
+      // the advisor may know the carrier accepts it.
+      for (const f of fill.fields) {
+        const r = f.mapping.rect;
+        if (!r || f.origin === 'signer' || !f.display || f.mapping.format === 'checkbox' || fitsBox(f.display, r)) continue;
+        results.push({ id: `${fill.template.id}:fit:${f.key}`, level: 'warn', title: `${f.label}: may not fit on the form`, detail: `${fill.template.name}. Shorten it if the carrier is strict.`, templateId: fill.template.id, fieldKey: f.key });
+      }
       results.push({
         id: `${fill.template.id}:kind`,
         level: 'warn',

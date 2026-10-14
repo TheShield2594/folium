@@ -122,14 +122,15 @@ export function prefillForm(
       key,
       label: m.label ?? prettifyFieldName(m.pdfField),
       value,
-      display: m.format === 'checkbox' ? value : formatValue(value, m.format),
+      display: m.format === 'checkbox' ? value : formatValue(value, m.format, m.limits),
       origin,
       sourceLabel: describeSource(m.source),
       crmValue: origin === 'edited' ? crmValue : undefined,
       crmBaseline: crmValue ?? '',
       required,
       missing,
-      formatError: validateFormat(value, m.format),
+      // CRM values are checked too, so bad data already in D365 surfaces here.
+      formatError: validateFormat(value, m.format, m.limits, scope.today),
     };
   });
 
@@ -191,7 +192,7 @@ export function inputsNeeded(fills: FormFill[]): { key: string; fields: FieldSta
 
 // ---------------------------------------------------------------- Draft snapshots
 
-const isSsn = (f: FieldState) => f.mapping.format === 'ssn' || f.mapping.format === 'ssnLast4' || /ev_ssn|ssnLast4/.test(f.mapping.source);
+const isSsn = (f: FieldState) => f.mapping.format === 'ssn' || f.mapping.format === 'ssnOrTin' || f.mapping.format === 'ssnLast4' || /ev_ssn|ssnLast4/.test(f.mapping.source);
 const fromCrm = (f: FieldState) => {
   const kind = sourceKind(f.mapping.source);
   return (kind === 'crm' || kind === 'computed') && !f.mapping.source.includes('today') && !isSsn(f);

@@ -4,7 +4,7 @@ import { prettifyFieldName } from '../../domain/format';
 import { mappingWarnings, prefillForm } from '../../domain/prefill';
 import { carryForward, diffRevision, type FieldChange } from '../../domain/revisions';
 import { roleLabel } from '../../domain/signers';
-import type { Check, ClientRecord, Contact, FieldFormat, FieldMapping, FormTemplate, Placement, PlacementType, TemplateMapping } from '../../domain/types';
+import type { Check, ClientRecord, Contact, DateLayout, FieldFormat, FieldLimits, FieldMapping, FormTemplate, Placement, PlacementType, TemplateMapping } from '../../domain/types';
 import { fillPdf } from '../../pdf/fill';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
@@ -16,7 +16,22 @@ import { STATUS_TONE } from './AdminTemplates';
 import { KNOWN_SOURCES, SOURCE_GROUPS } from './sources';
 
 type Tab = 'fields' | 'signers' | 'checks' | 'test';
-const FORMATS: (FieldFormat | '')[] = ['', 'date', 'ssn', 'ssnLast4', 'phone', 'zip', 'email', 'currency', 'percent', 'checkbox'];
+const FORMATS: [FieldFormat | '', string][] = [
+  ['', 'Text'],
+  ['date', 'Date'],
+  ['ssn', 'SSN'],
+  ['ssnLast4', 'SSN last 4'],
+  ['ein', 'EIN'],
+  ['ssnOrTin', 'SSN or EIN'],
+  ['phone', 'Phone'],
+  ['zip', 'ZIP'],
+  ['email', 'Email'],
+  ['currency', 'Currency'],
+  ['percent', 'Percent'],
+  ['integer', 'Whole number'],
+  ['decimal', 'Decimal'],
+  ['checkbox', 'Checkbox'],
+];
 const CHANGE_TONE: Record<FieldChange, 'accent' | 'warn' | 'info' | 'danger' | undefined> = { unchanged: undefined, new: 'warn', renamed: 'info', removed: 'danger' };
 
 export function TemplateEditor() {
@@ -37,6 +52,7 @@ export function TemplateEditor() {
   const [busy, setBusy] = useState<string>();
   const [publishing, setPublishing] = useState(false);
   const [filter, setFilter] = useState<'all' | 'attention'>('all');
+  const [limitsFor, setLimitsFor] = useState<string>();
 
   // Load the mapping when the editor opens a template, not on every refresh of the
   // template list, so a refresh from elsewhere never throws away unsaved edits.
@@ -85,7 +101,7 @@ export function TemplateEditor() {
   }
 
   function addUnmapped() {
-    setMapping((m) => m && { ...m, fields: [...m.fields, ...unmappedInPdf.map((f): FieldMapping => ({ pdfField: f.name, source: 'advisor', required: false, label: prettifyFieldName(f.name), format: f.type === 'checkbox' ? 'checkbox' : undefined }))] });
+    setMapping((m) => m && { ...m, fields: [...m.fields, ...unmappedInPdf.map((f): FieldMapping => ({ pdfField: f.name, source: 'advisor', required: false, label: prettifyFieldName(f.name), format: f.type === 'checkbox' ? 'checkbox' : undefined, limits: f.maxLength ? { maxLength: f.maxLength } : undefined }))] });
   }
 
   async function save(status?: FormTemplate['status'], effectiveDate?: string) {
@@ -281,13 +297,28 @@ export function TemplateEditor() {
                                 {custom && <TextInput aria-label="Custom path" className="mono" style={{ marginTop: 4 }} value={m.source} onChange={(e) => patchField(m.pdfField, { source: e.target.value })} />}
                               </td>
                               <td>
-                                <Select aria-label={`Format for ${m.pdfField}`} value={m.format ?? ''} onChange={(e) => patchField(m.pdfField, { format: (e.target.value || undefined) as FieldFormat | undefined })}>
-                                  {FORMATS.map((f) => (
-                                    <option key={f} value={f}>
-                                      {f || 'Text'}
-                                    </option>
-                                  ))}
-                                </Select>
+                                <div className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
+                                  <Select aria-label={`Format for ${m.pdfField}`} value={m.format ?? ''} onChange={(e) => patchField(m.pdfField, { format: (e.target.value || undefined) as FieldFormat | undefined })}>
+                                    {FORMATS.map(([f, label]) => (
+                                      <option key={f} value={f}>
+                                        {label}
+                                      </option>
+                                    ))}
+                                  </Select>
+                                  {m.format !== 'checkbox' && (
+                                    <IconButton
+                                      icon="sliders"
+                                      size={15}
+                                      label={`Limits for ${m.pdfField}${describeLimits(m.limits) ? `: ${describeLimits(m.limits)}` : ''}`}
+                                      pressed={!!describeLimits(m.limits)}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setLimitsFor(m.pdfField);
+                                      }}
+                                    />
+                                  )}
+                                </div>
+                                {describeLimits(m.limits) && <div className="t-footnote c3" style={{ marginTop: 2 }}>{describeLimits(m.limits)}</div>}
                               </td>
                               <td>
                                 <input type="checkbox" className="check" aria-label={`${m.pdfField} required`} checked={m.required} onChange={(e) => patchField(m.pdfField, { required: e.target.checked })} />
@@ -331,6 +362,14 @@ export function TemplateEditor() {
           </div>
         </div>
       </div>
+      {limitsFor && mapping.fields.some((f) => f.pdfField === limitsFor) && (
+        <LimitsSheet
+          field={mapping.fields.find((f) => f.pdfField === limitsFor)!}
+          pdfMaxLength={info?.fields.find((f) => f.name === limitsFor)?.maxLength}
+          onChange={(limits) => patchField(limitsFor, { limits })}
+          onClose={() => setLimitsFor(undefined)}
+        />
+      )}
       {publishing && (
         <PublishSheet
           template={{ ...template, mapping }}
@@ -626,6 +665,94 @@ function PublishSheet({ template, onClose, onPublish }: { template: FormTemplate
             <Icon name="warning" size={18} />
             No signature tabs are placed. Signers won’t have anywhere to sign in DocuSign.
           </div>
+        )}
+      </div>
+    </Sheet>
+  );
+}
+
+const NUMERIC: (FieldFormat | undefined)[] = ['integer', 'decimal', 'currency', 'percent'];
+
+/** One line summing up a field's limits, for the Fields table. */
+function describeLimits(l: FieldLimits | undefined): string {
+  if (!l) return '';
+  const parts: string[] = [];
+  if (l.min !== undefined || l.max !== undefined) parts.push(`${l.min ?? '…'}–${l.max ?? '…'}`);
+  if (l.minLength || l.maxLength) parts.push(l.minLength ? `${l.minLength}–${l.maxLength ?? '…'} chars` : `≤ ${l.maxLength} chars`);
+  if (l.dateMin || l.dateMax) parts.push(`${l.dateMin ?? '…'} to ${l.dateMax ?? '…'}`);
+  if (l.dateLayout) parts.push(l.dateLayout);
+  return parts.join(' · ');
+}
+
+/** Drop empty entries so a template with no limits saves without a `limits` key. */
+function cleanLimits(l: FieldLimits): FieldLimits | undefined {
+  const out = Object.fromEntries(Object.entries(l).filter(([, v]) => v !== undefined && v !== '' && !Number.isNaN(v))) as FieldLimits;
+  return Object.keys(out).length ? out : undefined;
+}
+
+function LimitsSheet({ field, pdfMaxLength, onChange, onClose }: { field: FieldMapping; pdfMaxLength?: number; onChange: (l: FieldLimits | undefined) => void; onClose: () => void }) {
+  const l = field.limits ?? {};
+  const set = (patch: Partial<FieldLimits>) => onChange(cleanLimits({ ...l, ...patch }));
+  const num = (v: string) => (v.trim() === '' ? undefined : Number(v));
+  const numeric = NUMERIC.includes(field.format);
+  return (
+    <Sheet
+      title={`Limits · ${field.label ?? prettifyFieldName(field.pdfField)}`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="gray" onClick={() => onChange(undefined)}>
+            Clear limits
+          </Button>
+          <Button variant="filled" onClick={onClose}>
+            Done
+          </Button>
+        </>
+      }
+    >
+      <div className="stack-4">
+        {numeric && (
+          <div className="grid-2">
+            <Field label="Lowest" htmlFor="lim-min" help={field.format === 'percent' ? 'Default 0' : undefined}>
+              <TextInput id="lim-min" inputMode="decimal" value={l.min ?? ''} onChange={(e) => set({ min: num(e.target.value) })} />
+            </Field>
+            <Field label="Highest" htmlFor="lim-max" help={field.format === 'percent' ? 'Default 100' : undefined}>
+              <TextInput id="lim-max" inputMode="decimal" value={l.max ?? ''} onChange={(e) => set({ max: num(e.target.value) })} />
+            </Field>
+          </div>
+        )}
+        {field.format === 'date' && (
+          <>
+            <div className="grid-2">
+              <Field label="Earliest" htmlFor="lim-dmin" help="A date, today, or -120y / +30d / -6m">
+                <TextInput id="lim-dmin" className="mono" value={l.dateMin ?? ''} placeholder="-120y" onChange={(e) => set({ dateMin: e.target.value.trim() || undefined })} />
+              </Field>
+              <Field label="Latest" htmlFor="lim-dmax" help="e.g. today for a date of birth">
+                <TextInput id="lim-dmax" className="mono" value={l.dateMax ?? ''} placeholder="today" onChange={(e) => set({ dateMax: e.target.value.trim() || undefined })} />
+              </Field>
+            </div>
+            <Field label="Prints as" htmlFor="lim-layout">
+              <Select id="lim-layout" value={l.dateLayout ?? ''} onChange={(e) => set({ dateLayout: (e.target.value || undefined) as DateLayout | undefined })}>
+                <option value="">MM/DD/YYYY (default)</option>
+                <option value="YYYY-MM-DD">YYYY-MM-DD</option>
+                <option value="MMDDYYYY">MMDDYYYY</option>
+                <option value="DD/MM/YYYY">DD/MM/YYYY</option>
+              </Select>
+            </Field>
+          </>
+        )}
+        <div className="grid-2">
+          <Field label="Fewest characters" htmlFor="lim-minlen" optional>
+            <TextInput id="lim-minlen" inputMode="numeric" value={l.minLength ?? ''} onChange={(e) => set({ minLength: num(e.target.value) })} />
+          </Field>
+          <Field label="Most characters" htmlFor="lim-maxlen" optional help={pdfMaxLength ? `The PDF box allows ${pdfMaxLength}.` : 'Measured on the printed value.'}>
+            <TextInput id="lim-maxlen" inputMode="numeric" value={l.maxLength ?? ''} onChange={(e) => set({ maxLength: num(e.target.value) })} />
+          </Field>
+        </div>
+        {pdfMaxLength && l.maxLength !== pdfMaxLength && (
+          <Button variant="tinted" size="sm" onClick={() => set({ maxLength: pdfMaxLength })}>
+            Use the PDF’s limit ({pdfMaxLength})
+          </Button>
         )}
       </div>
     </Sheet>

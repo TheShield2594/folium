@@ -15,6 +15,12 @@ export interface FillReport {
   pdf: Uint8Array;
   /** Mapped fields the PDF didn't have (a sign the mapping is stale). */
   unknownFields: string[];
+  /**
+   * Fields whose value was longer than the PDF's MaxLen and had to be cut. Review
+   * blocks these when the mapping carries `limits.maxLength`; this catches mappings
+   * that don't yet.
+   */
+  truncated: string[];
 }
 
 /** Fill a template PDF with prefill values, entirely in the browser (pdf-lib). */
@@ -22,6 +28,7 @@ export async function fillPdf(template: Uint8Array, fields: FieldState[], opts: 
   const doc = await PDFDocument.load(template, { ignoreEncryption: true });
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const unknownFields: string[] = [];
+  const truncated: string[] = [];
   const pages = doc.getPages();
 
   const toFill = fields.filter((f) => f.origin !== 'signer' && f.value !== '');
@@ -36,6 +43,8 @@ export async function fillPdf(template: Uint8Array, fields: FieldState[], opts: 
       }
       if (field instanceof PDFTextField) {
         const max = field.getMaxLength();
+        if (max && f.display.length > max) truncated.push(f.mapping.pdfField);
+        // pdf-lib throws past MaxLen, so cut it; the report says which fields lost text.
         field.setText(max ? f.display.slice(0, max) : f.display);
       } else if (field instanceof PDFCheckBox) {
         if (isTruthy(f.value)) field.check();
@@ -74,7 +83,7 @@ export async function fillPdf(template: Uint8Array, fields: FieldState[], opts: 
     }
   }
 
-  return { pdf: await doc.save(), unknownFields };
+  return { pdf: await doc.save(), unknownFields, truncated };
 }
 
 /** Merge several PDFs into one (for "Download PDFs to sign in person" and print). */
