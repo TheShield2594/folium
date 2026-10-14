@@ -1,5 +1,6 @@
 import { retentionDays } from './requests';
 import type { FirmPolicy, UserGroup, UserProfile } from './types';
+import { isActiveUser } from './users';
 
 // Firm-wide rules: who can share with whom, whose rep data can prefill a form, and which
 // PDFs can leave Folium. Pure, so the screens and the tests agree on them. Dataverse
@@ -16,6 +17,7 @@ export function withPolicyDefaults(p: Partial<FirmPolicy> | undefined): FirmPoli
     sharing: pick(p?.sharing, ['off', 'groups', 'anyone'], DEFAULT_POLICY.sharing),
     repDataVisibility: pick(p?.repDataVisibility, ['assistants', 'groupMembers'], DEFAULT_POLICY.repDataVisibility),
     pdfDownload: pick(p?.pdfDownload, ['all', 'signedOnly', 'none'], DEFAULT_POLICY.pdfDownload),
+    dormantAfterDays: p?.dormantAfterDays && p.dormantAfterDays > 0 ? p.dormantAfterDays : undefined,
   };
 }
 
@@ -30,8 +32,8 @@ export function shareAGroup(a: string, b: string, groups: UserGroup[]): boolean 
 export const sharingAllowed = (policy: FirmPolicy | undefined) => (policy?.sharing ?? DEFAULT_POLICY.sharing) !== 'off' && retentionDays(policy) > 0;
 
 /** Whether `me` can share a draft with `target`. */
-export function canShareWith(me: Pick<UserProfile, 'systemuserid'>, target: Pick<UserProfile, 'systemuserid'>, groups: UserGroup[], policy: FirmPolicy | undefined): boolean {
-  if (me.systemuserid === target.systemuserid || !sharingAllowed(policy)) return false;
+export function canShareWith(me: Pick<UserProfile, 'systemuserid'>, target: Pick<UserProfile, 'systemuserid' | 'active' | 'disabled'>, groups: UserGroup[], policy: FirmPolicy | undefined): boolean {
+  if (me.systemuserid === target.systemuserid || !sharingAllowed(policy) || !isActiveUser(target)) return false;
   if ((policy?.sharing ?? DEFAULT_POLICY.sharing) === 'anyone') return true;
   return shareAGroup(me.systemuserid, target.systemuserid, groups);
 }
@@ -43,7 +45,7 @@ export function canShareWith(me: Pick<UserProfile, 'systemuserid'>, target: Pick
  */
 export function actableUsers(me: UserProfile, users: UserProfile[], groups: UserGroup[], policy: FirmPolicy | undefined = DEFAULT_POLICY): UserProfile[] {
   const ids = new Set(groupsOf(me.systemuserid, groups).flatMap((g) => g.memberIds));
-  const groupUsers = users.filter((u) => u.role === 'User' && ids.has(u.systemuserid) && u.systemuserid !== me.systemuserid);
+  const groupUsers = users.filter((u) => u.role === 'User' && ids.has(u.systemuserid) && u.systemuserid !== me.systemuserid && isActiveUser(u));
   if (me.role === 'Assistant') return groupUsers;
   if (me.role === 'User' && policy.repDataVisibility === 'groupMembers') return [me, ...groupUsers];
   return [me];

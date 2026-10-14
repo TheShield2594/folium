@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import { FoliumAppIcon } from '../../brand/FoliumMark';
+import { withRepAudit } from '../../domain/advisor';
 import type { UserProfile, VerificationMethod } from '../../domain/types';
 import { useServices } from '../../services';
 import { resetDemo, setDemoUser } from '../../services/demo';
 import { Toolbar } from '../../shell/Shell';
 import { useApp, type Theme } from '../../state/store';
+import { RepAudit, RepDetails } from '../common/RepDetails';
 import { StatesPicker } from '../common/StatesPicker';
-import { Avatar, Badge, Button, Field, Segmented, Select, TextArea, TextInput, toast } from '../../ui/controls';
+import { Avatar, Badge, Button, Field, Segmented, Select, TextArea, toast } from '../../ui/controls';
 
 /** Your own Folium profile (User Data), preferences and appearance. */
 export function SettingsScreen() {
@@ -14,6 +16,7 @@ export function SettingsScreen() {
   const users = useApp((s) => s.users);
   const groups = useApp((s) => s.groups);
   const firm = useApp((s) => s.firm);
+  const policy = useApp((s) => s.policy);
   const theme = useApp((s) => s.theme);
   const setTheme = useApp((s) => s.setTheme);
   const reloadDirectory = useApp((s) => s.reloadDirectory);
@@ -30,7 +33,7 @@ export function SettingsScreen() {
   async function save() {
     setBusy(true);
     try {
-      await services.directory.saveUser(p!);
+      await services.directory.saveUser(withRepAudit(me, p!, me!.fullname));
       await reloadDirectory();
       toast.ok('Profile saved. New forms use it right away.');
     } catch (e) {
@@ -64,29 +67,12 @@ export function SettingsScreen() {
             <div>
               <h2 id="prof-h" className="t-title3">{me.role === 'User' ? 'Your advisor details' : 'Your details'}</h2>
               <p className="t-footnote c3">
-                {me.role === 'Assistant' ? 'Forms you prepare use the advisor you’re working for. ' : 'Forms fill rep fields (name, rep code, phone) from here. '}Your name comes from your Microsoft account.
+                {me.role === 'Assistant' ? 'Forms you prepare use the advisor you’re working for. ' : 'Forms fill rep fields (name, office, phones, rep code) from here. '}
+                Your name, phones, title and office come from your Microsoft profile; anything you change here is used on forms instead.
               </p>
             </div>
-            <div className="grid-2">
-              <Field label="Name" htmlFor="u-name" help="Managed in Microsoft Entra ID">
-                <TextInput id="u-name" value={p.fullname} disabled />
-              </Field>
-              <Field label="Title" htmlFor="u-title">
-                <TextInput id="u-title" value={p.title} onChange={(e) => set({ title: e.target.value })} />
-              </Field>
-              <Field label="Email" htmlFor="u-email">
-                <TextInput id="u-email" type="email" value={p.email} onChange={(e) => set({ email: e.target.value })} />
-              </Field>
-              <Field label="Phone" htmlFor="u-phone">
-                <TextInput id="u-phone" type="tel" value={p.phone} onChange={(e) => set({ phone: e.target.value })} />
-              </Field>
-              <Field label="Rep code" htmlFor="u-rep">
-                <TextInput id="u-rep" className="mono" value={p.repCode} onChange={(e) => set({ repCode: e.target.value })} />
-              </Field>
-              <Field label="Branch" htmlFor="u-branch">
-                <TextInput id="u-branch" value={p.branch} onChange={(e) => set({ branch: e.target.value })} />
-              </Field>
-            </div>
+            <RepDetails value={p} onChange={set} editor={me} policy={policy} idPrefix="u" />
+            <RepAudit user={p} />
           </section>
 
           <section className="card card-pad stack-4" aria-labelledby="def-h">

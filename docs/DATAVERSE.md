@@ -33,7 +33,13 @@ Later: `ev_onbasehandle` (phase 2).
 
 ## ev_foliumprofile — one row per Folium user
 
-`ev_user` (Lookup → systemuser), `ev_role` (Choice: User · Assistant · Admin), `ev_name`, `ev_payload` (`UserProfile`: rep code, branch, region, defaults, sign-off, groupIds).
+`ev_user` (Lookup → systemuser), `ev_role` (Choice: User · Assistant · Admin), `ev_name`, `ev_payload` (`UserProfile`: rep code, OSJ and RIA numbers, branch, region, defaults, sign-off, groupIds, `canEditRepData`, `repDataAudit`, `lastSeenOn`). `statecode` 1 (Inactive, `statuscode` 2) is a profile an Admin deactivated: it's kept, so requests keep their owner.
+
+The payload stores only what Folium overrides. Name, middle name, email, phone, fax, mobile, title and office address are read from the user's `systemuser` row (`fullname`, `middlename`, `internalemailaddress`, `address1_telephone1`, `address1_fax`, `mobilephone`, `title`, `address1_line1`/`line2`/`city`/`stateorprovince`/`postalcode`) every time, and `isdisabled` marks someone who has left. Folium users need read access to those `systemuser` columns. A Compliance view on `ev_foliumprofile` (name, role, status, modified on) can be opened in Excel for audits; Users & groups also downloads the list as CSV.
+
+## Contact: ID documents (to confirm)
+
+If Everence keeps driver's licence, passport, green card or citizenship columns on `contact`, name them in `ID_DOCUMENT_COLUMNS` (`src/services/power/config.ts`) and add the number columns to the same field security profile as `ev_ssn`. Folium reads them for the client and the Spouse connection (`id.client.*`, `id.spouse.*`) and never writes them.
 
 ## ev_foliumgroup
 

@@ -7,6 +7,7 @@ import { fillSubject, fillTokens, formatValue, resolveDateLimit, validateFormat 
 import { buildCondition, conditionTerms, evaluateCondition, explainCondition, parseCondition, resolvePath } from './paths';
 import { carryVariantValues, choiceDisplay, choiceOptions, fieldKey, fillBlockFromPerson, personBlocks, relatedPeople, inputsNeeded, mappingWarnings, migrateAccountValues, prefillForm, prefillPacket, seedCopyValues, termLabels, validateMapping } from './prefill';
 import { carryForward, diffRevision, latestLive } from './revisions';
+import { ID_SOURCE_OPTIONS, isIdNumberKey, parseIdSource, readIdDocuments } from './idDocuments';
 import { assignSigners, rolesForPacket, validateSigners } from './signers';
 import { buildEnvelopeDefinition, placementsToTabs } from '../services/docusign/tabs';
 
@@ -759,5 +760,40 @@ describe('envelope email templates', () => {
     expect(s.startsWith('Forms for Jordan A. Miller: ')).toBe(true);
     expect(fillSubject('  {client.middlename}  Forms  ', { ...ctx, client: { ...client.contact, middlename: undefined } })).toBe('Forms');
     expect(fillSubject('For {client.firstname} {client.nosuch}: {forms}', { ...ctx, forms: ['Transfer'] })).toBe('For Jordan: transfer');
+  });
+});
+
+describe('ID documents', () => {
+  it('reads the client’s and spouse’s ID from CRM when Dynamics holds it', () => {
+    expect(resolvePath('id.client.dlNumber', scope)).toBe('M210-5541-9823');
+    expect(resolvePath('id.client.dlExpires', scope)).toBe('2029-04-18');
+    expect(resolvePath('id.spouse.dlNumber', scope)).toBeUndefined();
+    const withSpouseId = { ...client, connections: client.connections.map((c) => (c.role === 'Spouse' ? { ...c, contact: { ...c.contact, idDocuments: { passportNumber: 'X1234567' } } } : c)) };
+    expect(resolvePath('id.spouse.passportNumber', { ...scope, client: withSpouseId })).toBe('X1234567');
+    expect(resolvePath('id.client.shoeSize', scope)).toBeUndefined();
+  });
+
+  it('is entered once per packet when CRM doesn’t have it', () => {
+    const app = tpl('tpl-ev1300-0226');
+    const bare = { ...client, contact: { ...client.contact, idDocuments: undefined } };
+    const fill = prefillForm(app, { ...scope, client: bare }, {});
+    const dl = fill.fields.find((f) => f.mapping.pdfField === 'ID_DL_Number')!;
+    expect(dl.key).toBe('id.client.dlNumber');
+    expect(dl.missing).toBe(true);
+    expect(dl.sourceLabel).toBe('Client’s ID documents');
+    const entered = prefillForm(app, { ...scope, client: bare }, { 'id.client.dlNumber': 'B123' });
+    expect(entered.fields.find((f) => f.mapping.pdfField === 'ID_DL_Number')).toMatchObject({ value: 'B123', origin: 'advisor', missing: false });
+  });
+
+  it('reads the configured contact columns', () => {
+    expect(readIdDocuments({ ev_dlnumber: 'B123', ev_dlexpires: '2030-01-31T00:00:00Z', ev_passport: '' }, { dlNumber: 'ev_dlnumber', dlExpires: 'ev_dlexpires', passportNumber: 'ev_passport' })).toEqual({ dlNumber: 'B123', dlExpires: '2030-01-31' });
+    expect(readIdDocuments({}, {})).toBeUndefined();
+  });
+
+  it('offers every field for client and spouse in the mapping editor', () => {
+    expect(ID_SOURCE_OPTIONS).toContainEqual(['id.spouse.passportExpires', 'Spouse · Passport expires']);
+    expect(parseIdSource('id.client.dlExpires')?.field.format).toBe('date');
+    expect(isIdNumberKey('id.client.dlNumber')).toBe(true);
+    expect(isIdNumberKey('id.client.dlState')).toBe(false);
   });
 });

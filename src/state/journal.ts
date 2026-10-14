@@ -1,3 +1,4 @@
+import { isIdNumberKey } from '../domain/idDocuments';
 import { fieldKey } from '../domain/prefill';
 import type { FieldFormat, FormTemplate } from '../domain/types';
 import type { Packet } from './store';
@@ -55,9 +56,9 @@ export function sensitiveKeys(templates: FormTemplate[]): SensitiveTest {
   };
 }
 
-const keep = (sensitive?: SensitiveTest) => ([k]: [string, string]) => !sensitive?.(k) && !SENSITIVE.test(k);
+const keep = (sensitive?: SensitiveTest) => ([k]: [string, string]) => !sensitive?.(k) && !SENSITIVE.test(k) && !isIdNumberKey(k.replace(/^pi-[^/]+\//, ''));
 
-/** The packet without SSN, EIN or TIN values, in what was entered and in the CRM snapshot. */
+/** The packet without SSN, EIN, TIN or ID document numbers, in what was entered and in the CRM snapshot. */
 export function redactPacket(packet: Packet, sensitive?: SensitiveTest): Packet {
   const values = Object.fromEntries(Object.entries(packet.values).filter(keep(sensitive)));
   return packet.snapshot ? { ...packet, values, snapshot: Object.fromEntries(Object.entries(packet.snapshot).filter(keep(sensitive))) } : { ...packet, values };

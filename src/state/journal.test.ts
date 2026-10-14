@@ -28,6 +28,11 @@ describe('packet journal', () => {
     expect(r.values).toEqual({ 'bene.Prim.1.pct': '100', 'withholding.federal': '10' });
   });
 
+  it('keeps ID document numbers out too, but not their dates or states', () => {
+    const r = redactPacket(packet({ values: { 'id.client.dlNumber': 'B123', 'pi-2/id.spouse.passportNumber': 'X1', 'id.client.dlState': 'IN', 'id.client.dlExpires': '2030-01-31' } }));
+    expect(r.values).toEqual({ 'id.client.dlState': 'IN', 'id.client.dlExpires': '2030-01-31' });
+  });
+
   it('leaves out values of SSN, EIN and TIN fields whatever their key is called', () => {
     const t = {
       ...TEMPLATES[0],

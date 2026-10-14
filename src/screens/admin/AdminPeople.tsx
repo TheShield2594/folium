@@ -1,10 +1,28 @@
-import { useState } from 'react';
-import type { FormCategory, FormSource, UserGroup, UserProfile, UserRole } from '../../domain/types';
+import { useMemo, useRef, useState } from 'react';
+import { withRepAudit } from '../../domain/advisor';
+import type { FirmPolicy, FormCategory, FormSource, UserGroup, UserProfile, UserRole } from '../../domain/types';
+import {
+  bulkSummary,
+  dormantDays,
+  isActiveUser,
+  lastAdminProblem,
+  parseUserImport,
+  planBulk,
+  planImport,
+  STATUS_LABEL,
+  userStatus,
+  usersCsv,
+  type BulkAction,
+  type ImportOutcome,
+  type UserStatus,
+} from '../../domain/users';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
+import { saveUserChanges, type ChangeReport } from '../../state/people';
 import { actableUsers, useApp } from '../../state/store';
-import { Avatar, Badge, Button, Field, IconButton, SearchField, Segmented, Select, Sheet, TextArea, TextInput, toast } from '../../ui/controls';
+import { Avatar, Badge, Button, downloadBytes, Field, IconButton, SearchField, Segmented, Select, Sheet, TextArea, TextInput, toast } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
+import { RepAudit, RepDetails } from '../common/RepDetails';
 
 const ROLES: { value: UserRole; label: string; detail: string }[] = [
   { value: 'User', label: 'User', detail: 'Advisor. Prepares and sends forms for their own clients.' },
@@ -26,21 +44,69 @@ async function runSave(setBusy: (b: boolean) => void, fn: () => Promise<void>) {
 const SOURCES: FormSource[] = ['Everence', 'Praxis', 'Carrier'];
 const CATEGORIES: FormCategory[] = ['Account maintenance', 'Beneficiary', 'Distributions', 'Transfers', 'New accounts', 'Insurance service', 'Banking'];
 
-/** User groups by role and region, and each person's Folium role. */
+const STATUS_TONE: Record<UserStatus, 'accent' | 'warn' | 'info' | 'danger' | undefined> = {
+  active: 'accent',
+  dormant: 'warn',
+  unused: undefined,
+  inactive: undefined,
+  disabled: 'danger',
+  noProfile: 'info',
+};
+
+/** Say how a batch of saves went: all saved, or who failed and why. */
+function announce(report: ChangeReport, what: string) {
+  if (!report.failed.length) toast.ok(`${what}: ${report.saved.length} saved`);
+  else toast.error(`${what}: ${report.saved.length} saved, ${report.failed.length} failed — ${report.failed.map((f) => `${f.name} (${f.error})`).join('; ')}`);
+}
+
+const lastSeen = (u: UserProfile) => (u.lastSeenOn ? new Date(u.lastSeenOn).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'never');
+
+/** User groups by role and region, and each person's Folium role, status and rep details. */
 export function AdminPeople() {
   const users = useApp((s) => s.users);
   const groups = useApp((s) => s.groups);
   const policy = useApp((s) => s.policy);
+  const me = useApp((s) => s.me);
   const reloadDirectory = useApp((s) => s.reloadDirectory);
   const services = useServices();
   const [tab, setTab] = useState<'groups' | 'users'>('groups');
   const [q, setQ] = useState('');
+  const [statusFilter, setStatusFilter] = useState<UserStatus | ''>('');
+  const [roleFilter, setRoleFilter] = useState<UserRole | ''>('');
+  const [groupFilter, setGroupFilter] = useState('');
+  const [selected, setSelected] = useState<string[]>([]);
+  const [bulk, setBulk] = useState<BulkAction>();
+  const [importing, setImporting] = useState(false);
   const [editUser, setEditUser] = useState<UserProfile | 'new'>();
   const [editGroup, setEditGroup] = useState<UserGroup | 'new'>();
 
+  const now = useMemo(() => new Date(), []);
+  const statusOf = (u: UserProfile) => userStatus(u, u.directory, now, dormantDays(policy));
   const byId = (id: string) => users.find((u) => u.systemuserid === id);
-  const filteredUsers = users.filter((u) => !q || `${u.fullname} ${u.email} ${u.branch} ${u.region}`.toLowerCase().includes(q.toLowerCase()));
+  const filteredUsers = users.filter(
+    (u) =>
+      (!q || `${u.fullname} ${u.email} ${u.branch} ${u.region} ${u.repCode}`.toLowerCase().includes(q.toLowerCase())) &&
+      (!statusFilter || statusOf(u) === statusFilter) &&
+      (!roleFilter || u.role === roleFilter) &&
+      (!groupFilter || u.groupIds.includes(groupFilter) || groups.find((g) => g.id === groupFilter)?.memberIds.includes(u.systemuserid)),
+  );
   const filteredGroups = groups.filter((g) => !q || `${g.name} ${g.region} ${g.description}`.toLowerCase().includes(q.toLowerCase()));
+  const shownSelected = selected.filter((id) => filteredUsers.some((u) => u.systemuserid === id));
+  const counts = users.reduce<Partial<Record<UserStatus, number>>>((acc, u) => ({ ...acc, [statusOf(u)]: (acc[statusOf(u)] ?? 0) + 1 }), {});
+
+  async function saveOne(before: UserProfile | undefined, u: UserProfile) {
+    const problem = lastAdminProblem(users, [u]);
+    if (problem) throw new Error(problem);
+    const audited = withRepAudit(before, u, me?.fullname ?? 'Administrator');
+    const report = await saveUserChanges(services.directory, users, groups, [audited]);
+    if (report.failed.length) throw new Error(report.failed[0].error);
+    await reloadDirectory();
+  }
+
+  function exportList() {
+    const csv = usersCsv(filteredUsers, groups, statusOf);
+    downloadBytes(new TextEncoder().encode(csv), `folium-users-${now.toISOString().slice(0, 10)}.csv`, 'text/csv;charset=utf-8');
+  }
 
   return (
     <>
@@ -54,6 +120,16 @@ export function AdminPeople() {
             { value: 'users', label: `Users (${users.length})` },
           ]}
         />
+        {tab === 'users' && (
+          <>
+            <Button variant="gray" icon="upload" onClick={() => setImporting(true)}>
+              Import
+            </Button>
+            <Button variant="gray" icon="download" onClick={exportList} disabled={!filteredUsers.length}>
+              Download as Excel
+            </Button>
+          </>
+        )}
         <Button variant="filled" icon="plus" onClick={() => (tab === 'groups' ? setEditGroup('new') : setEditUser('new'))}>
           {tab === 'groups' ? 'New group' : 'Add user'}
         </Button>
@@ -62,8 +138,10 @@ export function AdminPeople() {
         <div className="page page-narrow stack-5">
           <div>
             <h1 className="t-large">Users & groups</h1>
-            <p className="t-callout c2" style={{ marginTop: 4 }}>
-              Groups gather people by office, region or team. They decide which forms people see, who can share packets, and which advisors an assistant works for.
+            <p className="t-callout c2">
+              {tab === 'groups'
+                ? 'Groups gather people by office, region or team. They decide which forms people see, who can share packets, and which advisors an assistant works for.'
+                : 'Access to Folium comes from the Microsoft Entra ID group the app is shared with: when someone leaves Everence, their access ends with their account. Deactivate a profile to take someone out of Folium without touching their requests.'}
             </p>
           </div>
           <SearchField value={q} onChange={setQ} placeholder={tab === 'groups' ? 'Search groups' : 'Search people'} label="Search" />
@@ -105,45 +183,192 @@ export function AdminPeople() {
               })}
             </div>
           ) : (
-            <div className="list">
-              {filteredUsers.map((u) => {
-                const forWhom = u.role === 'Assistant' ? actableUsers(u, users, groups, policy) : [];
-                return (
-                  <button key={u.systemuserid} className="list-row" onClick={() => setEditUser(u)} style={{ padding: '12px 16px' }}>
-                    <Avatar name={u.fullname} size={34} alt={u.role !== 'User'} />
-                    <div className="grow" style={{ minWidth: 0 }}>
-                      <div className="t-headline">{u.fullname}</div>
-                      <div className="t-footnote c3 ellipsis">
-                        {u.title} · {u.branch}
-                        {u.repCode ? ` · ${u.repCode}` : ''}
-                        {forWhom.length ? ` · works for ${forWhom.map((x) => x.fullname).join(', ')}` : ''}
-                      </div>
+            <div className="stack-3">
+              <div className="row wrap" style={{ gap: 8 }}>
+                <Select aria-label="Status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as UserStatus | '')} style={{ width: 'auto' }}>
+                  <option value="">Every status</option>
+                  {(Object.keys(STATUS_LABEL) as UserStatus[])
+                    .filter((k) => k !== 'noProfile')
+                    .map((k) => (
+                      <option key={k} value={k}>
+                        {STATUS_LABEL[k]} ({counts[k] ?? 0})
+                      </option>
+                    ))}
+                </Select>
+                <Select aria-label="Role" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value as UserRole | '')} style={{ width: 'auto' }}>
+                  <option value="">Every role</option>
+                  {ROLES.map((r) => (
+                    <option key={r.value} value={r.value}>
+                      {r.label}s
+                    </option>
+                  ))}
+                </Select>
+                <Select aria-label="Group" value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)} style={{ width: 'auto' }}>
+                  <option value="">Every group</option>
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </Select>
+                <span className="spacer" />
+                <span className="t-footnote c3">
+                  {filteredUsers.length} of {users.length}
+                  {counts.dormant ? ` · ${counts.dormant} dormant` : ''}
+                  {counts.disabled ? ` · ${counts.disabled} left Everence` : ''}
+                </span>
+              </div>
+
+              {shownSelected.length > 0 && (
+                <div className="card card-pad row wrap" role="region" aria-label="Selected people" style={{ gap: 8 }}>
+                  <strong className="grow">{shownSelected.length} selected</strong>
+                  <Select
+                    aria-label="Change selected people"
+                    value=""
+                    style={{ width: 'auto' }}
+                    onChange={(e) => {
+                      const [kind, arg] = e.target.value.split(':');
+                      if (!kind) return;
+                      setBulk(kind === 'role' ? { kind, role: arg as UserRole } : kind === 'addGroup' || kind === 'removeGroup' ? { kind, groupId: arg } : ({ kind } as BulkAction));
+                    }}
+                  >
+                    <option value="">Change…</option>
+                    <optgroup label="Role">
+                      {ROLES.map((r) => (
+                        <option key={r.value} value={`role:${r.value}`}>
+                          Make {r.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Add to group">
+                      {groups.map((g) => (
+                        <option key={g.id} value={`addGroup:${g.id}`}>
+                          Add to {g.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Remove from group">
+                      {groups.map((g) => (
+                        <option key={g.id} value={`removeGroup:${g.id}`}>
+                          Remove from {g.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Access">
+                      <option value="deactivate">Deactivate</option>
+                      <option value="reactivate">Reactivate</option>
+                    </optgroup>
+                  </Select>
+                  <Button variant="gray" size="sm" onClick={() => setSelected([])}>
+                    Clear
+                  </Button>
+                </div>
+              )}
+
+              <div className="list">
+                <label className="list-row" style={{ cursor: 'pointer', padding: '8px 16px' }}>
+                  <input
+                    type="checkbox"
+                    className="check"
+                    aria-label="Select everyone shown"
+                    checked={!!filteredUsers.length && shownSelected.length === filteredUsers.length}
+                    onChange={(e) => setSelected(e.target.checked ? filteredUsers.map((u) => u.systemuserid) : [])}
+                  />
+                  <span className="t-footnote c3 grow">Select everyone shown</span>
+                  <span className="t-footnote c3">Last sign-in</span>
+                </label>
+                {filteredUsers.map((u) => {
+                  const forWhom = u.role === 'Assistant' ? actableUsers(u, users, groups, policy) : [];
+                  const status = statusOf(u);
+                  return (
+                    <div key={u.systemuserid} className="list-row" style={{ padding: '8px 16px', opacity: isActiveUser(u) ? 1 : 0.7 }}>
+                      <input
+                        type="checkbox"
+                        className="check"
+                        aria-label={`Select ${u.fullname}`}
+                        checked={selected.includes(u.systemuserid)}
+                        onChange={(e) => setSelected(e.target.checked ? [...selected, u.systemuserid] : selected.filter((x) => x !== u.systemuserid))}
+                      />
+                      <button className="row grow" onClick={() => setEditUser(u)} style={{ all: 'unset', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', flex: 1, minWidth: 0 }}>
+                        <Avatar name={u.fullname} size={34} alt={u.role !== 'User'} />
+                        <div className="grow" style={{ minWidth: 0 }}>
+                          <div className="t-headline">{u.fullname}</div>
+                          <div className="t-footnote c3 ellipsis">
+                            {u.title} · {u.branch}
+                            {u.repCode ? ` · ${u.repCode}` : ''}
+                            {forWhom.length ? ` · works for ${forWhom.map((x) => x.fullname).join(', ')}` : ''}
+                          </div>
+                        </div>
+                        {status !== 'active' && <Badge tone={STATUS_TONE[status]}>{STATUS_LABEL[status]}</Badge>}
+                        <Badge tone={u.role === 'Admin' ? 'info' : u.role === 'Assistant' ? 'warn' : 'accent'}>{u.role}</Badge>
+                        <span className="t-footnote c3" style={{ width: 92, textAlign: 'right' }}>
+                          {lastSeen(u)}
+                        </span>
+                        <Icon name="chevronRight" size={14} className="c3" />
+                      </button>
                     </div>
-                    <Badge tone={u.role === 'Admin' ? 'info' : u.role === 'Assistant' ? 'warn' : 'accent'}>{u.role}</Badge>
-                    <Icon name="chevronRight" size={14} className="c3" />
-                  </button>
-                );
-              })}
+                  );
+                })}
+              </div>
+              <p className="t-footnote c3">
+                “Dormant” means no sign-in for {dormantDays(policy)} days (Administration › Settings). “Left Everence” means the Microsoft account is turned off.
+              </p>
             </div>
           )}
         </div>
       </div>
 
-      {editUser && (
+      {editUser && me && (
         <UserSheet
           user={editUser === 'new' ? undefined : editUser}
+          me={me}
+          users={users}
           groups={groups}
+          policy={policy}
+          status={editUser === 'new' ? undefined : statusOf(editUser)}
           onClose={() => setEditUser(undefined)}
-          onSave={async (u, groupIds) => {
-            await services.directory.saveUser({ ...u, groupIds });
-            for (const g of groups) {
-              const has = g.memberIds.includes(u.systemuserid);
-              const want = groupIds.includes(g.id);
-              if (has !== want) await services.directory.saveGroup({ ...g, memberIds: want ? [...g.memberIds, u.systemuserid] : g.memberIds.filter((x) => x !== u.systemuserid) });
-            }
-            await reloadDirectory();
+          onSave={async (u) => {
+            await saveOne(editUser === 'new' ? undefined : editUser, u);
             setEditUser(undefined);
             toast.ok(`Saved ${u.fullname}`);
+          }}
+          onSetActive={
+            editUser === 'new'
+              ? undefined
+              : async (active) => {
+                  await saveOne(editUser, { ...editUser, active });
+                  setEditUser(undefined);
+                  toast.ok(active ? `${editUser.fullname} reactivated` : `${editUser.fullname} deactivated. Their requests are kept.`);
+                }
+          }
+        />
+      )}
+      {bulk && (
+        <BulkSheet
+          action={bulk}
+          users={users}
+          groups={groups}
+          ids={shownSelected}
+          onClose={() => setBulk(undefined)}
+          onConfirm={async (changed) => {
+            const report = await saveUserChanges(services.directory, users, groups, changed);
+            await reloadDirectory();
+            announce(report, bulkSummary(bulk, changed.length, groups));
+            setBulk(undefined);
+            setSelected(report.failed.length ? selected : []);
+          }}
+        />
+      )}
+      {importing && (
+        <ImportSheet
+          users={users}
+          groups={groups}
+          onClose={() => setImporting(false)}
+          onConfirm={async (changed) => {
+            const report = await saveUserChanges(services.directory, users, groups, changed);
+            await reloadDirectory();
+            announce(report, 'Import');
+            if (!report.failed.length) setImporting(false);
           }}
         />
       )}
@@ -174,23 +399,56 @@ export function AdminPeople() {
   );
 }
 
-function UserSheet({ user, groups, onClose, onSave }: { user?: UserProfile; groups: UserGroup[]; onClose: () => void; onSave: (u: UserProfile, groupIds: string[]) => Promise<void> }) {
+function UserSheet({
+  user,
+  me,
+  users,
+  groups,
+  policy,
+  status,
+  onClose,
+  onSave,
+  onSetActive,
+}: {
+  user?: UserProfile;
+  me: UserProfile;
+  users: UserProfile[];
+  groups: UserGroup[];
+  policy: FirmPolicy;
+  status?: UserStatus;
+  onClose: () => void;
+  onSave: (u: UserProfile) => Promise<void>;
+  onSetActive?: (active: boolean) => Promise<void>;
+}) {
   const [u, setU] = useState<UserProfile>(
-    user ?? { systemuserid: `usr-${Date.now()}`, fullname: '', email: '', phone: '', repCode: '', branch: '', title: '', role: 'User', groupIds: [] },
+    user ? { ...user, groupIds: groups.filter((g) => g.memberIds.includes(user.systemuserid)).map((g) => g.id) } : { systemuserid: `usr-${Date.now()}`, fullname: '', email: '', phone: '', repCode: '', branch: '', title: '', role: 'User', groupIds: [] },
   );
-  const [groupIds, setGroupIds] = useState<string[]>(groups.filter((g) => g.memberIds.includes(u.systemuserid)).map((g) => g.id));
   const [busy, setBusy] = useState(false);
   const set = (p: Partial<UserProfile>) => setU({ ...u, ...p });
+  const active = !user || user.active !== false;
+  const roleProblem = user ? lastAdminProblem(users, [u]) : undefined;
+  const deactivateProblem = user ? lastAdminProblem(users, [{ ...user, active: false }]) : undefined;
   return (
     <Sheet
+      wide
       title={user ? user.fullname : 'Add user'}
       onClose={onClose}
       footer={
         <>
+          {onSetActive && (
+            <Button
+              variant={active ? 'danger' : 'gray'}
+              disabled={busy || (active && !!deactivateProblem)}
+              onClick={() => runSave(setBusy, () => onSetActive(!active))}
+            >
+              {active ? 'Deactivate' : 'Reactivate'}
+            </Button>
+          )}
+          <span className="spacer" />
           <Button variant="gray" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="filled" busy={busy} disabled={!u.fullname || !u.email} onClick={() => runSave(setBusy, () => onSave(u, groupIds))}>
+          <Button variant="filled" busy={busy} disabled={!u.fullname || !u.email || !!roleProblem} onClick={() => runSave(setBusy, () => onSave(u))}>
             Save
           </Button>
         </>
@@ -198,24 +456,49 @@ function UserSheet({ user, groups, onClose, onSave }: { user?: UserProfile; grou
     >
       <div className="stack-4">
         {!user && <p className="t-footnote c3">People sign in with their Microsoft account. Add them here to give them a Folium role and groups.</p>}
+        {user && status && (
+          <p className="t-footnote c3 row" style={{ gap: 8 }}>
+            <Badge tone={STATUS_TONE[status]}>{STATUS_LABEL[status]}</Badge>
+            Last opened Folium: {lastSeen(user)}
+            {!active && ' · Deactivated profiles drop out of groups, acting-for and share lists; their requests stay.'}
+          </p>
+        )}
+        {(roleProblem || (active && deactivateProblem && onSetActive)) && (
+          <p className="t-footnote" role="note" style={{ color: 'var(--warn)' }}>
+            {roleProblem ?? deactivateProblem}
+          </p>
+        )}
+        {user ? (
+          <RepDetails value={u} onChange={set} editor={me} policy={policy} idPrefix="eu" />
+        ) : (
+          <div className="grid-2">
+            <Field label="Name" htmlFor="eu-name">
+              <TextInput id="eu-name" value={u.fullname} onChange={(e) => set({ fullname: e.target.value })} />
+            </Field>
+            <Field label="Email" htmlFor="eu-email">
+              <TextInput id="eu-email" type="email" value={u.email} onChange={(e) => set({ email: e.target.value })} />
+            </Field>
+            <Field label="Title" htmlFor="eu-title">
+              <TextInput id="eu-title" value={u.title} onChange={(e) => set({ title: e.target.value })} />
+            </Field>
+            <Field label="Branch" htmlFor="eu-branch">
+              <TextInput id="eu-branch" value={u.branch} onChange={(e) => set({ branch: e.target.value })} />
+            </Field>
+            <Field label="Rep code" htmlFor="eu-rep" optional>
+              <TextInput id="eu-rep" className="mono" value={u.repCode} onChange={(e) => set({ repCode: e.target.value })} />
+            </Field>
+          </div>
+        )}
         <div className="grid-2">
-          <Field label="Name" htmlFor="eu-name">
-            <TextInput id="eu-name" value={u.fullname} disabled={!!user} onChange={(e) => set({ fullname: e.target.value })} />
-          </Field>
-          <Field label="Email" htmlFor="eu-email">
-            <TextInput id="eu-email" type="email" value={u.email} onChange={(e) => set({ email: e.target.value })} />
-          </Field>
-          <Field label="Title" htmlFor="eu-title">
-            <TextInput id="eu-title" value={u.title} onChange={(e) => set({ title: e.target.value })} />
-          </Field>
-          <Field label="Branch" htmlFor="eu-branch">
-            <TextInput id="eu-branch" value={u.branch} onChange={(e) => set({ branch: e.target.value })} />
-          </Field>
           <Field label="Region" htmlFor="eu-region">
             <TextInput id="eu-region" value={u.region ?? ''} onChange={(e) => set({ region: e.target.value })} />
           </Field>
-          <Field label="Rep code" htmlFor="eu-rep" optional>
-            <TextInput id="eu-rep" className="mono" value={u.repCode} onChange={(e) => set({ repCode: e.target.value })} />
+          <Field label="Can edit their own rep details" htmlFor="eu-canedit" help="Rep, OSJ and RIA numbers stay with administrators either way.">
+            <Select id="eu-canedit" value={u.canEditRepData === undefined ? '' : String(u.canEditRepData)} onChange={(e) => set({ canEditRepData: e.target.value === '' ? undefined : e.target.value === 'true' })}>
+              <option value="">As the firm sets it ({policy.repDataSelfEdit === false ? 'no' : 'yes'})</option>
+              <option value="true">Yes</option>
+              <option value="false">No</option>
+            </Select>
           </Field>
         </div>
         <fieldset className="list" style={{ border: 0, padding: 0, margin: 0 }}>
@@ -230,16 +513,183 @@ function UserSheet({ user, groups, onClose, onSave }: { user?: UserProfile; grou
             </label>
           ))}
         </fieldset>
-        <fieldset className="list" style={{ border: 0, padding: 0, margin: 0 }}>
-          <legend className="field-label" style={{ padding: '0 0 6px 2px' }}>Groups</legend>
-          {groups.map((g) => (
-            <label key={g.id} className="list-row" style={{ cursor: 'pointer' }}>
-              <input type="checkbox" className="check" checked={groupIds.includes(g.id)} onChange={(e) => setGroupIds(e.target.checked ? [...groupIds, g.id] : groupIds.filter((x) => x !== g.id))} />
-              <span className="grow">{g.name}</span>
-              {g.region && <span className="t-footnote c3">{g.region}</span>}
-            </label>
+        {active && (
+          <fieldset className="list" style={{ border: 0, padding: 0, margin: 0 }}>
+            <legend className="field-label" style={{ padding: '0 0 6px 2px' }}>Groups</legend>
+            {groups.map((g) => (
+              <label key={g.id} className="list-row" style={{ cursor: 'pointer' }}>
+                <input type="checkbox" className="check" checked={u.groupIds.includes(g.id)} onChange={(e) => set({ groupIds: e.target.checked ? [...u.groupIds, g.id] : u.groupIds.filter((x) => x !== g.id) })} />
+                <span className="grow">{g.name}</span>
+                {g.region && <span className="t-footnote c3">{g.region}</span>}
+              </label>
+            ))}
+          </fieldset>
+        )}
+        {user && <RepAudit user={user} />}
+      </div>
+    </Sheet>
+  );
+}
+
+/** Confirm a bulk change: what it does, to whom, and what it can't do. */
+function BulkSheet({ action, users, groups, ids, onClose, onConfirm }: { action: BulkAction; users: UserProfile[]; groups: UserGroup[]; ids: string[]; onClose: () => void; onConfirm: (changed: UserProfile[]) => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const changed = planBulk(users, ids, action);
+  const problem = lastAdminProblem(users, changed);
+  const unchanged = ids.length - changed.length;
+  const summary = bulkSummary(action, changed.length, groups);
+  return (
+    <Sheet
+      title={summary}
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="gray" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant={action.kind === 'deactivate' ? 'danger' : 'filled'} busy={busy} disabled={!changed.length || !!problem} onClick={() => runSave(setBusy, () => onConfirm(changed))}>
+            {summary}
+          </Button>
+        </>
+      }
+    >
+      <div className="stack-3">
+        {problem && (
+          <p className="t-callout" role="alert" style={{ color: 'var(--danger)' }}>
+            {problem}
+          </p>
+        )}
+        {action.kind === 'deactivate' && <p className="t-footnote c3">They drop out of every group and can no longer be worked for or shared with. Their requests and drafts stay, with them as owner.</p>}
+        <ul className="list" style={{ margin: 0, padding: 0 }}>
+          {changed.map((u) => (
+            <li key={u.systemuserid} className="list-row">
+              <Avatar name={u.fullname} size={24} alt={u.role !== 'User'} />
+              <span className="grow">{u.fullname}</span>
+            </li>
           ))}
-        </fieldset>
+        </ul>
+        {unchanged > 0 && <p className="t-footnote c3">{unchanged === 1 ? '1 selected person is' : `${unchanged} selected people are`} already set this way, so nothing changes for them.</p>}
+      </div>
+    </Sheet>
+  );
+}
+
+const SAMPLE_CSV = 'email,role,groups,repCode,branch\r\ntaylor.brenneman@example.org,User,Goshen advisors,EV4471,Goshen\r\nmorgan.beachy@example.org,Assistant,Goshen advisors; Virginia,,Goshen\r\n';
+
+const OUTCOME: Record<ImportOutcome['kind'], { label: string; tone?: 'accent' | 'warn' | 'info' | 'danger' }> = {
+  new: { label: 'New', tone: 'accent' },
+  changed: { label: 'Changed', tone: 'info' },
+  unchanged: { label: 'No change' },
+  notFound: { label: 'Not in the directory', tone: 'warn' },
+  invalid: { label: 'Can’t import', tone: 'danger' },
+};
+
+/** Import or update people from a CSV, previewed against the directory before anything is saved. */
+function ImportSheet({ users, groups, onClose, onConfirm }: { users: UserProfile[]; groups: UserGroup[]; onClose: () => void; onConfirm: (changed: UserProfile[]) => Promise<void> }) {
+  const services = useServices();
+  const [text, setText] = useState('');
+  const [plan, setPlan] = useState<ImportOutcome[]>();
+  const [problem, setProblem] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  const file = useRef<HTMLInputElement>(null);
+
+  async function preview(source: string) {
+    setText(source);
+    setPlan(undefined);
+    const parsed = parseUserImport(source, groups);
+    setProblem(parsed.problem);
+    if (parsed.problem) return;
+    await runSave(setBusy, async () => {
+      const directory = await services.directory.lookupDirectory(parsed.rows.map((r) => r.email).filter(Boolean));
+      setPlan(planImport(parsed.rows, users, directory, groups));
+    });
+  }
+
+  const toSave = (plan ?? []).filter((o): o is Extract<ImportOutcome, { next: UserProfile }> => o.kind === 'new' || o.kind === 'changed');
+  const adminProblem = lastAdminProblem(users, toSave.map((o) => o.next));
+  return (
+    <Sheet
+      wide
+      title="Import people"
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="plain" icon="download" onClick={() => downloadBytes(new TextEncoder().encode(SAMPLE_CSV), 'folium-users-sample.csv', 'text/csv;charset=utf-8')}>
+            Sample CSV
+          </Button>
+          <span className="spacer" />
+          <Button variant="gray" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="filled" busy={busy} disabled={!toSave.length || !!adminProblem} onClick={() => runSave(setBusy, () => onConfirm(toSave.map((o) => o.next)))}>
+            {toSave.length ? `Save ${toSave.length} ${toSave.length === 1 ? 'person' : 'people'}` : 'Save'}
+          </Button>
+        </>
+      }
+    >
+      <div className="stack-4">
+        <p className="t-footnote c3">
+          A CSV with the columns <span className="mono">email, role, groups, repCode, branch</span>. Each email is matched to a person in the Microsoft directory; groups are names separated by “;”. Nothing is saved until you
+          confirm, and existing details the file leaves blank are kept.
+        </p>
+        <div className="row" style={{ gap: 8 }}>
+          <input
+            ref={file}
+            type="file"
+            accept=".csv,text/csv"
+            hidden
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              if (f) await preview(await f.text());
+              e.target.value = '';
+            }}
+          />
+          <Button variant="gray" icon="upload" onClick={() => file.current?.click()}>
+            Choose a CSV file
+          </Button>
+          <span className="t-footnote c3">or paste it below</span>
+        </div>
+        <TextArea aria-label="CSV to import" rows={5} className="mono" value={text} onChange={(e) => setText(e.target.value)} placeholder={SAMPLE_CSV} />
+        <div>
+          <Button variant="tinted" disabled={!text.trim() || busy} onClick={() => preview(text)}>
+            Preview
+          </Button>
+        </div>
+        {problem && (
+          <p className="t-callout" role="alert" style={{ color: 'var(--danger)' }}>
+            {problem}
+          </p>
+        )}
+        {adminProblem && (
+          <p className="t-callout" role="alert" style={{ color: 'var(--danger)' }}>
+            {adminProblem}
+          </p>
+        )}
+        {plan && (
+          <ul className="list" aria-label="What the import will do" style={{ margin: 0, padding: 0 }}>
+            {plan.map((o) => (
+              <li key={`${o.row.line}`} className="list-row" style={{ alignItems: 'flex-start' }}>
+                <span className="t-footnote c3 mono" style={{ width: 36 }}>
+                  {o.row.line}
+                </span>
+                <span className="grow">
+                  <span style={{ display: 'block', fontWeight: 600 }}>{'next' in o ? o.next.fullname : o.row.email || '(no email)'}</span>
+                  <span className="t-footnote c3">
+                    {o.kind === 'invalid'
+                      ? o.row.errors.join('; ')
+                      : o.kind === 'notFound'
+                        ? `No one with ${o.row.email} signs in to Microsoft here. Check the spelling.`
+                        : 'changes' in o
+                          ? o.changes.join(' · ')
+                          : o.row.email}
+                    {o.row.unknownGroups.length ? ` · No group called ${o.row.unknownGroups.map((g) => `“${g}”`).join(', ')}` : ''}
+                  </span>
+                </span>
+                <Badge tone={OUTCOME[o.kind].tone}>{OUTCOME[o.kind].label}</Badge>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </Sheet>
   );
@@ -290,7 +740,7 @@ function GroupSheet({ group, users, onClose, onSave, onDelete }: { group?: UserG
         <div className="grid-2" style={{ alignItems: 'start' }}>
           <fieldset className="list" style={{ border: 0, padding: 0, margin: 0 }}>
             <legend className="field-label" style={{ padding: '0 0 6px 2px' }}>Members</legend>
-            {users.map((u) => (
+            {users.filter((u) => isActiveUser(u) || g.memberIds.includes(u.systemuserid)).map((u) => (
               <label key={u.systemuserid} className="list-row" style={{ cursor: 'pointer' }}>
                 <input type="checkbox" className="check" checked={g.memberIds.includes(u.systemuserid)} onChange={(e) => set({ memberIds: toggle(g.memberIds, u.systemuserid, e.target.checked) })} />
                 <Avatar name={u.fullname} size={24} alt={u.role !== 'User'} />

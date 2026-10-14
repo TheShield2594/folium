@@ -1,3 +1,4 @@
+import type { IdAttr } from '../../domain/idDocuments';
 import type { SignatureStatus } from '../../domain/types';
 
 // Names Folium uses in Dataverse and SharePoint. Adjust here (once) if Everence's
@@ -63,6 +64,15 @@ export const CHOICES: ChoiceMap = {
     gendercode: { label: 'Gender', options: { 1: 'male', 2: 'female' } },
   },
 };
+
+/**
+ * Contact columns that hold ID documents, if Everence's Dynamics 365 keeps them
+ * (to confirm). Name a column here, e.g. `dlNumber: 'ev_dlnumber'`, and forms fill
+ * that field from the client's or spouse's contact; put the number columns under
+ * Dataverse field security, as for `ev_ssn`. A field with no column is entered at
+ * review, once per packet.
+ */
+export const ID_DOCUMENT_COLUMNS: Partial<Record<IdAttr, string>> = {};
 
 /**
  * `ev_signaturerequest.ev_status` option values, in one place so `toRow` and the

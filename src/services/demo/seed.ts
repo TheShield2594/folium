@@ -1,3 +1,4 @@
+import type { DirectoryUser } from '../../domain/advisor';
 import type { Advisor, ClientRecord, Contact, FirmProfile, FormTemplate, SavedPacket, SignatureRequest, UserGroup, UserProfile } from '../../domain/types';
 import { layoutSpec } from '../../pdf/layout';
 import { SPECS, type FormSpec } from './specs';
@@ -13,10 +14,25 @@ export const ADVISOR: Advisor = {
 };
 
 export const USERS: UserProfile[] = [
-  { ...ADVISOR, role: 'User', groupIds: ['grp-goshen'], region: 'Goshen', defaultAuth: 'sms', defaultReminderDays: 3, licensedStates: ['IN', 'KS', 'MI', 'OH'] },
-  { systemuserid: 'usr-advisor-2', fullname: 'Jesse Shenk', email: 'jesse.shenk@example.org', phone: '540-555-0161', repCode: 'EV3302', branch: 'Harrisonburg', title: 'Financial advisor', role: 'User', groupIds: ['grp-goshen', 'grp-va'], region: 'Harrisonburg', defaultAuth: 'email', defaultReminderDays: 5 },
-  { systemuserid: 'usr-assistant-1', fullname: 'Morgan Beachy', email: 'morgan.beachy@example.org', phone: '574-555-0150', repCode: '', branch: 'Goshen', title: 'Client service associate', role: 'Assistant', groupIds: ['grp-goshen'], region: 'Goshen' },
-  { systemuserid: 'usr-admin-1', fullname: 'Dana Yoder', email: 'dana.yoder@example.org', phone: '574-555-0100', repCode: '', branch: 'Home office', title: 'Forms & operations', role: 'Admin', groupIds: ['grp-ops'], region: 'Home office' },
+  { ...ADVISOR, role: 'User', groupIds: ['grp-goshen'], region: 'Goshen', defaultAuth: 'sms', defaultReminderDays: 3, licensedStates: ['IN', 'KS', 'MI', 'OH'], osjNumber: 'OSJ-0112', riaNumber: '801-56789', phoneExt: '214', lastSeenOn: '2026-10-13T14:02:00.000Z' },
+  { systemuserid: 'usr-advisor-2', fullname: 'Jesse Shenk', email: 'jesse.shenk@example.org', phone: '540-555-0161', repCode: 'EV3302', branch: 'Harrisonburg', title: 'Financial advisor', role: 'User', groupIds: ['grp-goshen', 'grp-va'], region: 'Harrisonburg', defaultAuth: 'email', defaultReminderDays: 5, osjNumber: 'OSJ-0140', lastSeenOn: '2026-05-28T15:40:00.000Z' },
+  { systemuserid: 'usr-assistant-1', fullname: 'Morgan Beachy', email: 'morgan.beachy@example.org', phone: '574-555-0150', repCode: '', branch: 'Goshen', title: 'Client service associate', role: 'Assistant', groupIds: ['grp-goshen'], region: 'Goshen', lastSeenOn: '2026-10-12T13:15:00.000Z' },
+  { systemuserid: 'usr-admin-1', fullname: 'Dana Yoder', email: 'dana.yoder@example.org', phone: '574-555-0100', repCode: '', branch: 'Home office', title: 'Forms & operations', role: 'Admin', groupIds: ['grp-ops'], region: 'Home office', lastSeenOn: '2026-10-13T12:00:00.000Z' },
+  { systemuserid: 'usr-advisor-3', fullname: 'Riley Kauffman', email: 'riley.kauffman@example.org', phone: '', repCode: 'EV2918', branch: 'Newton', title: 'Financial advisor', role: 'User', groupIds: [], region: 'Newton', lastSeenOn: '2026-03-02T16:20:00.000Z' },
+];
+
+/**
+ * The demo's `systemuser` rows: what Entra ID holds for each person. Profiles above
+ * override them only where they differ. Riley has left (disabled); Avery has signed in
+ * but has no Folium profile yet.
+ */
+export const DIRECTORY: DirectoryUser[] = [
+  { systemuserid: 'usr-advisor-1', fullname: 'Taylor Brenneman', middleName: 'Jo', email: 'taylor.brenneman@example.org', phone: '574-555-0142', fax: '574-555-0199', mobile: '574-555-0177', title: 'Financial advisor', office: { line1: '1110 N Main St', suite: 'Suite 200', city: 'Goshen', state: 'IN', zip: '46528' } },
+  { systemuserid: 'usr-advisor-2', fullname: 'Jesse Shenk', email: 'jesse.shenk@example.org', phone: '540-555-0161', title: 'Financial advisor', office: { line1: '1200 Port Republic Rd', city: 'Harrisonburg', state: 'VA', zip: '22801' } },
+  { systemuserid: 'usr-assistant-1', fullname: 'Morgan Beachy', email: 'morgan.beachy@example.org', phone: '574-555-0150', title: 'Client service associate', office: { line1: '1110 N Main St', suite: 'Suite 200', city: 'Goshen', state: 'IN', zip: '46528' } },
+  { systemuserid: 'usr-admin-1', fullname: 'Dana Yoder', email: 'dana.yoder@example.org', phone: '574-555-0100', title: 'Forms & operations', office: { line1: '1110 N Main St', city: 'Goshen', state: 'IN', zip: '46528' } },
+  { systemuserid: 'usr-advisor-3', fullname: 'Riley Kauffman', email: 'riley.kauffman@example.org', title: 'Financial advisor', disabled: true },
+  { systemuserid: 'usr-advisor-4', fullname: 'Avery Graber', email: 'avery.graber@example.org', phone: '316-555-0120', title: 'Financial advisor', office: { line1: '704 N Main St', city: 'Newton', state: 'KS', zip: '67114' } },
 ];
 
 export const GROUPS: UserGroup[] = [
@@ -61,6 +77,7 @@ const jordan = c({
   familystatuscode: 'married',
   ev_region: 'Goshen',
   ev_employer: 'Retired',
+  idDocuments: { dlNumber: 'M210-5541-9823', dlState: 'IN', dlIssued: '2021-04-12', dlExpires: '2029-04-18', citizenship: 'United States' },
 });
 const sam = c({ contactid: 'c-sam', firstname: 'Sam', lastname: 'Miller', ev_clientid: 'C-0048214', birthdate: '1963-09-02', ev_ssn: '409-21-7781', emailaddress1: 'sam.miller@example.com', mobilephone: '574-555-0177', address1_line1: '1408 Riverbend Ln', address1_city: 'Goshen', address1_stateorprovince: 'IN', address1_postalcode: '46526', familystatuscode: 'married' });
 const ruth = c({ contactid: 'c-ruth', firstname: 'Ruth', lastname: 'Miller-Kauffman', ev_clientid: 'C-0051177', emailaddress1: 'ruth.mk@example.com', mobilephone: '260-555-0190' });

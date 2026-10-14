@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { DEFAULT_ATTACHMENT_LIMITS } from '../../domain/checks';
 import { RETENTION_OPTIONS, retentionDays } from '../../domain/requests';
+import { dormantDays } from '../../domain/users';
 import type { FirmPolicy, PdfDownloadPolicy, RepDataVisibility, SharingPolicy } from '../../domain/types';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
@@ -96,6 +97,23 @@ export function AdminSettings() {
                 {(Object.keys(DOWNLOAD) as PdfDownloadPolicy[]).map((k) => (
                   <option key={k} value={k}>
                     {DOWNLOAD[k].label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <div className="list">
+              <SwitchRow
+                label="People can edit their own rep details"
+                detail="Title, phones, office and email on forms, in Settings. Change it for one person in Users & groups. Rep, OSJ and RIA numbers are always set by an administrator."
+                checked={p.repDataSelfEdit ?? true}
+                onChange={(v) => set({ repDataSelfEdit: v })}
+              />
+            </div>
+            <Field label="Show people as dormant after" htmlFor="p-dormant" help="In Users & groups, for anyone who hasn’t opened Folium in that long.">
+              <Select id="p-dormant" value={String(dormantDays(p))} onChange={(e) => set({ dormantAfterDays: Number(e.target.value) })}>
+                {[30, 60, 90, 180, 365].map((d) => (
+                  <option key={d} value={d}>
+                    {d} days
                   </option>
                 ))}
               </Select>
