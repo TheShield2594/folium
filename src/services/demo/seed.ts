@@ -150,6 +150,8 @@ export function specToTemplate(spec: FormSpec): FormTemplate {
               help: field.help,
               requiredWhen: field.requiredWhen,
               lockWhen: field.lockWhen,
+              checkedWhen: field.checkedWhen,
+              person: field.person,
               rect: spec.pdfKind === 'flat' ? rectByName.get(field.name) : undefined,
             })),
       signers: spec.signers,

@@ -14,7 +14,7 @@ import { Icon } from '../../ui/Icon';
 import { PdfView, useInspection } from '../common/PdfView';
 import { STATUS_TONE } from './AdminTemplates';
 import { ConditionSheet, describeConditions } from './ConditionSheet';
-import { KNOWN_SOURCES, SOURCE_GROUPS } from './sources';
+import { KNOWN_SOURCES, SOURCE_GROUPS, choiceWords } from './sources';
 import { describeStates, parseStatesFromTitle } from '../../domain/states';
 import { StatesPicker } from '../common/StatesPicker';
 
@@ -57,6 +57,7 @@ export function TemplateEditor() {
   const [filter, setFilter] = useState<'all' | 'attention'>('all');
   const [limitsFor, setLimitsFor] = useState<string>();
   const [conditionsFor, setConditionsFor] = useState<string>();
+  const [optionsFor, setOptionsFor] = useState<string>();
 
   // Load the mapping when the editor opens a template, not on every refresh of the
   // template list, so a refresh from elsewhere never throws away unsaved edits.
@@ -91,6 +92,8 @@ export function TemplateEditor() {
   const keyWarnings = mappingWarnings(mapping);
   const changeOf = (name: string) => diff?.find((d) => d.pdfField === name);
   const needsAttention = (m: FieldMapping) => (changeOf(m.pdfField)?.change ?? 'unchanged') !== 'unchanged' || !m.source;
+
+  const pdfTypeOf = (name: string) => info?.fields.find((f) => f.name === name)?.type;
 
   function patchField(name: string, patch: Partial<FieldMapping>) {
     setMapping((m) => m && { ...m, fields: m.fields.map((f) => (f.pdfField === name ? { ...f, ...patch } : f)) });
@@ -327,6 +330,36 @@ export function TemplateEditor() {
                                   )}
                                 </div>
                                 {describeLimits(m.limits) && <div className="t-footnote c3" style={{ marginTop: 2 }}>{describeLimits(m.limits)}</div>}
+                                {(m.format === 'checkbox' || pdfTypeOf(m.pdfField) === 'checkbox') && m.source !== 'signer' && (
+                                  <>
+                                    <TextInput
+                                      aria-label={`${m.pdfField} checked when`}
+                                      list={`cw-${m.pdfField}`}
+                                      style={{ marginTop: 4 }}
+                                      value={m.checkedWhen ?? ''}
+                                      placeholder="Checked when… (Yes)"
+                                      onChange={(e) => patchField(m.pdfField, { checkedWhen: e.target.value.trim() || undefined })}
+                                    />
+                                    <datalist id={`cw-${m.pdfField}`}>
+                                      {choiceWords(m.source).map((w) => (
+                                        <option key={w} value={w} />
+                                      ))}
+                                    </datalist>
+                                  </>
+                                )}
+                                {pdfTypeOf(m.pdfField) === 'radio' && (
+                                  <Button
+                                    variant="plain"
+                                    size="sm"
+                                    icon={m.options ? 'pencil' : 'plus'}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setOptionsFor(m.pdfField);
+                                    }}
+                                  >
+                                    {m.options ? `${Object.keys(m.options).length} options` : 'Option for each value'}
+                                  </Button>
+                                )}
                               </td>
                               <td>
                                 {m.requiredWhen?.trim() ? (
@@ -404,6 +437,14 @@ export function TemplateEditor() {
       )}
       {conditionsFor && mapping.fields.some((f) => f.pdfField === conditionsFor) && (
         <ConditionSheet field={mapping.fields.find((f) => f.pdfField === conditionsFor)!} mapping={mapping} onChange={(patch) => patchField(conditionsFor, patch)} onClose={() => setConditionsFor(undefined)} />
+      )}
+      {optionsFor && mapping.fields.some((f) => f.pdfField === optionsFor) && (
+        <OptionsSheet
+          field={mapping.fields.find((f) => f.pdfField === optionsFor)!}
+          pdfOptions={info?.fields.find((f) => f.name === optionsFor)?.options ?? []}
+          onChange={(options) => patchField(optionsFor, { options })}
+          onClose={() => setOptionsFor(undefined)}
+        />
       )}
       {publishing && (
         <PublishSheet
@@ -920,5 +961,60 @@ function DetailsTab({ template, templates, onSaved }: { template: FormTemplate; 
         </Button>
       </div>
     </section>
+  );
+}
+
+/** Which PDF option a radio group selects for each value of its source. */
+function OptionsSheet({ field, pdfOptions, onChange, onClose }: { field: FieldMapping; pdfOptions: string[]; onChange: (o: Record<string, string> | undefined) => void; onClose: () => void }) {
+  const current = field.options ?? {};
+  // The source's choice words, plus any value already mapped (a custom column's words).
+  const words = [...new Set([...choiceWords(field.source), ...Object.keys(current)])];
+  const [extra, setExtra] = useState('');
+  const set = (word: string, opt: string) => {
+    const next = { ...current };
+    if (opt) next[word] = opt;
+    else delete next[word];
+    onChange(Object.keys(next).length ? next : undefined);
+  };
+  return (
+    <Sheet
+      title={`Options · ${field.label ?? prettifyFieldName(field.pdfField)}`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="gray" onClick={() => onChange(undefined)}>
+            Clear
+          </Button>
+          <Button variant="filled" onClick={onClose}>
+            Done
+          </Button>
+        </>
+      }
+    >
+      <div className="stack-4">
+        <p className="t-callout c2">
+          Pick the PDF option for each value of <span className="mono">{field.source}</span>. Values with no option leave the group blank.
+        </p>
+        {!pdfOptions.length && <p className="t-footnote c-warn">This PDF field has no options Folium could read.</p>}
+        {words.map((w) => (
+          <Field key={w} label={w} htmlFor={`opt-${w}`}>
+            <Select id={`opt-${w}`} value={current[w] ?? ''} onChange={(e) => set(w, e.target.value)}>
+              <option value="">Leave blank</option>
+              {pdfOptions.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        ))}
+        <div className="row" style={{ gap: 6 }}>
+          <TextInput aria-label="Another value" placeholder="Another value…" value={extra} onChange={(e) => setExtra(e.target.value)} />
+          <Button variant="gray" disabled={!extra.trim() || !pdfOptions.length} onClick={() => (set(extra.trim(), pdfOptions[0]), setExtra(''))}>
+            Add
+          </Button>
+        </div>
+      </div>
+    </Sheet>
   );
 }

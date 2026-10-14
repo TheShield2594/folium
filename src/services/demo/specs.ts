@@ -59,14 +59,27 @@ const bene = (kind: 'Prim' | 'Cont', n: number, fromConn?: string): SpecField[] 
   const p = `${kind === 'Prim' ? 'Bene' : 'ContBene'}${n}`;
   const conn = fromConn ? `connection[${fromConn}]` : undefined;
   const who = `${kind === 'Prim' ? 'Primary' : 'Contingent'} beneficiary ${n}`;
+  // Each beneficiary is a person block: Review can fill it from any related person.
+  const person = (attr: string) => ({ block: who, attr });
   return [
-    { name: `${p}_Name`, label: 'Beneficiary name', uiLabel: `${who} · name`, span: 4, source: conn ? `${conn}.fullname` : 'advisor', required: n === 1 && kind === 'Prim', key: `bene.${kind}.${n}.name` },
-    { name: `${p}_Relationship`, label: 'Relationship', uiLabel: `${who} · relationship`, span: 2, source: conn ? `${conn}.role` : 'advisor', key: `bene.${kind}.${n}.rel` },
-    { name: `${p}_DOB`, label: 'Date of birth', uiLabel: `${who} · date of birth`, span: 2, source: conn ? `${conn}.birthdate` : 'advisor', format: 'date', limits: { dateMin: '-120y', dateMax: 'today' }, key: `bene.${kind}.${n}.dob` },
-    { name: `${p}_SSN`, label: 'SSN / Tax ID', uiLabel: `${who} · SSN / Tax ID`, span: 2, source: conn ? `${conn}.ev_ssn` : 'advisor', format: 'ssnOrTin', key: `bene.${kind}.${n}.ssn` },
-    { name: `${p}_Pct`, label: 'Share %', uiLabel: `${who} · share %`, span: 2, source: conn ? `${conn}.ev_sharepct` : 'advisor', format: 'percent', required: n === 1 && kind === 'Prim', key: `bene.${kind}.${n}.pct` },
+    { name: `${p}_Name`, label: 'Beneficiary name', uiLabel: `${who} · name`, span: 4, source: conn ? `${conn}.fullname` : 'advisor', required: n === 1 && kind === 'Prim', key: `bene.${kind}.${n}.name`, person: person('fullname') },
+    { name: `${p}_Relationship`, label: 'Relationship', uiLabel: `${who} · relationship`, span: 2, source: conn ? `${conn}.role` : 'advisor', key: `bene.${kind}.${n}.rel`, person: person('role') },
+    { name: `${p}_DOB`, label: 'Date of birth', uiLabel: `${who} · date of birth`, span: 2, source: conn ? `${conn}.birthdate` : 'advisor', format: 'date', limits: { dateMin: '-120y', dateMax: 'today' }, key: `bene.${kind}.${n}.dob`, person: person('birthdate') },
+    { name: `${p}_SSN`, label: 'SSN / Tax ID', uiLabel: `${who} · SSN / Tax ID`, span: 2, source: conn ? `${conn}.ev_ssn` : 'advisor', format: 'ssnOrTin', key: `bene.${kind}.${n}.ssn`, person: person('ev_ssn') },
+    { name: `${p}_Pct`, label: 'Share %', uiLabel: `${who} · share %`, span: 2, source: conn ? `${conn}.ev_sharepct` : 'advisor', format: 'percent', required: n === 1 && kind === 'Prim', key: `bene.${kind}.${n}.pct`, person: person('ev_sharepct') },
   ];
 };
+
+/** Marital status boxes, ticked from the contact's choice column: one stored value drives the set. */
+const marital: SpecField[] = (['single', 'married', 'divorced', 'widowed'] as const).map((w) => ({
+  name: `Owner_Marital_${w[0].toUpperCase()}${w.slice(1)}`,
+  label: `${w[0].toUpperCase()}${w.slice(1)}`,
+  span: 3,
+  source: 'contact.familystatuscode',
+  type: 'checkbox' as const,
+  format: 'checkbox' as const,
+  checkedWhen: w,
+}));
 
 const bank: SpecField[] = [
   { name: 'Bank_Name', label: 'Bank name', span: 6, source: 'signer' },
@@ -103,7 +116,7 @@ export const SPECS: FormSpec[] = [
     description: 'Name or change primary and contingent beneficiaries on an Everence account.',
     intro: 'Use this form to name or change beneficiaries. This designation replaces any prior designation for the account below.',
     sections: [
-      { title: 'Section 1 · Account owner', fields: [...owner(), ...account()] },
+      { title: 'Section 1 · Account owner', fields: [...owner(), ...account(), ...marital] },
       { title: 'Section 2 · Primary beneficiaries', note: 'Shares must total 100%.', fields: [...bene('Prim', 1, 'Spouse'), ...bene('Prim', 2), ...bene('Prim', 3)] },
       { title: 'Section 3 · Contingent beneficiaries', fields: [...bene('Cont', 1), ...bene('Cont', 2)] },
       {

@@ -201,6 +201,7 @@ export function prefillForm(
     else origin = 'missing';
 
     const missing = kind !== 'signer' && !locked && required && !value.trim();
+    const choice = !!(m.checkedWhen || m.options);
     return {
       templateId: template.id,
       itemId: item?.id ?? template.id,
@@ -208,7 +209,7 @@ export function prefillForm(
       key,
       label: m.label ?? prettifyFieldName(m.pdfField),
       value,
-      display: m.format === 'checkbox' ? value : formatValue(value, m.format, m.limits),
+      display: choiceDisplay(m, value) ?? (m.format === 'checkbox' ? value : formatValue(value, m.format, m.limits)),
       origin,
       sourceLabel: describeSource(m.source),
       crmValue: origin === 'edited' ? crmValue : undefined,
@@ -216,7 +217,7 @@ export function prefillForm(
       required,
       missing,
       // CRM values are checked too, so bad data already in D365 surfaces here.
-      formatError: locked ? undefined : validateFormat(value, m.format, m.limits, scope.today),
+      formatError: locked || choice ? undefined : validateFormat(value, m.format, m.limits, scope.today),
       locked,
       lockReason: locked ? explainCondition(m.lockWhen, labels) : undefined,
     };
@@ -234,6 +235,38 @@ export function prefillForm(
     requiredCount: relevant.filter((f) => f.required).length,
     missingCount: fields.filter((f) => f.missing).length,
   };
+}
+
+const sameWord = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * What a box or radio mapped to a choice prints: `Yes` when the value is the box's word
+ * (empty otherwise), or the radio option for the value. Undefined for other fields.
+ */
+export function choiceDisplay(m: Pick<FieldMapping, 'checkedWhen' | 'options'>, value: string): string | undefined {
+  if (m.checkedWhen) return value && sameWord(value, m.checkedWhen) ? 'Yes' : '';
+  if (m.options) return Object.entries(m.options).find(([k]) => value && sameWord(k, value))?.[1] ?? '';
+  return undefined;
+}
+
+/** The choices a set of fields sharing one key offers (each box's word, or each radio value), in mapping order. */
+export function choiceOptions(fields: Pick<FieldState, 'mapping' | 'label'>[]): { value: string; label: string }[] {
+  const out = new Map<string, string>();
+  for (const f of fields) {
+    if (f.mapping.checkedWhen && !out.has(f.mapping.checkedWhen.toLowerCase())) out.set(f.mapping.checkedWhen.toLowerCase(), f.label);
+    for (const k of Object.keys(f.mapping.options ?? {})) if (!out.has(k.toLowerCase())) out.set(k.toLowerCase(), k.charAt(0).toUpperCase() + k.slice(1));
+  }
+  return [...out.entries()].map(([value, label]) => ({ value, label }));
+}
+
+const CHOICE_NAMES: Record<string, string> = { familystatuscode: 'Marital status', gendercode: 'Gender', ev_employmentstatus: 'Employment status' };
+
+/** What a set of choice boxes asks, from their source: `contact.familystatuscode` → "Marital status". */
+export function choiceQuestion(source: string, fallback: string): string {
+  const attr = /\.([a-z0-9_]+)$/i.exec(source)?.[1];
+  const prefix = /^connection\[([^\]#]+)/.exec(source)?.[1];
+  const name = attr ? CHOICE_NAMES[attr] : undefined;
+  return name ? (prefix ? `${prefix}: ${name.toLowerCase()}` : name) : fallback;
 }
 
 export interface PacketFillInput {

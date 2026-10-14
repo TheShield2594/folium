@@ -7,6 +7,8 @@ export interface InspectedField {
   rects: FieldRect[];
   /** The text field's MaxLen, when the PDF sets one. */
   maxLength?: number;
+  /** Export values: each option of a radio group or dropdown, or a checkbox's "on" value. */
+  options?: string[];
 }
 
 export interface PdfInspection {
@@ -14,6 +16,16 @@ export interface PdfInspection {
   pageCount: number;
   pages: { width: number; height: number }[];
   fields: InspectedField[];
+}
+
+function optionsOf(f: PDFField): string[] | undefined {
+  if (f instanceof PDFRadioGroup || f instanceof PDFDropdown) return f.getOptions();
+  if (f instanceof PDFCheckBox) {
+    // The "on" appearance name of the first widget, e.g. /Yes or /Married.
+    const on = f.acroField.getWidgets()[0]?.getOnValue();
+    return on ? [on.decodeText()] : undefined;
+  }
+  return undefined;
 }
 
 function typeOf(f: PDFField): InspectedField['type'] {
@@ -50,6 +62,7 @@ export async function inspectPdf(bytes: Uint8Array): Promise<PdfInspection> {
     name: f.getName(),
     type: typeOf(f),
     maxLength: f instanceof PDFTextField ? f.getMaxLength() || undefined : undefined,
+    options: optionsOf(f),
     rects: f.acroField.getWidgets().map((w): FieldRect => {
       const r = w.getRectangle();
       const idx = widgetPage.get(w.dict) ?? 0;

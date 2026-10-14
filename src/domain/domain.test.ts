@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { CLIENTS, FIRM, TEMPLATES, USERS } from '../services/demo/seed';
+import type { FieldMapping } from './types';
 import { outputGate, runChecks, summarize, type CheckResult } from './checks';
 import { formatValue, resolveDateLimit, validateFormat } from './format';
 import { buildCondition, conditionTerms, evaluateCondition, explainCondition, parseCondition, resolvePath } from './paths';
-import { fieldKey, inputsNeeded, mappingWarnings, migrateAccountValues, prefillForm, prefillPacket, seedCopyValues, termLabels, validateMapping } from './prefill';
+import { choiceDisplay, choiceOptions, fieldKey, inputsNeeded, mappingWarnings, migrateAccountValues, prefillForm, prefillPacket, seedCopyValues, termLabels, validateMapping } from './prefill';
 import { carryForward, diffRevision } from './revisions';
 import { assignSigners, rolesForPacket, validateSigners } from './signers';
 import { buildEnvelopeDefinition, placementsToTabs } from '../services/docusign/tabs';
@@ -305,6 +306,39 @@ describe('prefill', () => {
       expect(results.find((r) => r.id === 'pi-1:check:0')?.level).toBe('pass');
       expect(results.find((r) => r.id === 'pi-2:check:0')?.level).toBe('block');
       expect(results.find((r) => r.id.startsWith('same-account:'))).toMatchObject({ level: 'warn', itemId: 'pi-2' });
+    });
+  });
+
+  describe('choice boxes', () => {
+    const box = (word: string, extra: Partial<FieldMapping> = {}): FieldMapping => ({ pdfField: `MS_${word}`, label: word, source: 'contact.familystatuscode', required: false, format: 'checkbox', checkedWhen: word, ...extra });
+    const form = { ...bene, id: 'tpl-ms', mapping: { ...bene.mapping, fields: [box('single'), box('married')], checks: [{ type: 'oneOf' as const, fields: ['MS_single', 'MS_married'] }] } };
+
+    it('ticks the box whose word is the CRM value, keeping the word as the value', () => {
+      const fill = prefillForm(form, scope, {});
+      expect(fill.fields.map((f) => [f.value, f.display, f.key])).toEqual([
+        ['married', '', 'contact.familystatuscode'],
+        ['married', 'Yes', 'contact.familystatuscode'],
+      ]);
+      expect(fill.fields.every((f) => !f.formatError)).toBe(true);
+      // One value drives the set, so a pick-one check sees one box ticked.
+      expect(runChecks([fill], { scope, values: {}, latestFor: () => undefined }).find((r) => r.id.endsWith(':check:0'))?.level).toBe('pass');
+      const edited = prefillForm(form, scope, { 'contact.familystatuscode': 'single' });
+      expect(edited.fields.map((f) => f.display)).toEqual(['Yes', '']);
+      expect(edited.fields[0].origin).toBe('edited');
+    });
+
+    it('maps a radio value to its PDF option', () => {
+      expect(choiceDisplay({ options: { married: 'M', single: 'S' } }, 'Married')).toBe('M');
+      expect(choiceDisplay({ options: { married: 'M' } }, 'widowed')).toBe('');
+      expect(choiceDisplay({}, 'x')).toBeUndefined();
+    });
+
+    it('lists the choices a set offers', () => {
+      const fill = prefillForm(form, scope, {});
+      expect(choiceOptions(fill.fields)).toEqual([
+        { value: 'single', label: 'single' },
+        { value: 'married', label: 'married' },
+      ]);
     });
   });
 

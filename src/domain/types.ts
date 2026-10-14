@@ -84,6 +84,23 @@ export interface FieldMapping {
    */
   lockWhen?: string;
   /**
+   * For a checkbox (or one option of a set of boxes): ticked when the source's value is
+   * this word, e.g. `married` on `contact.familystatuscode`. The value stays the source's
+   * word, so ticking another box in the set changes it, and two can't both be ticked.
+   */
+  checkedWhen?: string;
+  /**
+   * For a radio group: the PDF option (export value) to select for each source value,
+   * e.g. `{ married: 'M', single: 'S' }`.
+   */
+  options?: Record<string, string>;
+  /**
+   * A field in a block about one person (beneficiary 2, a joint owner). Review can fill
+   * the whole block from any related person: `attr` is a contact column, `role` or
+   * `ev_sharepct`.
+   */
+  person?: { block: string; attr: string };
+  /**
    * On a second or later copy of a form in one packet, advisor-entered values are kept
    * per copy. Set this for the rare advisor value that must match on every copy.
    */
@@ -188,6 +205,7 @@ export interface Contact {
   address1_stateorprovince?: string;
   address1_postalcode?: string;
   familystatuscode?: 'single' | 'married' | 'divorced' | 'widowed';
+  gendercode?: 'male' | 'female';
   ev_clientid: string;
   ev_region?: string;
   /** Owning advisor (systemuser). */

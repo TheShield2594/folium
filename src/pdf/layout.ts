@@ -20,6 +20,8 @@ export interface SpecField {
   key?: string;
   help?: string;
   type?: 'text' | 'checkbox';
+  checkedWhen?: string;
+  person?: { block: string; attr: string };
 }
 
 export interface SpecSection {

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { FieldState } from '../../domain/prefill';
 import { defaultDraftTitle } from '../../domain/drafts';
-import { inputsNeeded, snapshotDiff } from '../../domain/prefill';
+import { choiceOptions, inputsNeeded, snapshotDiff } from '../../domain/prefill';
 import type { SignatureRequest } from '../../domain/types';
 import { formLabel, outputGate, summarize, type CheckResult } from '../../domain/checks';
 import { sourceKind } from '../../domain/paths';
@@ -203,12 +203,15 @@ export function ReviewScreen() {
       .catch(() => undefined);
   }
 
+  /** The choices a set of boxes or a radio group sharing a key offers, across the packet. */
+  const choicesFor = (key: string) => choiceOptions(view!.fills.flatMap((x) => x.fields).filter((x) => x.key === key));
+
   function renderNeed(key: string, fields: FieldState[]) {
     const f = fields[0];
     const forms = [...new Set(fields.map((x) => view!.fills.find((v) => v.itemId === x.itemId)).map((v) => (v ? formLabel(v) : undefined)))];
     return (
       <div key={key} id={`in-${cssKey(key)}`} className={['input-row', selected === key && 'active'].filter(Boolean).join(' ')} onFocus={() => setSelected(key)}>
-        <FieldInput field={f} value={packet.values[key] ?? f.value} onChange={(v) => setValue(key, v)} />
+        <FieldInput field={f} value={packet.values[key] ?? f.value} onChange={(v) => setValue(key, v)} choices={choicesFor(key)} />
         <div className="where" style={{ marginTop: 6 }}>
           {forms.length > 1 ? `Used on ${forms.length} forms — enter it once` : forms[0]}
           {sourceKind(f.mapping.source) === 'crm' && ' · not on file in CRM'}
@@ -305,6 +308,7 @@ export function ReviewScreen() {
               onChange={(v) => setValue(selectedField.key, v)}
               onClose={() => (setSelected(undefined), setEditorKey(undefined))}
               usedOn={view.fills.filter((f) => f.fields.some((x) => x.key === selectedField.key)).map(formLabel)}
+              choices={choicesFor(selectedField.key)}
             />
           )}
 

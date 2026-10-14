@@ -161,7 +161,7 @@ export function runChecks(fills: FormFill[], ctx: CheckContext): CheckResult[] {
       // the advisor may know the carrier accepts it.
       for (const f of fill.fields) {
         const r = f.mapping.rect;
-        if (!r || f.origin === 'signer' || !f.display || f.mapping.format === 'checkbox' || fitsBox(f.display, r)) continue;
+        if (!r || f.origin === 'signer' || !f.display || f.mapping.format === 'checkbox' || f.mapping.checkedWhen || fitsBox(f.display, r)) continue;
         results.push({ id: `${fill.itemId}:fit:${f.key}`, level: 'warn', title: `${f.label}: may not fit on the form`, detail: `${formLabel(fill)}. Shorten it if the carrier is strict.`, templateId: fill.template.id, itemId: fill.itemId, fieldKey: f.key });
       }
       results.push({
