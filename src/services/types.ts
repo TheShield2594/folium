@@ -82,7 +82,12 @@ export interface PacketStore {
 }
 
 export interface EnvelopeStatus {
-  status: SignatureStatus;
+  /** Undefined when DocuSign reports a status Folium doesn't know: keep the stored one. */
+  status?: SignatureStatus;
+  /** Why DocuSign voided it (an expiry reason maps to `Expired`). */
+  voidedReason?: string;
+  /** DocuSign's `expireDateTime`. */
+  expiresOn?: string;
   viewedOn?: string;
   signedOn?: string;
   recipients: { role: string; email: string; status: 'sent' | 'delivered' | 'completed' | 'declined'; at?: string; authMethod?: string }[];
@@ -90,7 +95,19 @@ export interface EnvelopeStatus {
 
 export interface SendRequest {
   documents: { name: string; pdf: Uint8Array; placements: Placement[] }[];
-  signers: { role: string; name: string; email: string; phone?: string; order: number; auth: VerificationMethod }[];
+  signers: {
+    role: string;
+    name: string;
+    email: string;
+    phone?: string;
+    order: number;
+    auth: VerificationMethod;
+    /** Only ever here, on its way to DocuSign: `SignerAssignment` keeps `accessCodeSet`. */
+    accessCode?: string;
+    /** Embedded signing: DocuSign gets a `clientUserId` and the signer goes first. */
+    inSession?: boolean;
+    contactId?: string;
+  }[];
   ccs?: { name: string; email: string }[];
   subject: string;
   message: string;
@@ -114,7 +131,15 @@ export interface SigningProvider {
   downloadCompleted(envelopeId: string): Promise<{ pdf: Uint8Array; certificate: Uint8Array }>;
   void(envelopeId: string, reason: string): Promise<void>;
   resend(envelopeId: string): Promise<void>;
+  /** Corrects only what's given. A signer's access code and in-session setting stay as they were. */
   correctRecipient(envelopeId: string, role: string, change: { email?: string; phone?: string; name?: string }): Promise<void>;
+  /**
+   * A short-lived link to sign now, for a signer sent `inSession`. Ask for a fresh one
+   * each time: a used, cancelled or timed-out link can't be opened again. DocuSign
+   * sends the signer to `returnUrl` with `event` added (`signing_complete`, `decline`,
+   * `cancel`, `ttl_expired`, …).
+   */
+  signingUrl(envelopeId: string, role: string, returnUrl: string): Promise<string>;
 }
 
 /** Folium users, groups and the firm profile (Admin-managed; users edit their own profile). */

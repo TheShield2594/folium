@@ -17,7 +17,8 @@ Use Everence's publisher prefix if it isn't `ev_`, and change `src/services/powe
 |---|---|---|
 | ev_name | Text | Title |
 | ev_contact | Lookup → contact | |
-| ev_status | Choice | Drafted · Sent · Viewed · Signed · Declined · Voided |
+| ev_status | Choice | Drafted · Sent · Viewed · Signed · Declined · Voided · Expired. Option values 100000000 upward in this order; `SIGNATURE_STATUS_OPTIONS` in `config.ts` must match. |
+| ev_expireson | Date/time | When the envelope lapses. Set on send, then from DocuSign's `expireDateTime`. For "expiring this week" views and the reminder flow. |
 | ev_provider | Text | `DocuSign` |
 | ev_envelopeid | Text (indexed) | For Connect updates |
 | ev_senton / ev_signedon | Date/time | |

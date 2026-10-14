@@ -3,7 +3,8 @@ import type { Contact } from '../../domain/types';
 import { rolesForPacket } from '../../domain/signers';
 import { CLIENTS, FIRM, TEMPLATES, USERS } from '../demo/seed';
 import { decodeChoices, encodeChoices } from './choices';
-import { CHOICES } from './config';
+import { CHOICES, SIGNATURE_STATUS_OPTIONS } from './config';
+import { seedRequests } from '../demo/seed';
 
 // A fake Dataverse: contacts as Dataverse stores them, with option numbers and the
 // FormattedValue annotation the SDK requests by default.
@@ -100,5 +101,17 @@ describe('soft delete', () => {
     await requests.listMine();
     await requests.listForContact('c-1');
     expect(queries.every((q) => q.filter?.includes('statecode eq 0'))).toBe(true);
+  });
+});
+
+describe('signature request rows', () => {
+  it('writes ev_status as the choice option and the expiry date to its own column', async () => {
+    const { requests } = createPowerServices();
+    const r = seedRequests().find((x) => x.id === 'req-0940')!;
+    await requests.save({ ...r, id: 'rq-9', status: 'Expired' });
+    const row = updates.find((u) => u.id === 'rq-9')!.data;
+    expect(row.ev_status).toBe(SIGNATURE_STATUS_OPTIONS.Expired);
+    expect(row.ev_expireson).toBe(r.expiresOn);
+    expect(new Set(Object.values(SIGNATURE_STATUS_OPTIONS)).size).toBe(Object.keys(SIGNATURE_STATUS_OPTIONS).length);
   });
 });

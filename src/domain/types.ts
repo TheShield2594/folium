@@ -72,8 +72,17 @@ export interface FieldMapping {
   limits?: FieldLimits;
   /** Short guidance shown next to the input. */
   help?: string;
-  /** Only required when this condition holds (same grammar as signer conditions). */
+  /**
+   * Required when this condition holds (same grammar as signer conditions). Setting it
+   * makes the field conditionally required on its own, whatever `required` says.
+   */
   requiredWhen?: string;
+  /**
+   * Locked when this condition holds: read-only, not required and printed blank (and
+   * read-only in the editable PDF). What the advisor typed is kept, so unlocking
+   * restores it.
+   */
+  lockWhen?: string;
   /**
    * Overlay box for flat (scanned) or XFA PDFs that have no fillable field, in PDF
    * points from the page's top-left. Fillable PDFs take positions from their widgets.
@@ -239,9 +248,11 @@ export interface SavedPacket {
   usedCount: number;
 }
 
-export type SignatureStatus = 'Drafted' | 'Sent' | 'Viewed' | 'Signed' | 'Declined' | 'Voided';
+/** `Expired`: DocuSign voided the envelope because it lapsed before everyone signed. */
+export type SignatureStatus = 'Drafted' | 'Sent' | 'Viewed' | 'Signed' | 'Declined' | 'Voided' | 'Expired';
 
-export type VerificationMethod = 'email' | 'sms' | 'kba';
+/** `phone`: DocuSign Phone authentication (a call or text with a code), through an IDV workflow like SMS. */
+export type VerificationMethod = 'email' | 'sms' | 'phone' | 'kba';
 
 export interface SignerAssignment {
   role: string;
@@ -250,6 +261,14 @@ export interface SignerAssignment {
   phone?: string;
   order: number;
   auth: VerificationMethod;
+  /**
+   * An access code was set for this signer. The code itself is never stored: it goes
+   * to DocuSign with the envelope and the advisor gives it to the client by phone or
+   * in person.
+   */
+  accessCodeSet?: boolean;
+  /** Signs in DocuSign on the advisor's device, with the advisor present (embedded signing). */
+  inSession?: boolean;
   /** Contact this signer was resolved from, if any. */
   contactId?: string;
   status?: 'pending' | 'sent' | 'viewed' | 'signed' | 'declined';
@@ -307,6 +326,8 @@ export interface SignatureRequest {
   message: string;
   reminderDays?: number;
   expiresInDays?: number;
+  /** When the envelope lapses (ISO): worked out on send, then DocuSign's `expireDateTime` once status is read. */
+  expiresOn?: string;
   anyOrder: boolean;
   draftFolderUrl?: string;
   /** Draft PDFs written to SharePoint, so a later cleanup can find them. */

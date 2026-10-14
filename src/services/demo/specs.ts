@@ -75,7 +75,7 @@ const bank: SpecField[] = [
 ];
 
 const withholding: SpecField[] = [
-  { name: 'Withholding_Fed_Pct', label: 'Federal withholding %', span: 4, source: 'advisor', required: true, format: 'percent', key: 'withholding.federal', help: 'Use 10% unless the client elected otherwise on a W-4R.' },
+  { name: 'Withholding_Fed_Pct', label: 'Federal withholding %', span: 4, source: 'advisor', required: true, format: 'percent', key: 'withholding.federal', help: 'Use 10% unless the client elected otherwise on a W-4R.', lockWhen: 'withholding.none' },
   { name: 'Withholding_State_Pct', label: 'State withholding %', span: 4, source: 'advisor', format: 'percent', key: 'withholding.state' },
   { name: 'Withholding_None', label: 'Elect no federal withholding', span: 4, source: 'advisor', type: 'checkbox', format: 'checkbox', key: 'withholding.none' },
 ];
@@ -298,7 +298,7 @@ export const SPECS: FormSpec[] = [
           { name: 'From_Account', label: 'Account number there', span: 3, source: 'advisor', required: true, key: 'toa.acct' },
           { name: 'From_Type', label: 'Account type there', span: 3, source: 'advisor', key: 'toa.type' },
           { name: 'Transfer_All', label: 'Transfer everything', span: 4, source: 'advisor', type: 'checkbox', format: 'checkbox', key: 'toa.all' },
-          { name: 'Transfer_Partial', label: 'Partial amount', span: 4, source: 'advisor', format: 'currency', key: 'toa.partial' },
+          { name: 'Transfer_Partial', label: 'Partial amount', span: 4, source: 'advisor', format: 'currency', key: 'toa.partial', lockWhen: 'toa.all' },
           { name: 'Transfer_InKind', label: 'Transfer in kind', span: 4, source: 'advisor', type: 'checkbox', format: 'checkbox', key: 'toa.inkind' },
         ],
       },

@@ -93,6 +93,7 @@ export function SettingsScreen() {
               <Field label="Verify the owner with" htmlFor="u-auth">
                 <Select id="u-auth" value={p.defaultAuth ?? 'sms'} onChange={(e) => set({ defaultAuth: e.target.value as VerificationMethod })}>
                   <option value="sms">SMS code</option>
+                  <option value="phone">Phone call</option>
                   <option value="email">Email only</option>
                   <option value="kba">ID questions (KBA)</option>
                 </Select>

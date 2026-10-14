@@ -41,6 +41,12 @@ export function ReviewScreen() {
 
   const [active, setActive] = useState(0);
   const [selected, setSelected] = useState<string>();
+  /**
+   * The field in the "Selected field" editor. Separate from `selected` so focusing a row
+   * in Needs your input only highlights it: changing the editor above the list mid-click
+   * would move the row out from under the pointer (and a checkbox would miss the click).
+   */
+  const [editorKey, setEditorKey] = useState<string>();
   const [zoom, setZoom] = useState<'fit' | 'large'>('fit');
   const [busy, setBusy] = useState<string>();
   const [sharing, setSharing] = useState(false);
@@ -78,7 +84,8 @@ export function ReviewScreen() {
     }
     return [...seen.current]
       .map((key) => ({ key, fields: all.filter((f) => f.key === key), required: req.get(key) ?? all.some((f) => f.key === key && f.required) }))
-      .filter((n) => n.fields.length > 0);
+      // A locked field leaves the list while it's locked, and comes back if it unlocks.
+      .filter((n) => n.fields.length > 0 && !n.fields.every((f) => f.locked));
   }, [view]);
   const requiredNeeds = needs.filter((n) => n.required);
   const optionalNeeds = needs.filter((n) => !n.required);
@@ -93,7 +100,7 @@ export function ReviewScreen() {
     const { [key]: _done, ...rest } = useApp.getState().packet.snapshot ?? {};
     setPacket({ snapshot: rest });
   }
-  const selectedField: FieldState | undefined = useMemo(() => fill?.fields.find((f) => f.key === selected) ?? view?.fills.flatMap((f) => f.fields).find((f) => f.key === selected), [fill, view, selected]);
+  const selectedField: FieldState | undefined = useMemo(() => fill?.fields.find((f) => f.key === editorKey) ?? view?.fills.flatMap((f) => f.fields).find((f) => f.key === editorKey), [fill, view, editorKey]);
 
   // Jump to the form + field for a key (from checks or the inputs list).
   function focusKey(key: string | undefined, templateId?: string) {
@@ -103,6 +110,7 @@ export function ReviewScreen() {
     // Form-level checks (an out-of-date revision) just switch to the form.
     if (!key) return;
     setSelected(key);
+    setEditorKey(key);
     if (optionalNeeds.some((n) => n.key === key)) setShowOptional(true);
     requestAnimationFrame(() => document.getElementById(`in-${cssKey(key)}`)?.querySelector<HTMLElement>('input, select, textarea')?.focus());
   }
@@ -293,7 +301,7 @@ export function ReviewScreen() {
               field={selectedField}
               value={packet.values[selectedField.key]}
               onChange={(v) => setValue(selectedField.key, v)}
-              onClose={() => setSelected(undefined)}
+              onClose={() => (setSelected(undefined), setEditorKey(undefined))}
               usedOn={view.fills.filter((f) => f.fields.some((x) => x.key === selectedField.key)).map((f) => f.template.name)}
             />
           )}

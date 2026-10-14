@@ -1,11 +1,12 @@
 import { getContext } from '@microsoft/power-apps/app';
 import { getClient, type DataClient } from '@microsoft/power-apps/data';
-import type { Account, Connection, Contact, FirmProfile, FormTemplate, SavedPacket, SignatureRequest, SignatureStatus, TemplateMapping, UserGroup, UserProfile } from '../../domain/types';
+import type { Account, Connection, Contact, FirmProfile, FormTemplate, SavedPacket, SignatureRequest, TemplateMapping, UserGroup, UserProfile } from '../../domain/types';
+import { mapDocuSignStatus } from '../../domain/requests';
 import { buildEnvelopeDefinition, ROLE_SEPARATOR } from '../docusign/tabs';
 import { classifyError, FoliumError } from '../errors';
 import type { CrmService, DirectoryService, DraftStore, IncomingFile, PacketStore, RequestStore, Services, SigningProvider, TemplateLibrary } from '../types';
 import { decodeChoices, encodeChoices } from './choices';
-import { CHOICES, CONNECTORS, DATAVERSE, DOCUSIGN, SHAREPOINT } from './config';
+import { CHOICES, CONNECTORS, DATAVERSE, DOCUSIGN, SHAREPOINT, SIGNATURE_STATUS_OPTIONS } from './config';
 import { dataSourcesInfo } from './dataSourcesInfo';
 
 // Power Platform implementations. Dataverse tables go through the SDK's data client;
@@ -266,7 +267,8 @@ export function createPowerServices(): Services {
   const toRow = (r: SignatureRequest) => ({
     ev_name: r.title,
     'ev_contact@odata.bind': `/contacts(${r.contactId})`,
-    ev_status: r.status,
+    ev_status: SIGNATURE_STATUS_OPTIONS[r.status],
+    ev_expireson: r.expiresOn ?? null,
     ev_envelopeid: r.envelopeId ?? null,
     ev_provider: r.provider,
     ev_senton: r.sentOn ?? null,
@@ -331,9 +333,6 @@ export function createPowerServices(): Services {
   };
 
   // ---------------------------------------------------------------- DocuSign (custom connector, see connectors/)
-  const mapStatus = (s: string): SignatureStatus =>
-    ({ created: 'Drafted', sent: 'Sent', delivered: 'Viewed', completed: 'Signed', declined: 'Declined', voided: 'Voided' })[s] as SignatureStatus ?? 'Sent';
-
   const signing: SigningProvider = {
     name: 'DocuSign',
     async create(req) {
@@ -346,14 +345,16 @@ export function createPowerServices(): Services {
       await connector(CONNECTORS.docuSign, 'UpdateEnvelope', { envelopeId, body: { status: 'sent' } }, 'Send envelope');
     },
     async getStatus(envelopeId) {
-      const e = await connector<{ status: string; deliveredDateTime?: string; completedDateTime?: string; recipients?: { signers: { roleName: string; email: string; status: string; signedDateTime?: string }[] } }>(
+      const e = await connector<{ status: string; voidedReason?: string; expireDateTime?: string; deliveredDateTime?: string; completedDateTime?: string; recipients?: { signers: { roleName: string; email: string; status: string; signedDateTime?: string }[] } }>(
         CONNECTORS.docuSign,
         'GetEnvelope',
         { envelopeId, include: 'recipients' },
         'Envelope status',
       );
       return {
-        status: mapStatus(e.status),
+        status: mapDocuSignStatus(e.status, e.voidedReason),
+        voidedReason: e.voidedReason,
+        expiresOn: e.expireDateTime,
         viewedOn: e.deliveredDateTime,
         signedOn: e.completedDateTime,
         // A recipient signing for several roles reports once per role.
@@ -374,6 +375,20 @@ export function createPowerServices(): Services {
     async resend(envelopeId) {
       await connector(CONNECTORS.docuSign, 'UpdateEnvelope', { envelopeId, resend_envelope: true, body: {} }, 'Resend envelope');
     },
+    async signingUrl(envelopeId, role, returnUrl) {
+      const e = await connector<{ recipients: { signers: { recipientId: string; roleName: string; name: string; email: string; clientUserId?: string }[] } }>(CONNECTORS.docuSign, 'GetEnvelope', { envelopeId, include: 'recipients' }, 'Envelope recipients');
+      const r = e.recipients.signers.find((s) => s.roleName.split(ROLE_SEPARATOR).includes(role));
+      if (!r) throw new Error(`No ${role} on this envelope`);
+      if (!r.clientUserId) throw new Error('This signer was sent by email, not to sign in session.');
+      const view = await connector<{ url: string }>(
+        CONNECTORS.docuSign,
+        'CreateRecipientView',
+        { envelopeId, body: { userName: r.name, email: r.email, recipientId: r.recipientId, clientUserId: r.clientUserId, returnUrl, authenticationMethod: 'None' } },
+        'Open signing',
+      );
+      return view.url;
+    },
+    // Only the fields being corrected are sent, so DocuSign keeps the access code and clientUserId.
     async correctRecipient(envelopeId, role, change) {
       const e = await connector<{ recipients: { signers: { recipientId: string; roleName: string }[] } }>(CONNECTORS.docuSign, 'GetEnvelope', { envelopeId, include: 'recipients' }, 'Envelope recipients');
       const r = e.recipients.signers.find((s) => s.roleName.split(ROLE_SEPARATOR).includes(role));

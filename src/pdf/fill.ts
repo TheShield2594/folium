@@ -31,7 +31,9 @@ export async function fillPdf(template: Uint8Array, fields: FieldState[], opts: 
   const truncated: string[] = [];
   const pages = doc.getPages();
 
-  const toFill = fields.filter((f) => f.origin !== 'signer' && f.value !== '');
+  // Locked fields print blank: whatever the advisor typed stays in the packet, not on the form.
+  const toFill = fields.filter((f) => f.origin !== 'signer' && !f.locked && f.value !== '');
+  const locked = fields.filter((f) => f.locked);
 
   if (opts.kind === 'fillable') {
     const form = doc.getForm();
@@ -56,6 +58,16 @@ export async function fillPdf(template: Uint8Array, fields: FieldState[], opts: 
         const opt = field.getOptions().find((o) => o.toLowerCase() === f.display.toLowerCase());
         if (opt) field.select(opt);
       }
+    }
+    // Keep the lock in the editable PDF: blank and read-only.
+    for (const f of locked) {
+      const field = form.getFieldMaybe(f.mapping.pdfField);
+      if (!field) continue;
+      if (field instanceof PDFTextField) field.setText('');
+      else if (field instanceof PDFCheckBox) field.uncheck();
+      else if (field instanceof PDFDropdown) field.clear();
+      else if (field instanceof PDFRadioGroup) field.clear();
+      field.enableReadOnly();
     }
     form.updateFieldAppearances(font);
     if (opts.flatten) form.flatten({ updateFieldAppearances: false });

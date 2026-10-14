@@ -13,6 +13,7 @@ import { Badge, Button, Empty, Field, IconButton, Segmented, Select, Sheet, Text
 import { Icon } from '../../ui/Icon';
 import { PdfView, useInspection } from '../common/PdfView';
 import { STATUS_TONE } from './AdminTemplates';
+import { ConditionSheet, describeConditions } from './ConditionSheet';
 import { KNOWN_SOURCES, SOURCE_GROUPS } from './sources';
 
 type Tab = 'fields' | 'signers' | 'checks' | 'test';
@@ -53,6 +54,7 @@ export function TemplateEditor() {
   const [publishing, setPublishing] = useState(false);
   const [filter, setFilter] = useState<'all' | 'attention'>('all');
   const [limitsFor, setLimitsFor] = useState<string>();
+  const [conditionsFor, setConditionsFor] = useState<string>();
 
   // Load the mapping when the editor opens a template, not on every refresh of the
   // template list, so a refresh from elsewhere never throws away unsaved edits.
@@ -144,6 +146,7 @@ export function TemplateEditor() {
     sourceLabel: m.source,
     required: m.required,
     missing: needsAttention(m),
+    locked: false,
   }));
   const shownFields = mapping.fields.filter((m) => filter === 'all' || needsAttention(m));
 
@@ -255,7 +258,7 @@ export function TemplateEditor() {
                     </div>
                   ))}
                   <div style={{ overflowX: 'auto' }}>
-                    <table className="table mapping" style={{ minWidth: 760 }}>
+                    <table className="table mapping" style={{ minWidth: 900 }}>
                       <thead>
                         <tr>
                           <th>PDF field</th>
@@ -263,6 +266,7 @@ export function TemplateEditor() {
                           <th>Fill from</th>
                           <th>Format</th>
                           <th>Required</th>
+                          <th>Conditions</th>
                           <th aria-label="Remove" />
                         </tr>
                       </thead>
@@ -321,7 +325,30 @@ export function TemplateEditor() {
                                 {describeLimits(m.limits) && <div className="t-footnote c3" style={{ marginTop: 2 }}>{describeLimits(m.limits)}</div>}
                               </td>
                               <td>
-                                <input type="checkbox" className="check" aria-label={`${m.pdfField} required`} checked={m.required} onChange={(e) => patchField(m.pdfField, { required: e.target.checked })} />
+                                {m.requiredWhen?.trim() ? (
+                                  <span className="t-footnote c3">When…</span>
+                                ) : (
+                                  <input type="checkbox" className="check" aria-label={`${m.pdfField} required`} checked={m.required} onChange={(e) => patchField(m.pdfField, { required: e.target.checked })} />
+                                )}
+                              </td>
+                              <td style={{ minWidth: 180 }}>
+                                {describeConditions(m, mapping).map((c) => (
+                                  <div key={c} className="t-footnote c2" style={{ marginBottom: 2 }}>
+                                    {c}
+                                  </div>
+                                ))}
+                                <Button
+                                  variant="plain"
+                                  size="sm"
+                                  icon={m.requiredWhen || m.lockWhen ? 'pencil' : 'plus'}
+                                  aria-label={`Conditions for ${m.pdfField}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setConditionsFor(m.pdfField);
+                                  }}
+                                >
+                                  {m.requiredWhen || m.lockWhen ? 'Edit' : 'Add'}
+                                </Button>
                               </td>
                               <td>
                                 <IconButton icon="trash" size={15} label={`Remove ${m.pdfField}`} onClick={() => setMapping({ ...mapping, fields: mapping.fields.filter((f) => f.pdfField !== m.pdfField) })} />
@@ -369,6 +396,9 @@ export function TemplateEditor() {
           onChange={(limits) => patchField(limitsFor, { limits })}
           onClose={() => setLimitsFor(undefined)}
         />
+      )}
+      {conditionsFor && mapping.fields.some((f) => f.pdfField === conditionsFor) && (
+        <ConditionSheet field={mapping.fields.find((f) => f.pdfField === conditionsFor)!} mapping={mapping} onChange={(patch) => patchField(conditionsFor, patch)} onClose={() => setConditionsFor(undefined)} />
       )}
       {publishing && (
         <PublishSheet
@@ -571,6 +601,7 @@ function TestTab({ template }: { template: FormTemplate }) {
     const account = client.accounts.find((a) => template.appliesTo?.includes(a.ev_accounttype)) ?? client.accounts[0];
     return prefillForm(template, { client, advisor, firm, account }, {});
   }, [client, advisor, firm, template]);
+  const conditional = fill?.fields.filter((f) => f.mapping.requiredWhen?.trim() || f.mapping.lockWhen?.trim()) ?? [];
 
   return (
     <section className="card card-pad stack-4" style={{ gridColumn: '1 / -1' }}>
@@ -611,7 +642,25 @@ function TestTab({ template }: { template: FormTemplate }) {
               <b>{fill.fields.filter((f) => f.origin === 'signer').length}</b>
               <span>left for the signer</span>
             </div>
+            <div className="stat">
+              <b>{fill.fields.filter((f) => f.locked).length}</b>
+              <span>locked for this contact</span>
+            </div>
           </div>
+          {conditional.length > 0 && (
+            <div className="list" aria-label="Conditional fields for this contact">
+              {conditional.map((f) => (
+                <div key={f.mapping.pdfField} className="list-row">
+                  <Icon name={f.locked ? 'lock' : f.required ? 'warning' : 'checkCircle'} size={16} className={f.locked ? 'c3' : f.required ? 'c-warn' : 'c-accent'} />
+                  <span className="grow">
+                    <span style={{ display: 'block', fontWeight: 600 }}>{f.label}</span>
+                    <span className="t-footnote c3">{describeConditions(f.mapping, template.mapping).join(' · ')}</span>
+                  </span>
+                  <Badge tone={f.locked ? undefined : f.required ? 'warn' : 'accent'}>{f.locked ? 'Locked' : f.required ? 'Required' : 'Open'}</Badge>
+                </div>
+              ))}
+            </div>
+          )}
           <div style={{ background: 'var(--surface-sunken)', borderRadius: 12, padding: 16 }}>
             <PdfView template={template} fields={fill.fields} placements={template.mapping.placements} width={720} />
           </div>

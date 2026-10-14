@@ -1,5 +1,6 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import type { ClientRecord, FirmProfile, FormTemplate, SavedPacket, SignatureRequest, UserGroup, UserProfile } from '../../domain/types';
+import { mapDocuSignStatus } from '../../domain/requests';
 import { generateTemplatePdf } from '../../pdf/generate';
 import type {
   CrmService,
@@ -37,7 +38,7 @@ interface DemoState {
   clients: Record<string, ClientRecord>;
   currentUserId: string;
   /** Simulated DocuSign envelopes: created (a draft) and, once released, when they went out. */
-  envelopes?: Record<string, { createdAt: number; sentAt?: number }>;
+  envelopes?: Record<string, DemoEnvelope>;
 }
 
 function load(): DemoState {
@@ -374,7 +375,22 @@ const packets: PacketStore = {
   },
 };
 
-/** Simulated DocuSign. Envelopes move Sent → Viewed → Signed over a couple of minutes. */
+const forceExpiry = () => typeof location !== 'undefined' && /[?&]expire=1(&|$)/.test(location.search + location.hash);
+
+interface DemoEnvelope {
+  createdAt: number;
+  sentAt?: number;
+  /** Kept with the envelope (not just in memory) so a signing tab opened from Folium can read it. */
+  signers?: { role: string; email: string; inSession?: boolean }[];
+  expiresInDays?: number;
+  /** In-session signers who finished, and when. */
+  signedInSession?: Record<string, number>;
+}
+
+/**
+ * Simulated DocuSign. Envelopes move Sent → Viewed → Signed over a couple of minutes,
+ * except in-session signers, who sign on the demo signing page.
+ */
 const envelopes = () => (state.envelopes ??= {});
 /** When an envelope went out, for envelopes this demo created. */
 const sentAtOf = (id: string) => envelopes()[id]?.sentAt;
@@ -386,7 +402,7 @@ const signing: SigningProvider = {
   async create(req) {
     await wait(500);
     const id = crypto.randomUUID();
-    envelopes()[id] = { createdAt: Date.now() };
+    envelopes()[id] = { createdAt: Date.now(), signers: req.signers.map((x) => ({ role: x.role, email: x.email, inSession: x.inSession || undefined })), expiresInDays: req.expiresInDays };
     persist();
     sentDocs.set(id, req);
     return { envelopeId: id };
@@ -400,21 +416,41 @@ const signing: SigningProvider = {
     persist();
   },
   async getStatus(envelopeId): Promise<EnvelopeStatus> {
+    syncSignedInSession(envelopeId);
     const env = envelopes()[envelopeId];
     if (env && !env.sentAt) return { status: 'Drafted', recipients: [] };
     const t = sentAtOf(envelopeId);
     const req = state.requests.find((r) => r.envelopeId === envelopeId);
+    // Like DocuSign, an envelope still open past its expiry comes back voided with an
+    // expiry reason. `?demo=1&expire=1` makes every open envelope lapse now.
+    const expiresOn = req?.expiresOn ?? (t && env?.expiresInDays ? new Date(t + env.expiresInDays * 86_400_000).toISOString() : undefined);
+    const open = !req || req.status === 'Sent' || req.status === 'Viewed';
+    if (open && (forceExpiry() || (expiresOn && new Date(expiresOn).getTime() <= Date.now()))) {
+      return {
+        status: mapDocuSignStatus('voided', 'Envelope has expired.'),
+        voidedReason: 'Envelope has expired.',
+        expiresOn: expiresOn ?? new Date().toISOString(),
+        viewedOn: req?.viewedOn,
+        recipients: (req?.signers ?? []).map((s) => ({ role: s.role, email: s.email, status: s.status === 'signed' ? 'completed' : s.status === 'viewed' ? 'delivered' : 'sent', at: s.signedOn })),
+      };
+    }
     if (!t) {
-      return { status: req?.status ?? 'Sent', viewedOn: req?.viewedOn, signedOn: req?.signedOn, recipients: [] };
+      return { status: req?.status ?? 'Sent', viewedOn: req?.viewedOn, signedOn: req?.signedOn, expiresOn, recipients: [] };
     }
     const age = (Date.now() - t) / 1000;
-    const status = age > 90 ? 'Signed' : age > 30 ? 'Viewed' : 'Sent';
-    const now = new Date().toISOString();
+    const remote: 'completed' | 'delivered' | 'sent' = age > 90 ? 'completed' : age > 30 ? 'delivered' : 'sent';
+    const done = env?.signedInSession ?? {};
+    const recipients = (env?.signers ?? sentDocs.get(envelopeId)?.signers ?? []).map((s) => {
+      const at = done[s.role];
+      return { role: s.role, email: s.email, status: at ? ('completed' as const) : s.inSession ? ('sent' as const) : remote, at: at ? new Date(at).toISOString() : undefined };
+    });
+    const status = recipients.length && recipients.every((x) => x.status === 'completed') ? 'Signed' : recipients.some((x) => x.status !== 'sent') ? 'Viewed' : age > 30 && !recipients.length ? 'Viewed' : 'Sent';
     return {
       status,
-      viewedOn: age > 30 ? new Date(t + 30_000).toISOString() : undefined,
-      signedOn: age > 90 ? now : undefined,
-      recipients: (sentDocs.get(envelopeId)?.signers ?? []).map((s) => ({ role: s.role, email: s.email, status: status === 'Signed' ? 'completed' : status === 'Viewed' ? 'delivered' : 'sent' })),
+      expiresOn,
+      viewedOn: status !== 'Sent' ? new Date(Math.min(t + 30_000, ...Object.values(done))).toISOString() : undefined,
+      signedOn: status === 'Signed' ? new Date().toISOString() : undefined,
+      recipients,
     };
   },
   async downloadCompleted(envelopeId) {
@@ -454,7 +490,34 @@ const signing: SigningProvider = {
   async correctRecipient() {
     await wait(300);
   },
+  async signingUrl(envelopeId, role, returnUrl) {
+    await wait(300);
+    const signer = envelopes()[envelopeId]?.signers?.find((x) => x.role === role);
+    if (!signer) throw new Error(`No ${role} on this envelope`);
+    if (!signer.inSession) throw new Error('This signer was sent by email, not to sign in session.');
+    const q = new URLSearchParams({ envelope: envelopeId, role, return: returnUrl });
+    return `${location.origin}${location.pathname}${location.search}#/demo-signing?${q}`;
+  },
 };
+
+/** Signing happens in another tab: pick up what it saved. */
+function syncSignedInSession(envelopeId: string) {
+  try {
+    const saved = (JSON.parse(localStorage.getItem(KEY) ?? 'null') as DemoState | null)?.envelopes?.[envelopeId]?.signedInSession;
+    const env = envelopes()[envelopeId];
+    if (saved && env) env.signedInSession = { ...saved, ...env.signedInSession };
+  } catch {
+    /* ignore */
+  }
+}
+
+/** The demo signing page's "Finish": the in-session signer has signed. */
+export function demoSignInSession(envelopeId: string, role: string) {
+  const env = envelopes()[envelopeId];
+  if (!env) throw new Error('Envelope not found');
+  (env.signedInSession ??= {})[role] = Date.now();
+  persist();
+}
 
 export function createDemoServices(): Services {
   return { mode: 'demo', directory, crm, templates, drafts, requests, packets, signing, attachments: new Map() };

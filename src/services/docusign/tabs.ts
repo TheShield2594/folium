@@ -52,21 +52,31 @@ export const ROLE_SEPARATOR = '+';
 /** DocuSign identity-verification workflow IDs for the account (Settings › Identity Verification). */
 export interface IdvWorkflows {
   sms?: string;
+  /** Phone authentication. */
+  phone?: string;
   kba?: string;
 }
+
+/** Weakest to strongest. Phone and SMS both prove the same phone, so they rank equally. */
+export const AUTH_STRENGTH: Record<VerificationMethod, number> = { email: 0, sms: 1, phone: 1, kba: 2 };
+
+/** For `clientUserId`: who an in-session signer is, stable across fresh signing links. */
+export const clientUserIdFor = (s: { role: string; contactId?: string }) => s.contactId ?? s.role;
 
 /**
  * The identity-verification settings for one signer. Throws rather than quietly sending
  * a financial form with weaker verification than the advisor chose.
  */
 function authFor(method: VerificationMethod, phone: string | undefined, idv: IdvWorkflows, who: string): Record<string, unknown> {
-  if (method === 'sms') {
-    if (!idv.sms) throw new Error('SMS verification isn’t set up for this DocuSign account. Choose another method or ask an administrator.');
+  if (method === 'sms' || method === 'phone') {
+    const workflowId = idv[method];
+    const what = method === 'sms' ? 'SMS verification' : 'Phone authentication';
+    if (!workflowId) throw new Error(`${what} isn’t set up for this DocuSign account. Choose another method or ask an administrator.`);
     const number = (phone ?? '').replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
-    if (number.length !== 10) throw new Error(`${who} needs a mobile number for SMS verification.`);
+    if (number.length !== 10) throw new Error(`${who} needs a ${method === 'sms' ? 'mobile' : 'phone'} number for ${what}.`);
     return {
       identityVerification: {
-        workflowId: idv.sms,
+        workflowId,
         inputOptions: [{ name: 'phone_number_list', valueType: 'PhoneNumberList', phoneNumberList: [{ countryCode: '1', number }] }],
       },
     };
@@ -107,12 +117,13 @@ export function buildEnvelopeDefinition(req: SendRequest, idv: IdvWorkflows = {}
     const key = `${s.name.trim().toLowerCase()}|${s.email.trim().toLowerCase()}`;
     people.set(key, [...(people.get(key) ?? []), s]);
   }
-  const strength = { email: 0, sms: 1, kba: 2 } as const;
-
   const signers = [...people.values()].map((roles, i) => {
     const s = roles[0];
-    const auth = roles.reduce((a, r) => (strength[r.auth] > strength[a] ? r.auth : a), s.auth);
+    const auth = roles.reduce((a, r) => (AUTH_STRENGTH[r.auth] > AUTH_STRENGTH[a] ? r.auth : a), s.auth);
     const phone = roles.find((r) => r.phone)?.phone;
+    // Roles merged into one person use the first code set (the Send screen warns when they differ).
+    const accessCode = roles.find((r) => r.accessCode?.trim())?.accessCode?.trim();
+    const inSession = roles.find((r) => r.inSession);
     const merged: DocuSignTabs = {};
     req.documents.forEach((d, di) => {
       for (const r of roles) {
@@ -125,8 +136,11 @@ export function buildEnvelopeDefinition(req: SendRequest, idv: IdvWorkflows = {}
       roleName: roles.map((r) => r.role).join(ROLE_SEPARATOR),
       name: s.name,
       email: s.email,
-      routingOrder: String(Math.min(...roles.map((r) => r.order))),
+      // An in-session signer doesn't wait in the routing order, as in Laser App.
+      routingOrder: inSession ? '1' : String(Math.min(...roles.map((r) => r.order))),
       tabs: merged,
+      ...(accessCode ? { accessCode } : {}),
+      ...(inSession ? { clientUserId: clientUserIdFor(inSession) } : {}),
       ...authFor(auth, phone, idv, s.name),
     };
   });

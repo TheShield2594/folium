@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { applyEnvelopeStatus, expiryInfo } from '../../domain/requests';
 import { roleLabel } from '../../domain/signers';
 import type { SignatureRequest } from '../../domain/types';
 import { useServices } from '../../services';
@@ -8,6 +9,7 @@ import { useApp } from '../../state/store';
 import { Badge, Button, Field, IconButton, Menu, Select, Sheet, TextArea, TextInput, downloadBytes, toast } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
 import { useDraftActions } from '../common/useDraftActions';
+import { SignNowButtons } from './InSessionSigning';
 
 export const fmtWhen = (iso?: string) =>
   iso ? new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
@@ -27,7 +29,17 @@ export function statusInfo(r: SignatureRequest): { label: string; tone: 'accent'
       return { label: 'Declined', tone: 'danger' };
     case 'Voided':
       return { label: 'Voided', tone: 'danger' };
+    case 'Expired':
+      return { label: 'Expired, not signed', tone: 'danger' };
   }
+}
+
+/** "expires Nov 12" for an open request, warn-toned within DocuSign's 7-day warning. */
+export function expiryLabel(r: SignatureRequest, now = new Date()): { text: string; tone?: 'warn' | 'danger' } | undefined {
+  const e = expiryInfo(r, now);
+  if (!e) return undefined;
+  if (e.pastDue) return { text: 'Past expiry, check status', tone: 'danger' };
+  return { text: e.daysLeft <= 1 ? `expires ${fmtDay(e.expiresOn)} (tomorrow)` : `expires ${fmtDay(e.expiresOn)}`, tone: e.soon ? 'warn' : undefined };
 }
 
 export function RequestCard({ req, showClient, clientName }: { req: SignatureRequest; showClient?: boolean; clientName?: string }) {
@@ -49,7 +61,8 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
   const info = statusInfo(r);
   const signed = r.signers.filter((s) => s.status === 'signed').length;
   const order = ['Drafted', 'Sent', 'Viewed', 'Signed'] as const;
-  const reached = r.status === 'Declined' || r.status === 'Voided' ? 1 : order.indexOf(r.status as (typeof order)[number]);
+  const expiry = expiryLabel(r);
+  const reached = r.status === 'Declined' || r.status === 'Voided' || r.status === 'Expired' ? 1 : order.indexOf(r.status as (typeof order)[number]);
   const ownerName = users.find((u) => u.systemuserid === r.ownerId)?.fullname;
 
   async function save(next: SignatureRequest, msg?: string) {
@@ -92,34 +105,22 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
       ),
     );
 
-  const refresh = () =>
+  const refresh = (quiet?: boolean) =>
     withBusy('status', async () => {
-      const st = await services.signing.getStatus(r.envelopeId!);
-      // One signer can finish while the envelope is still "Sent", so compare signers too.
-      const signers = r.signers.map((s) => {
-        const rec = st.recipients.find((x) => x.role === s.role);
-        if (!rec) return s;
-        const status = rec.status === 'completed' ? 'signed' : rec.status === 'delivered' ? 'viewed' : rec.status === 'declined' ? 'declined' : 'sent';
-        return { ...s, status, signedOn: rec.at ?? s.signedOn } as typeof s;
-      });
-      const signersChanged = signers.some((s, i) => s.status !== r.signers[i].status);
-      if (st.status === r.status && !signersChanged) return toast.ok('No change yet');
-      const events = [...r.audit];
-      for (const s of signers) if (s.status === 'signed' && r.signers.find((x) => x.role === s.role)?.status !== 'signed') events.push({ at: s.signedOn ?? new Date().toISOString(), actor: s.name, action: 'Signed' });
-      if (st.viewedOn && !r.viewedOn) events.push({ at: st.viewedOn, actor: r.signers[0]?.name ?? 'Signer', action: 'Viewed' });
-      if (st.status === 'Signed') events.push({ at: st.signedOn ?? new Date().toISOString(), actor: 'DocuSign', action: 'Completed', detail: 'All signers signed' });
-      await save(
-        {
-          ...r,
-          status: st.status,
-          viewedOn: st.viewedOn ?? r.viewedOn,
-          signedOn: st.signedOn ?? r.signedOn,
-          signers,
-          audit: events,
-        },
-        st.status === r.status ? `${signers.filter((s) => s.status === 'signed').length} of ${signers.length} signed` : `Now: ${st.status.toLowerCase()}`,
-      );
+      const { next, changed, message } = applyEnvelopeStatus(r, await services.signing.getStatus(r.envelopeId!));
+      if (changed) return save(next, message);
+      if (next.expiresOn !== r.expiresOn) await save(next);
+      if (!quiet) toast.ok(message);
     });
+
+  // An open request past its expiry date is probably expired in DocuSign: ask once.
+  const autoChecked = useRef(false);
+  const pastDue = !!r.envelopeId && !!expiryInfo(r)?.pastDue;
+  useEffect(() => {
+    if (!pastDue || autoChecked.current) return;
+    autoChecked.current = true;
+    void refresh(true);
+  }, [pastDue]);
 
   const resend = () =>
     withBusy('resend', async () => {
@@ -161,6 +162,14 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
             {r.sentOn ? ` · sent ${fmtDay(r.sentOn)} by ${r.sentBy}` : ` · started ${fmtDay(r.createdOn)} by ${r.preparedBy ?? r.sentBy}`}
             {ownerName && r.preparedById && r.preparedById !== r.ownerId ? ` for ${ownerName}` : ''}
             {r.lastReminderOn ? ` · reminded ${fmtDay(r.lastReminderOn)}` : ''}
+            {expiry && (
+              <>
+                {' · '}
+                <span className={expiry.tone === 'danger' ? 'c-danger' : expiry.tone === 'warn' ? 'c-warn' : undefined} style={expiry.tone ? { fontWeight: 600 } : undefined}>
+                  {expiry.text}
+                </span>
+              </>
+            )}
             {r.envelopeId && (
               <>
                 {' · '}
@@ -177,7 +186,7 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
             trigger={(p) => <IconButton icon="ellipsis" label="More actions" {...p} />}
             items={[
               { label: 'Use these forms again', icon: 'copy', onSelect: () => openDraft(true) },
-              ...(r.envelopeId && (r.status === 'Sent' || r.status === 'Viewed') ? [{ label: 'Check status now', icon: 'refresh' as const, onSelect: refresh }] : []),
+              ...(r.envelopeId && (r.status === 'Sent' || r.status === 'Viewed') ? [{ label: 'Check status now', icon: 'refresh' as const, onSelect: () => refresh() }] : []),
               ...(r.draftFolderUrl ? [{ label: 'Open SharePoint folder', icon: 'folder' as const, onSelect: () => window.open(r.draftFolderUrl, '_blank', 'noopener') }] : []),
               ...(r.status === 'Drafted'
                 ? [
@@ -228,9 +237,11 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
         </div>
       )}
 
+      <SignNowButtons req={r} />
+
       {(r.status === 'Sent' || r.status === 'Viewed') && (
         <div className="row wrap">
-          <Button variant="bordered" icon="refresh" busy={busy === 'status'} onClick={refresh}>
+          <Button variant="bordered" icon="refresh" busy={busy === 'status'} onClick={() => refresh()}>
             Check status
           </Button>
           <Button variant="bordered" icon="send" busy={busy === 'resend'} onClick={resend}>
@@ -255,6 +266,18 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
               Shared with {users.filter((u) => r.sharedWith!.includes(u.systemuserid)).map((u) => u.fullname).join(', ')}
             </span>
           ) : null}
+        </div>
+      )}
+
+      {r.status === 'Expired' && (
+        <div className="row wrap">
+          <span className="t-callout c2 grow">
+            It lapsed on {fmtDay(r.expiresOn) || 'its expiry date'} before everyone signed.
+            {signed > 0 ? ` Signed before then: ${r.signers.filter((s) => s.status === 'signed').map((s) => s.name).join(', ')}.` : ' Nobody had signed.'} Send the forms again to finish.
+          </span>
+          <Button variant="tinted" icon="copy" onClick={() => openDraft(true)}>
+            Start again from these forms
+          </Button>
         </div>
       )}
 
@@ -292,7 +315,7 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
                     <li key={s.role} className="row">
                       <Icon name={s.status === 'signed' ? 'checkCircle' : 'circle'} size={16} className={s.status === 'signed' ? 'c-accent' : 'c3'} />
                       <span className="grow">
-                        {s.name} <span className="t-footnote c3">· {roleLabel(s.role)} · {s.auth === 'sms' ? 'SMS code' : s.auth === 'kba' ? 'ID questions' : 'email'}</span>
+                        {s.name} <span className="t-footnote c3">· {roleLabel(s.role)} · {s.auth === 'sms' ? 'SMS code' : s.auth === 'phone' ? 'phone call' : s.auth === 'kba' ? 'ID questions' : 'email'}{s.accessCodeSet ? ' + access code' : ''}{s.inSession ? ' · in session' : ''}</span>
                       </span>
                       <span className="t-footnote c3">{s.signedOn ? fmtWhen(s.signedOn) : s.status}</span>
                     </li>

@@ -50,6 +50,22 @@ describe('pdf', () => {
     expect((await PDFDocument.load(merged)).getPageCount()).toBe(t.pageCount * 2);
   });
 
+  it('prints a locked field blank and keeps it read-only in the editable PDF', async () => {
+    const t = TEMPLATES.find((x) => x.id === 'tpl-px310-0826')!;
+    const blank = await services.templates.getPdf(t);
+    const values = { 'withholding.federal': '12', 'withholding.none': 'Yes' };
+    const out = await fillPdf(blank, prefillForm(t, scope, values).fields, { kind: 'fillable' });
+    const form = (await PDFDocument.load(out.pdf)).getForm();
+    expect(form.getTextField('Withholding_Fed_Pct').getText() ?? '').toBe('');
+    expect(form.getTextField('Withholding_Fed_Pct').isReadOnly()).toBe(true);
+    expect(form.getTextField('Withholding_State_Pct').isReadOnly()).toBe(false);
+
+    const open = await fillPdf(blank, prefillForm(t, scope, { 'withholding.federal': '12' }).fields, { kind: 'fillable' });
+    const f2 = (await PDFDocument.load(open.pdf)).getForm();
+    expect(f2.getTextField('Withholding_Fed_Pct').getText()).toBe('12%');
+    expect(f2.getTextField('Withholding_Fed_Pct').isReadOnly()).toBe(false);
+  });
+
   it('reports MaxLen, and a long value is a check instead of a silent cut', async () => {
     const doc = await PDFDocument.create();
     const page = doc.addPage([612, 792]);

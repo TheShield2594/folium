@@ -147,6 +147,7 @@ export function specToTemplate(spec: FormSpec): FormTemplate {
               limits: field.limits,
               help: field.help,
               requiredWhen: field.requiredWhen,
+              lockWhen: field.lockWhen,
               rect: spec.pdfKind === 'flat' ? rectByName.get(field.name) : undefined,
             })),
       signers: spec.signers,
@@ -229,6 +230,8 @@ export function seedRequests(): SignatureRequest[] {
       subject: 'Transfer paperwork to sign',
       message: 'Hi Jordan, this moves your old 401(k) over to us.',
       reminderDays: 3,
+      expiresInDays: 60,
+      expiresOn: daysAgo(3 - 60, 9, 41),
       anyOrder: false,
       uploadedToOnBase: false,
       lastReminderOn: daysAgo(0, 9, 41),
@@ -313,6 +316,8 @@ export function seedRequests(): SignatureRequest[] {
       subject: 'Your RMD election',
       message: '',
       reminderDays: 5,
+      expiresInDays: 14,
+      expiresOn: daysAgo(9 - 14),
       anyOrder: false,
       viewedOn: daysAgo(8),
       uploadedToOnBase: false,
@@ -323,7 +328,51 @@ export function seedRequests(): SignatureRequest[] {
         { at: daysAgo(8), actor: 'Eli Yoder', action: 'Viewed' },
       ],
     },
+    lapsedRequest(),
   ];
+}
+
+/**
+ * A request whose envelope lapsed while Folium still had it as Viewed, so the card
+ * shows "Past expiry" and checks status on its own (the demo DocuSign reports it
+ * expired, with the owner's signature already in).
+ */
+function lapsedRequest(): SignatureRequest {
+  return {
+    id: 'req-0940',
+    contactId: 'c-jordan',
+    title: 'Brokerage beneficiary update',
+    ownerId: ADVISOR.systemuserid,
+    preparedById: ADVISOR.systemuserid,
+    preparedBy: ADVISOR.fullname,
+    sentBy: ADVISOR.fullname,
+    createdOn: daysAgo(63, 10, 2),
+    sentOn: daysAgo(63, 10, 5),
+    provider: 'DocuSign',
+    envelopeId: '5c9e0d3a-81b2-4e6f-a7d4-0b3f2c1e9a55',
+    status: 'Viewed',
+    documents: [{ templateId: 'tpl-ev1120-0326', name: 'Beneficiary designation', formNumber: 'EV-1120', revision: '03/2026' }],
+    signers: [
+      { role: 'Owner', name: 'Jordan A. Miller', email: 'jordan.miller@example.com', order: 1, auth: 'email', status: 'signed', signedOn: daysAgo(61, 19, 30) },
+      { role: 'SpouseConsent', name: 'Sam Miller', email: 'sam.miller@example.com', order: 2, auth: 'email', status: 'sent' },
+    ],
+    ccs: [],
+    subject: 'Beneficiary form to sign',
+    message: '',
+    reminderDays: 5,
+    expiresInDays: 60,
+    expiresOn: daysAgo(3, 10, 5),
+    anyOrder: false,
+    viewedOn: daysAgo(62),
+    uploadedToOnBase: false,
+    values: {},
+    attachments: [],
+    audit: [
+      { at: daysAgo(63, 10, 5), actor: ADVISOR.fullname, action: 'Sent with DocuSign' },
+      { at: daysAgo(62), actor: 'Jordan A. Miller', action: 'Viewed' },
+      { at: daysAgo(61, 19, 30), actor: 'Jordan A. Miller', action: 'Signed' },
+    ],
+  };
 }
 
 export function seedPackets(): SavedPacket[] {

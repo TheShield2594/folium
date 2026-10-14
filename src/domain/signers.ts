@@ -63,7 +63,9 @@ export function assignSigners(
     const base = { role: need.role, order: i + 1, status: 'pending' as const };
     if (need.role === 'Owner') {
       const c = scope.client.contact;
-      return { ...base, name: c.fullname, email: c.emailaddress1 ?? '', phone: c.mobilephone, contactId: c.contactid, auth: c.mobilephone ? defaultAuth : 'email' };
+      // Phone authentication can call a landline, so it falls back to the main number.
+      const phone = c.mobilephone || (defaultAuth === 'phone' ? c.telephone1 : undefined);
+      return { ...base, name: c.fullname, email: c.emailaddress1 ?? '', phone, contactId: c.contactid, auth: phone ? defaultAuth : 'email' };
     }
     if (need.role === 'Advisor') {
       return { ...base, name: scope.advisor.fullname, email: scope.advisor.email, phone: scope.advisor.phone, auth: 'email' };
@@ -89,6 +91,7 @@ export function validateSigners(signers: SignerAssignment[]): SignerProblem[] {
     if (!s.name.trim()) problems.push({ role: s.role, message: `${roleLabel(s.role)} needs a name.` });
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.email)) problems.push({ role: s.role, message: `${roleLabel(s.role)} needs a valid email.` });
     if (s.auth === 'sms' && (s.phone ?? '').replace(/\D/g, '').length < 10) problems.push({ role: s.role, message: `${roleLabel(s.role)} needs a mobile number for SMS verification.` });
+    if (s.auth === 'phone' && (s.phone ?? '').replace(/\D/g, '').length < 10) problems.push({ role: s.role, message: `${roleLabel(s.role)} needs a 10-digit phone number for phone authentication.` });
     const prior = emails.get(s.email.toLowerCase());
     // The same person in two roles is fine: the envelope merges them into one recipient.
     // Two different people on one address is not — DocuSign can't tell who signed.
@@ -97,4 +100,56 @@ export function validateSigners(signers: SignerAssignment[]): SignerProblem[] {
     if (s.email) emails.set(s.email.toLowerCase(), s.name);
   }
   return problems;
+}
+
+// ---------------------------------------------------------------- Access codes
+
+/** Six random digits for a signer's DocuSign access code. */
+export function generateAccessCode(random: (n: number) => number = cryptoInt): string {
+  return Array.from({ length: 6 }, () => String(random(10))).join('');
+}
+
+function cryptoInt(n: number): number {
+  const buf = new Uint32Array(1);
+  // Reject the top of the range so every digit is equally likely.
+  const limit = Math.floor(0x1_0000_0000 / n) * n;
+  do crypto.getRandomValues(buf);
+  while (buf[0] >= limit);
+  return buf[0] % n;
+}
+
+const personKey = (s: Pick<SignerAssignment, 'name' | 'email'>) => `${s.name.trim().toLowerCase()}|${s.email.trim().toLowerCase()}`;
+
+/**
+ * The signers as DocuSign gets them: with each one's access code, which exists only
+ * here and in the envelope. Codes are keyed by role.
+ */
+export function envelopeSigners(signers: SignerAssignment[], codes: Record<string, string>): (SignerAssignment & { accessCode?: string })[] {
+  return signers.map((s) => (codes[s.role]?.trim() ? { ...s, accessCode: codes[s.role].trim() } : s));
+}
+
+/**
+ * The signers as the request saves them: `accessCodeSet`, never the code, and who
+ * DocuSign has sent to first (in-session signers don't wait their turn).
+ */
+export function recordedSigners(signers: SignerAssignment[], codes: Record<string, string>): SignerAssignment[] {
+  const first = Math.min(...signers.map((x) => x.order));
+  return signers.map((s) => {
+    const { accessCode: _drop, ...rest } = s as SignerAssignment & { accessCode?: string };
+    return { ...rest, accessCodeSet: codes[s.role]?.trim() ? true : undefined, status: s.order === first || s.inSession ? 'sent' : 'pending' };
+  });
+}
+
+/** One person holding two roles gets one DocuSign recipient, so one code: warn when their roles set different ones. */
+export function accessCodeWarnings(signers: SignerAssignment[], codes: Record<string, string>): SignerProblem[] {
+  const byPerson = new Map<string, SignerAssignment[]>();
+  for (const s of signers) byPerson.set(personKey(s), [...(byPerson.get(personKey(s)) ?? []), s]);
+  const out: SignerProblem[] = [];
+  for (const roles of byPerson.values()) {
+    const set = roles.filter((r) => codes[r.role]?.trim());
+    if (new Set(set.map((r) => codes[r.role].trim())).size > 1) {
+      out.push({ role: set[1].role, message: `${set[0].name} signs as ${set.map((r) => roleLabel(r.role)).join(' and ')} with different access codes. DocuSign uses the ${roleLabel(set[0].role)} code.` });
+    }
+  }
+  return out;
 }

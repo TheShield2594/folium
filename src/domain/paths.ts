@@ -116,28 +116,297 @@ export function describeSource(source: string): string {
   return 'Contact record';
 }
 
+// ---------------------------------------------------------------- Conditions
+//
+// Conditions gate signers (`SignerRule.condition`), requirements (`requiredWhen`) and
+// locks (`lockWhen`). The grammar is small and dependency-free:
+//
+//   expr       := or
+//   or         := and ('||' and)*
+//   and        := unary ('&&' unary)*
+//   unary      := '!' unary | '(' expr ')' | comparison
+//   comparison := term [ ('==' | '!=' | 'contains') value | 'in' '(' value (',' value)* ')' ]
+//
+// A term is a packet value key or a CRM path (`contact.familystatuscode`,
+// `connection[Joint owner].fullname`); packet values win. Values may be quoted, which
+// they need to be when they hold an operator or a comma. Comparisons ignore case.
+
+export type ConditionNode =
+  | { op: 'or' | 'and'; left: ConditionNode; right: ConditionNode }
+  | { op: 'not'; arg: ConditionNode }
+  | { op: 'truthy'; term: string }
+  | { op: '==' | '!=' | 'contains'; term: string; value: string }
+  | { op: 'in'; term: string; values: string[] };
+
+export class ConditionError extends Error {}
+
+type Token = { t: 'text' | 'str'; v: string } | { t: 'op'; v: '||' | '&&' | '==' | '!=' | '!' | '(' | ')' | ',' | 'contains' | 'in' };
+
+function tokenize(src: string): Token[] {
+  const out: Token[] = [];
+  let buf = '';
+  let depth = 0; // inside [...] (connection roles) nothing is an operator
+  const flush = () => {
+    const v = buf.trim();
+    if (v) out.push({ t: 'text', v });
+    buf = '';
+  };
+  const wordAt = (i: number, w: string) => {
+    if (src.slice(i, i + w.length).toLowerCase() !== w) return false;
+    const before = i === 0 ? ' ' : src[i - 1];
+    const after = src[i + w.length] ?? ' ';
+    return /\s/.test(before) && (/\s/.test(after) || after === '(');
+  };
+  for (let i = 0; i < src.length; ) {
+    const c = src[i];
+    if (depth > 0) {
+      if (c === ']') depth--;
+      buf += c;
+      i++;
+      continue;
+    }
+    if (c === '[') {
+      depth++;
+      buf += c;
+      i++;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      const end = src.indexOf(c, i + 1);
+      if (end < 0) throw new ConditionError('A quote isn’t closed.');
+      flush();
+      out.push({ t: 'str', v: src.slice(i + 1, end) });
+      i = end + 1;
+      continue;
+    }
+    const two = src.slice(i, i + 2);
+    if (two === '||' || two === '&&' || two === '==' || two === '!=') {
+      flush();
+      out.push({ t: 'op', v: two });
+      i += 2;
+      continue;
+    }
+    if (c === '!' || c === '(' || c === ')' || c === ',') {
+      flush();
+      out.push({ t: 'op', v: c });
+      i++;
+      continue;
+    }
+    // `in` only counts before a list, so a field named "Opt in" still reads as a name.
+    const word = wordAt(i, 'contains') ? 'contains' : wordAt(i, 'in') && buf.trim() && /^\s*\(/.test(src.slice(i + 2)) ? 'in' : undefined;
+    if (word) {
+      flush();
+      out.push({ t: 'op', v: word });
+      i += word.length;
+      continue;
+    }
+    buf += c;
+    i++;
+  }
+  if (depth > 0) throw new ConditionError('A [ isn’t closed.');
+  flush();
+  return out;
+}
+
+/** Parse a condition. Throws `ConditionError` when it can't be read. */
+export function parseCondition(condition: string): ConditionNode {
+  const tokens = tokenize(condition);
+  let pos = 0;
+  const peek = () => tokens[pos];
+  const isOp = (v: string) => peek()?.t === 'op' && peek()!.v === v;
+  const expectOp = (v: string) => {
+    if (!isOp(v)) throw new ConditionError(`Expected “${v}”.`);
+    pos++;
+  };
+  const operand = (what: string): string => {
+    const tok = peek();
+    if (!tok || tok.t === 'op') throw new ConditionError(`Expected ${what}.`);
+    pos++;
+    return tok.v;
+  };
+
+  const or = (): ConditionNode => {
+    let left = and();
+    while (isOp('||')) {
+      pos++;
+      left = { op: 'or', left, right: and() };
+    }
+    return left;
+  };
+  const and = (): ConditionNode => {
+    let left = unary();
+    while (isOp('&&')) {
+      pos++;
+      left = { op: 'and', left, right: unary() };
+    }
+    return left;
+  };
+  const unary = (): ConditionNode => {
+    if (isOp('!')) {
+      pos++;
+      return { op: 'not', arg: unary() };
+    }
+    if (isOp('(')) {
+      pos++;
+      const inner = or();
+      expectOp(')');
+      return inner;
+    }
+    const term = operand('a field or path');
+    if (isOp('==') || isOp('!=') || isOp('contains')) {
+      const op = peek()!.v as '==' | '!=' | 'contains';
+      pos++;
+      return { op, term, value: operand('a value') };
+    }
+    if (isOp('in')) {
+      pos++;
+      expectOp('(');
+      const values = [operand('a value')];
+      while (isOp(',')) {
+        pos++;
+        values.push(operand('a value'));
+      }
+      expectOp(')');
+      return { op: 'in', term, values };
+    }
+    return { op: 'truthy', term };
+  };
+
+  if (!tokens.length) throw new ConditionError('The condition is empty.');
+  const node = or();
+  if (pos < tokens.length) throw new ConditionError(`Unexpected “${tokens[pos].v}”.`);
+  return node;
+}
+
+/** Every term (value key or path) a condition reads. Empty when it can't be parsed. */
+export function conditionTerms(condition: string | undefined): string[] {
+  if (!condition?.trim()) return [];
+  let node: ConditionNode;
+  try {
+    node = parseCondition(condition);
+  } catch {
+    return [];
+  }
+  const out: string[] = [];
+  const walk = (n: ConditionNode) => {
+    if (n.op === 'or' || n.op === 'and') (walk(n.left), walk(n.right));
+    else if (n.op === 'not') walk(n.arg);
+    else if ('term' in n) out.push(n.term);
+  };
+  walk(node);
+  return [...new Set(out)];
+}
+
 /**
- * Evaluate a condition like `contact.familystatuscode == married`.
- * Supports `==`, `!=`, bare truthiness, and `&&` / `||` (no parentheses).
+ * Evaluate a condition like `contact.familystatuscode == married`. An empty condition
+ * holds. One that can't be parsed gives `onError` (true unless the caller says).
  */
-export function evaluateCondition(condition: string | undefined, scope: ResolveScope, values?: Record<string, string>): boolean {
+export function evaluateCondition(condition: string | undefined, scope: ResolveScope, values?: Record<string, string>, onError = true): boolean {
   if (!condition || !condition.trim()) return true;
-  return condition.split('||').some((orPart) =>
-    orPart.split('&&').every((term) => evaluateTerm(term.trim(), scope, values)),
-  );
+  let node: ConditionNode;
+  try {
+    node = parseCondition(condition);
+  } catch {
+    return onError;
+  }
+  const lookup = (p: string) => (values?.[p] ?? resolvePath(p, scope) ?? '').toLowerCase();
+  const evalNode = (n: ConditionNode): boolean => {
+    switch (n.op) {
+      case 'or':
+        return evalNode(n.left) || evalNode(n.right);
+      case 'and':
+        return evalNode(n.left) && evalNode(n.right);
+      case 'not':
+        return !evalNode(n.arg);
+      case 'truthy': {
+        const v = lookup(n.term);
+        return !!v && v !== 'false' && v !== '0';
+      }
+      case '==':
+        return lookup(n.term) === n.value.toLowerCase();
+      case '!=':
+        return lookup(n.term) !== n.value.toLowerCase();
+      case 'contains':
+        return lookup(n.term).includes(n.value.toLowerCase());
+      case 'in':
+        return n.values.some((v) => v.toLowerCase() === lookup(n.term));
+    }
+  };
+  return evalNode(node);
 }
 
-function evaluateTerm(term: string, scope: ResolveScope, values?: Record<string, string>): boolean {
-  const lookup = (p: string) => values?.[p] ?? resolvePath(p, scope);
-  const neq = term.split('!=');
-  if (neq.length === 2) return (lookup(neq[0].trim()) ?? '').toLowerCase() !== unquote(neq[1]).toLowerCase();
-  const eq = term.split('==');
-  if (eq.length === 2) return (lookup(eq[0].trim()) ?? '').toLowerCase() === unquote(eq[1]).toLowerCase();
-  if (term.startsWith('!')) return !lookup(term.slice(1).trim());
-  const v = lookup(term);
-  return !!v && v !== 'false' && v !== '0';
+/** How the editor names a term: its field label, and whether it's a checkbox. */
+export type TermLabel = (term: string) => { label: string; checkbox?: boolean } | undefined;
+
+const CHECKED = /^(true|yes|y|x|on|1|checked)$/i;
+
+/**
+ * A condition as a plain sentence for the editor and for locked fields, e.g. "when
+ * Contingent beneficiary is checked". Falls back to the raw text when it can't be parsed.
+ */
+export function explainCondition(condition: string | undefined, labelFor: TermLabel = () => undefined): string {
+  if (!condition?.trim()) return '';
+  let node: ConditionNode;
+  try {
+    node = parseCondition(condition);
+  } catch {
+    return `when ${condition.trim()}`;
+  }
+  const name = (term: string) => labelFor(term)?.label ?? term;
+  const say = (n: ConditionNode, nested: boolean): string => {
+    switch (n.op) {
+      case 'or':
+      case 'and': {
+        const s = `${say(n.left, n.left.op !== n.op)} ${n.op} ${say(n.right, n.right.op !== n.op)}`;
+        return nested ? `(${s})` : s;
+      }
+      case 'not':
+        if (n.arg.op === 'truthy') return `${name(n.arg.term)} is ${labelFor(n.arg.term)?.checkbox ? 'not checked' : 'empty'}`;
+        if (n.arg.op === '==') return say({ ...n.arg, op: '!=' }, nested);
+        return `not ${say(n.arg, true)}`;
+      case 'truthy':
+        return `${name(n.term)} is ${labelFor(n.term)?.checkbox ? 'checked' : 'filled in'}`;
+      case '==':
+      case '!=': {
+        const box = labelFor(n.term)?.checkbox;
+        if (box) return `${name(n.term)} is ${CHECKED.test(n.value) === (n.op === '==') ? 'checked' : 'not checked'}`;
+        if (!n.value) return `${name(n.term)} is ${n.op === '==' ? 'empty' : 'filled in'}`;
+        return `${name(n.term)} is ${n.op === '!=' ? 'not ' : ''}${n.value}`;
+      }
+      case 'contains':
+        return `${name(n.term)} contains “${n.value}”`;
+      case 'in':
+        return `${name(n.term)} is ${n.values.length > 1 ? `${n.values.slice(0, -1).join(', ')} or ${n.values[n.values.length - 1]}` : n.values[0]}`;
+    }
+  };
+  return `when ${say(node, false)}`;
 }
 
-function unquote(s: string): string {
-  return s.trim().replace(/^['"]|['"]$/g, '');
+/** What the editor's condition builder offers. */
+export type BuilderOp = 'checked' | 'unchecked' | 'filled' | 'empty' | 'equals' | 'notEquals' | 'contains' | 'in';
+
+/** Quote a value when it holds something the grammar would read as an operator. */
+export function quoteValue(v: string): string {
+  if (!/[|&=!(),'"[\]]|^\s|\s$|(^|\s)(in|contains)(\s|$)/i.test(v) && v !== '') return v;
+  return v.includes('"') ? `'${v}'` : `"${v}"`;
+}
+
+/** One builder row as an expression, e.g. `beneficiary.contingent` or `contact.familystatuscode in (married, widowed)`. */
+export function buildCondition(term: string, op: BuilderOp, value = ''): string {
+  switch (op) {
+    case 'checked':
+    case 'filled':
+      return term;
+    case 'unchecked':
+    case 'empty':
+      return `!${term}`;
+    case 'equals':
+      return `${term} == ${quoteValue(value)}`;
+    case 'notEquals':
+      return `${term} != ${quoteValue(value)}`;
+    case 'contains':
+      return `${term} contains ${quoteValue(value)}`;
+    case 'in':
+      return `${term} in (${value.split(',').map((v) => quoteValue(v.trim())).filter(Boolean).join(', ')})`;
+  }
 }

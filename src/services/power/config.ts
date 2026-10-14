@@ -1,3 +1,5 @@
+import type { SignatureStatus } from '../../domain/types';
+
 // Names Folium uses in Dataverse and SharePoint. Adjust here (once) if Everence's
 // publisher prefix or table names differ from the brief's `ev_` defaults.
 
@@ -38,7 +40,13 @@ export const SHAREPOINT = {
 
 export const DOCUSIGN = {
   /** Identity-verification workflow IDs from DocuSign Admin › Identity Verification. */
-  idv: { sms: '', kba: '' },
+  idv: { sms: '', phone: '', kba: '' },
+  /**
+   * Where an advisor grants Folium's DocuSign app consent when DocuSign answers
+   * `consent_required` (DocuSign's /oauth/auth URL with the app's client ID, scope
+   * `signature` and the connector's redirect URL). Blank: Folium says to ask an admin.
+   */
+  consentUrl: '',
 } as const;
 
 /**
@@ -53,6 +61,22 @@ export const CHOICES: ChoiceMap = {
   contact: {
     familystatuscode: { label: 'Marital status', options: { 1: 'single', 2: 'married', 3: 'divorced', 4: 'widowed' } },
   },
+};
+
+/**
+ * `ev_signaturerequest.ev_status` option values, in one place so `toRow` and the
+ * DocuSign Connect flow (DEPLOY.md §5) write the same numbers. These are the defaults
+ * for a new choice with the `ev_` publisher (100000000 upward, in the order of
+ * DATAVERSE.md). Confirm them in Power Apps › Tables › Signature request › Columns.
+ */
+export const SIGNATURE_STATUS_OPTIONS: Record<SignatureStatus, number> = {
+  Drafted: 100000000,
+  Sent: 100000001,
+  Viewed: 100000002,
+  Signed: 100000003,
+  Declined: 100000004,
+  Voided: 100000005,
+  Expired: 100000006,
 };
 
 export interface ChoiceColumn {
