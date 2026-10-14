@@ -137,6 +137,7 @@ export function TemplateEditor() {
 
   const fieldsForPreview = mapping.fields.map((m) => ({
     templateId: template.id,
+    itemId: template.id,
     mapping: m,
     key: m.pdfField,
     label: m.label ?? m.pdfField,

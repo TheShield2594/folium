@@ -6,6 +6,8 @@ export type FieldOrigin = 'crm' | 'rep' | 'firm' | 'computed' | 'static' | 'edit
 
 export interface FieldState {
   templateId: string;
+  /** The packet item (form instance) this field is on. */
+  itemId: string;
   mapping: FieldMapping;
   /** Canonical key shared across forms in a packet. */
   key: string;
@@ -32,6 +34,10 @@ export interface FieldState {
 
 export interface FormFill {
   template: FormTemplate;
+  /** The packet item this is: a form's id in the packet, distinct for each copy. Defaults to the template id. */
+  itemId: string;
+  /** 2 and up on an added copy of a form. */
+  copy?: number;
   account?: Account;
   /** The account `account.*` fields resolved against, including the first-account fallback. */
   accountId?: string;
@@ -45,9 +51,16 @@ export interface FormFill {
  * The canonical key for a field. Fields with the same key share one value across
  * every form in a packet — LaserApp's "enter once, use everywhere". Account fields
  * are scoped to the account the form is about, so a correction on one account's
- * form never leaks onto a form about another account.
+ * form never leaks onto a form about another account. On an added copy of a form
+ * (`copyId`, the copy's item id), advisor-entered fields are scoped to that copy, so
+ * typing on copy 2 never changes copy 1; client data stays shared.
  */
-export function fieldKey(m: FieldMapping, t: Pick<FormTemplate, 'formNumber'>, accountId?: string): string {
+export function fieldKey(m: FieldMapping, t: Pick<FormTemplate, 'formNumber'>, accountId?: string, copyId?: string): string {
+  const base = baseKey(m, t, accountId);
+  return copyId && sourceKind(m.source) === 'advisor' && !m.shareAcrossCopies ? copyKey(copyId, base) : base;
+}
+
+function baseKey(m: FieldMapping, t: Pick<FormTemplate, 'formNumber'>, accountId?: string): string {
   if (m.key) return m.key;
   const kind = sourceKind(m.source);
   if (kind === 'advisor' || kind === 'signer') return `${t.formNumber}:${m.pdfField}`;
@@ -56,6 +69,10 @@ export function fieldKey(m: FieldMapping, t: Pick<FormTemplate, 'formNumber'>, a
 }
 
 export const accountKey = (accountId: string, attr: string) => `account[${accountId}].${attr}`;
+export const copyKey = (itemId: string, key: string) => `${itemId}/${key}`;
+
+/** The item id a copy's own values are keyed under: set for copy 2 and later, never for the first. */
+export const copyScope = (item: { id?: string; copy?: number } | undefined) => (item?.id && (item.copy ?? 1) > 1 ? item.id : undefined);
 
 /** The account a form's `account.*` sources resolve against (see resolvePath). */
 export const formAccountId = (scope: Pick<ResolveScope, 'account' | 'client'>) => (scope.account ?? scope.client.accounts[0])?.accountid;
@@ -63,13 +80,32 @@ export const formAccountId = (scope: Pick<ResolveScope, 'account' | 'client'>) =
 /**
  * Values as conditions on one form see them: overrides for this form's account also
  * answer to the plain `account.<attr>` path, so `account.ev_accounttype == Roth IRA`
- * keeps working.
+ * keeps working. On a copy, the copy's own values answer to their plain keys too.
  */
-export function valuesForAccount(values: Record<string, string>, accountId: string | undefined): Record<string, string> {
-  if (!accountId) return values;
+export function valuesForAccount(values: Record<string, string>, accountId: string | undefined, copyId?: string): Record<string, string> {
+  if (!accountId && !copyId) return values;
   const prefix = `account[${accountId}].`;
+  const mine = copyId ? `${copyId}/` : undefined;
   const out = { ...values };
-  for (const [k, v] of Object.entries(values)) if (k.startsWith(prefix)) out[`account.${k.slice(prefix.length)}`] = v;
+  for (const [k, v] of Object.entries(values)) {
+    if (accountId && k.startsWith(prefix)) out[`account.${k.slice(prefix.length)}`] = v;
+    if (mine && k.startsWith(mine)) out[k.slice(mine.length)] = v;
+  }
+  return out;
+}
+
+/**
+ * Values for a new copy of a form: its advisor fields start from the original's
+ * (`fromCopyId` when the original is itself a copy), so the advisor edits only what
+ * differs.
+ */
+export function seedCopyValues(t: FormTemplate, values: Record<string, string>, toItemId: string, fromCopyId?: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const m of t.mapping.fields) {
+    if (sourceKind(m.source) !== 'advisor' || m.shareAcrossCopies) continue;
+    const from = fieldKey(m, t, undefined, fromCopyId);
+    if (from in values) out[fieldKey(m, t, undefined, toItemId)] = values[from];
+  }
   return out;
 }
 
@@ -139,12 +175,14 @@ export function prefillForm(
   template: FormTemplate,
   scope: ResolveScope,
   values: Record<string, string>,
+  item?: { id?: string; copy?: number },
 ): FormFill {
   const accountId = formAccountId(scope);
-  const condValues = valuesForAccount(values, accountId);
+  const copyId = copyScope(item);
+  const condValues = valuesForAccount(values, accountId, copyId);
   const labels = termLabels(template.mapping);
   const fields = template.mapping.fields.map((m): FieldState => {
-    const key = fieldKey(m, template, accountId);
+    const key = fieldKey(m, template, accountId, copyId);
     const kind = sourceKind(m.source);
     const crmValue = kind === 'advisor' || kind === 'signer' ? undefined : resolvePath(m.source, scope);
     const edited = Object.prototype.hasOwnProperty.call(values, key) ? values[key] : undefined;
@@ -165,6 +203,7 @@ export function prefillForm(
     const missing = kind !== 'signer' && !locked && required && !value.trim();
     return {
       templateId: template.id,
+      itemId: item?.id ?? template.id,
       mapping: m,
       key,
       label: m.label ?? prettifyFieldName(m.pdfField),
@@ -186,6 +225,8 @@ export function prefillForm(
   const relevant = fields.filter((f) => f.origin !== 'signer');
   return {
     template,
+    itemId: item?.id ?? template.id,
+    copy: item?.copy && item.copy > 1 ? item.copy : undefined,
     account: scope.account,
     accountId: template.mapping.fields.some((m) => m.source.startsWith('account.')) ? accountId : scope.account?.accountid,
     fields,
@@ -198,6 +239,9 @@ export function prefillForm(
 export interface PacketFillInput {
   template: FormTemplate;
   account?: Account;
+  /** The packet item; defaults to the template id. */
+  itemId?: string;
+  copy?: number;
 }
 
 export function prefillPacket(
@@ -205,7 +249,7 @@ export function prefillPacket(
   scope: Omit<ResolveScope, 'account'>,
   values: Record<string, string>,
 ): FormFill[] {
-  return items.map((it) => prefillForm(it.template, { ...scope, account: it.account }, values));
+  return items.map((it) => prefillForm(it.template, { ...scope, account: it.account }, values, { id: it.itemId, copy: it.copy }));
 }
 
 /**

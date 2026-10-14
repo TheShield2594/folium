@@ -4,6 +4,7 @@ import { Toolbar } from '../../shell/Shell';
 import { latestLive, useApp } from '../../state/store';
 import { Badge, Button, Empty, IconButton } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
+import { addForm } from '../common/addForm';
 import { fmtDay } from '../requests/RequestCard';
 
 /** One form, with favorite and add-to-packet controls. Module scope so React keeps rows (and focus) across renders. */
@@ -11,8 +12,7 @@ function Row({ t, detail }: { t: FormTemplate; detail?: string }) {
   const inPacket = useApp((s) => s.packet.items.some((i) => i.templateId === t.id));
   const fav = useApp((s) => s.favorites.includes(t.id));
   const client = useApp((s) => s.client);
-  const addToPacket = useApp((s) => s.addToPacket);
-  const removeFromPacket = useApp((s) => s.removeFromPacket);
+  const removeTemplateFromPacket = useApp((s) => s.removeTemplateFromPacket);
   const toggleFavorite = useApp((s) => s.toggleFavorite);
   return (
     <div className="list-row">
@@ -26,7 +26,7 @@ function Row({ t, detail }: { t: FormTemplate; detail?: string }) {
       </div>
       {t.status !== 'Live' && <Badge tone="warn">{t.status}</Badge>}
       <IconButton icon={fav ? 'starFill' : 'star'} label={fav ? 'Remove from favorites' : 'Add to favorites'} className={fav ? 'fav on' : 'fav'} onClick={() => toggleFavorite(t.id)} />
-      <Button variant={inPacket ? 'tinted' : 'gray'} size="sm" icon={inPacket ? 'check' : 'plus'} disabled={!client} onClick={() => (inPacket ? removeFromPacket(t.id) : addToPacket(t.id))}>
+      <Button variant={inPacket ? 'tinted' : 'gray'} size="sm" icon={inPacket ? 'check' : 'plus'} disabled={!client} onClick={() => (inPacket ? removeTemplateFromPacket(t.id) : addForm(t.id))}>
         {inPacket ? 'Added' : 'Add'}
       </Button>
     </div>

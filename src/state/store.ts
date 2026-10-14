@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { create } from 'zustand';
 import type { ResolveScope } from '../domain/paths';
-import { migrateAccountValues } from '../domain/prefill';
+import { copyScope, migrateAccountValues, seedCopyValues } from '../domain/prefill';
 import type {
   Attachment,
   ClientRecord,
@@ -115,10 +115,17 @@ interface AppState {
   refreshTemplates(): Promise<void>;
   refreshPackets(): Promise<void>;
 
-  addToPacket(templateId: string, accountId?: string): void;
-  removeFromPacket(templateId: string): void;
-  moveInPacket(templateId: string, delta: number): void;
-  setPacketAccount(templateId: string, accountId: string): void;
+  /**
+   * Add a form. Without `duplicate`, a form already in the packet isn't added again.
+   * With it, a copy is added that starts from the last copy's values.
+   */
+  addToPacket(templateId: string, accountId?: string, opts?: { duplicate?: boolean }): AddResult;
+  /** Remove one form (a single copy) by its item id. */
+  removeFromPacket(itemId: string): void;
+  /** Remove every copy of a form, for the library's add/remove toggle. */
+  removeTemplateFromPacket(templateId: string): void;
+  moveInPacket(itemId: string, delta: number): void;
+  setPacketAccount(itemId: string, accountId: string): void;
   setValue(key: string, value: string | undefined): void;
   setPacket(p: Partial<Packet>): void;
   clearPacket(): void;
@@ -138,16 +145,49 @@ function applyTheme(t: Theme) {
   else el.setAttribute('data-theme', t);
 }
 
-/** Pick the account a form is most likely about. */
-export function suggestAccount(t: FormTemplate, client?: ClientRecord) {
+/**
+ * Pick the account a form is most likely about. Accounts in `taken` (ones other copies
+ * of the form already use) are passed over while an unused one of a matching type is
+ * left, so "Add another copy" on an IRA form picks the second IRA.
+ */
+export function suggestAccount(t: FormTemplate, client?: ClientRecord, taken: string[] = []) {
   if (!client || !t.appliesTo?.length) return undefined;
-  // appliesTo is in order of preference; within a type, prefer the form issuer's own accounts.
-  for (const type of t.appliesTo) {
-    const ofType = client.accounts.filter((a) => a.ev_accounttype === type);
-    const pick = ofType.find((a) => a.ev_custodian === t.issuer) ?? ofType[0];
-    if (pick) return pick.accountid;
-  }
-  return undefined;
+  const pickFrom = (free: boolean) => {
+    // appliesTo is in order of preference; within a type, prefer the form issuer's own accounts.
+    for (const type of t.appliesTo!) {
+      const ofType = client.accounts.filter((a) => a.ev_accounttype === type && (!free || !taken.includes(a.accountid)));
+      const pick = ofType.find((a) => a.ev_custodian === t.issuer) ?? ofType[0];
+      if (pick) return pick.accountid;
+    }
+    return undefined;
+  };
+  return (taken.length ? pickFrom(true) : undefined) ?? pickFrom(false);
+}
+
+/** The most forms one packet can hold (Laser App caps a launch at 20 too). */
+export const PACKET_LIMIT = 20;
+
+export type AddResult = 'added' | 'present' | 'full';
+
+/** A new packet item id. */
+export function newItemId(): string {
+  const rand = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 10);
+  return `pi-${rand}`;
+}
+
+/**
+ * Give items saved before packet items had ids (old journals and drafts) an id, and
+ * number repeated forms as copies.
+ */
+export function normalizeItems(items: (Omit<PacketItem, 'id'> & { id?: string })[]): PacketItem[] {
+  const seen = new Map<string, number>();
+  return items.map((i) => {
+    const n = (seen.get(i.templateId) ?? 0) + 1;
+    const copy = i.copy ?? n;
+    seen.set(i.templateId, Math.max(n, copy));
+    const { copy: _c, ...rest } = i;
+    return { ...rest, id: i.id ?? newItemId(), ...(copy > 1 ? { copy } : {}) };
+  });
 }
 
 /** Counts contact picks, so a slow load for an earlier pick never lands over a later one. */
@@ -253,7 +293,7 @@ export const useApp = create<AppState>((set, get) => ({
       // throws; the banner reports it).
       if (!(await get().openContact(j.contactId))) return;
     }
-    set({ pendingRestore: undefined, packet: { ...emptyPacket(), ...j.packet, dirty: true } });
+    set({ pendingRestore: undefined, packet: { ...emptyPacket(), ...j.packet, items: normalizeItems(j.packet.items), dirty: true } });
   },
   discardJournal() {
     const { pendingRestore, me } = get();
@@ -282,27 +322,48 @@ export const useApp = create<AppState>((set, get) => ({
     set({ packets: await get().services!.packets.list() });
   },
 
-  addToPacket(templateId, accountId) {
+  addToPacket(templateId, accountId, opts) {
     const { packet, templates, client } = get();
-    if (packet.items.some((i) => i.templateId === templateId)) return;
+    const copies = packet.items.filter((i) => i.templateId === templateId);
+    if (copies.length && !opts?.duplicate) return 'present';
+    if (packet.items.length >= PACKET_LIMIT) return 'full';
     const t = templates.find((x) => x.id === templateId);
-    set({ packet: { ...packet, dirty: true, items: [...packet.items, { templateId, accountId: accountId ?? (t ? suggestAccount(t, client) : undefined) }] } });
+    const id = newItemId();
+    if (!copies.length) {
+      set({ packet: { ...packet, dirty: true, items: [...packet.items, { id, templateId, accountId: accountId ?? (t ? suggestAccount(t, client) : undefined) }] } });
+      return 'added';
+    }
+    // A copy: numbered after the highest copy, on the next unused account, starting from the last copy's values.
+    const last = copies.reduce((a, b) => ((b.copy ?? 1) > (a.copy ?? 1) ? b : a));
+    const copy = (last.copy ?? 1) + 1;
+    const taken = copies.map((c) => c.accountId).filter((a): a is string => !!a);
+    const item: PacketItem = { id, templateId, copy, accountId: accountId ?? (t ? suggestAccount(t, client, taken) : undefined) };
+    const index = packet.items.indexOf(copies[copies.length - 1]) + 1;
+    const values = t ? { ...packet.values, ...seedCopyValues(t, packet.values, id, copyScope(last)) } : packet.values;
+    set({ packet: { ...packet, dirty: true, values, items: [...packet.items.slice(0, index), item, ...packet.items.slice(index)] } });
+    return 'added';
   },
-  removeFromPacket(templateId) {
+  removeFromPacket(itemId) {
     const { packet } = get();
-    set({ packet: { ...packet, dirty: true, items: packet.items.filter((i) => i.templateId !== templateId) } });
+    // A copy's own values go with it.
+    const values = Object.fromEntries(Object.entries(packet.values).filter(([k]) => !k.startsWith(`${itemId}/`)));
+    set({ packet: { ...packet, dirty: true, values, items: packet.items.filter((i) => i.id !== itemId) } });
   },
-  moveInPacket(templateId, delta) {
+  removeTemplateFromPacket(templateId) {
+    for (const i of get().packet.items.filter((x) => x.templateId === templateId)) get().removeFromPacket(i.id);
+  },
+  moveInPacket(itemId, delta) {
     const items = [...get().packet.items];
-    const i = items.findIndex((x) => x.templateId === templateId);
+    const i = items.findIndex((x) => x.id === itemId);
     const j = i + delta;
     if (i < 0 || j < 0 || j >= items.length) return;
     [items[i], items[j]] = [items[j], items[i]];
     set({ packet: { ...get().packet, dirty: true, items } });
   },
-  setPacketAccount(templateId, accountId) {
+  setPacketAccount(itemId, accountId) {
     const { packet } = get();
-    set({ packet: { ...packet, dirty: true, items: packet.items.map((i) => (i.templateId === templateId ? { templateId, accountId } : i)) } });
+    // Picking an account clears the "account replaced" flag.
+    set({ packet: { ...packet, dirty: true, items: packet.items.map((i) => (i.id === itemId ? { id: i.id, templateId: i.templateId, ...(i.copy ? { copy: i.copy } : {}), accountId } : i)) } });
   },
   setValue(key, value) {
     const values = { ...get().packet.values };
@@ -324,17 +385,26 @@ export const useApp = create<AppState>((set, get) => ({
       .filter((t): t is FormTemplate => !!t)
       // A saved packet points at a revision; always use the current live one.
       .map((t) => latestLive(templates, t.formNumber) ?? t);
-    set({ packet: { ...emptyPacket(), title: saved.name, items: live.map((t) => ({ templateId: t.id, accountId: suggestAccount(t, client) })) } });
+    const items: PacketItem[] = [];
+    for (const t of live.slice(0, PACKET_LIMIT)) {
+      const taken = items.filter((i) => i.templateId === t.id).map((i) => i.accountId).filter((a): a is string => !!a);
+      items.push({ id: newItemId(), templateId: t.id, accountId: suggestAccount(t, client, taken) });
+    }
+    set({ packet: { ...emptyPacket(), title: saved.name, items: normalizeItems(items) } });
   },
   loadRequest(req) {
     const { templates, client } = get();
-    const items = req.documents.map((d): PacketItem => {
-      const t = templates.find((x) => x.id === d.templateId);
-      const active = client?.accounts.some((a) => a.accountid === d.accountId);
-      if (d.accountId && active) return { templateId: d.templateId, accountId: d.accountId };
-      // The saved account was closed or moved: suggest one and have Review ask.
-      return { templateId: d.templateId, accountId: t ? suggestAccount(t, client) : undefined, accountReplaced: !!d.accountId || undefined };
-    });
+    // Drafts saved before copies existed have no item ids: normalizeItems gives them some.
+    const items = normalizeItems(
+      req.documents.map((d) => {
+        const t = templates.find((x) => x.id === d.templateId);
+        const active = client?.accounts.some((a) => a.accountid === d.accountId);
+        const base = { id: d.itemId, templateId: d.templateId, copy: d.copy };
+        if (d.accountId && active) return { ...base, accountId: d.accountId };
+        // The saved account was closed or moved: suggest one and have Review ask.
+        return { ...base, accountId: t ? suggestAccount(t, client) : undefined, accountReplaced: !!d.accountId || undefined };
+      }),
+    );
     // The first form that reads account data gets any pre-scoping `account.*` overrides.
     const used = items.map((i) => ({ item: i, t: templates.find((t) => t.id === i.templateId) })).filter((x): x is { item: PacketItem; t: FormTemplate } => !!x.t);
     const first = used.find((x) => x.t.mapping.fields.some((m) => m.source.startsWith('account.'))) ?? used[0];

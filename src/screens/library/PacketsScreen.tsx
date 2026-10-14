@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import type { SavedPacket } from '../../domain/types';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
-import { latestLive, useApp } from '../../state/store';
+import { PACKET_LIMIT, latestLive, useApp } from '../../state/store';
 import { Badge, Button, ConfirmSheet, Empty, IconButton, Menu, SearchField, Segmented, toast } from '../../ui/controls';
 import { NameSheet } from '../common/NameSheet';
 import { Icon } from '../../ui/Icon';
@@ -53,12 +53,25 @@ export function PacketsScreen() {
   /** Add a saved packet's forms to the packet in progress, keeping what's already there. */
   function addToCurrent(p: SavedPacket) {
     if (!client) return toast.error('Choose a client first.');
+    let added = 0;
+    let full = false;
+    const seen = new Set<string>();
     for (const id of p.templateIds) {
       const t = templates.find((x) => x.id === id);
-      if (t) addToPacket((latestLive(templates, t.formNumber) ?? t).id);
+      if (!t) continue;
+      const live = (latestLive(templates, t.formNumber) ?? t).id;
+      // A form listed twice in the saved packet is added as a copy.
+      const r = addToPacket(live, undefined, { duplicate: seen.has(live) });
+      seen.add(live);
+      if (r === 'full') {
+        full = true;
+        break;
+      }
+      if (r === 'added') added++;
     }
     countUse(p);
-    toast.ok(`Added ${p.templateIds.length} forms from “${p.name}”`);
+    if (full) toast.error(`A packet holds up to ${PACKET_LIMIT} forms, so only ${added} of ${p.templateIds.length} from “${p.name}” were added.`);
+    else toast.ok(`Added ${added} ${added === 1 ? 'form' : 'forms'} from “${p.name}”${added < p.templateIds.length ? ' (the rest were already in the packet)' : ''}`);
     navigate('/');
   }
 

@@ -4,8 +4,8 @@ import { prefillPacket, snapshotDiff, prefillSnapshot } from '../domain/prefill'
 import type { ClientRecord, PacketItem, SignatureRequest } from '../domain/types';
 import { createDemoServices, resetDemo } from '../services/demo';
 import { CLIENTS, FIRM, TEMPLATES, USERS } from '../services/demo/seed';
-import { attachmentBytes, saveDraft, unreachableAttachments } from './actions';
-import { useApp, type Packet } from './store';
+import { attachmentBytes, fillPacket, saveDraft, unreachableAttachments } from './actions';
+import { PACKET_LIMIT, useApp, type Packet } from './store';
 
 const client = structuredClone(CLIENTS['c-jordan']) as ClientRecord;
 const me = USERS[0];
@@ -13,11 +13,11 @@ const scope = { client, advisor: me, firm: FIRM, today: new Date(2026, 9, 13) };
 const tpl = (id: string) => TEMPLATES.find((t) => t.id === id)!;
 // Two forms about two different IRAs, in a non-default order.
 const items: PacketItem[] = [
-  { templateId: 'tpl-px310-0826', accountId: 'a-j3' },
-  { templateId: 'tpl-ev1004-0125', accountId: 'a-j1' },
+  { id: 'pi-1', templateId: 'tpl-px310-0826', accountId: 'a-j3' },
+  { id: 'pi-2', templateId: 'tpl-ev1004-0125', accountId: 'a-j1' },
 ];
 const fillsFor = (c: ClientRecord, its: PacketItem[], values: Record<string, string> = {}) =>
-  prefillPacket(its.map((i) => ({ template: tpl(i.templateId), account: c.accounts.find((a) => a.accountid === i.accountId) })), { ...scope, client: c }, values);
+  prefillPacket(its.map((i) => ({ template: tpl(i.templateId), account: c.accounts.find((a) => a.accountid === i.accountId), itemId: i.id, copy: i.copy })), { ...scope, client: c }, values);
 const packet = (p: Partial<Packet> = {}): Packet => ({ items, values: {}, title: '', attachments: [], sharedWith: [], ...p });
 
 beforeEach(() => {
@@ -44,13 +44,13 @@ describe('resuming a draft', () => {
     expect(first.accountId).not.toBe('a-j3');
     expect(second).toEqual(items[1]);
     // Picking an account clears the flag.
-    useApp.getState().setPacketAccount(first.templateId, 'a-j1');
-    expect(useApp.getState().packet.items[0]).toEqual({ templateId: first.templateId, accountId: 'a-j1' });
+    useApp.getState().setPacketAccount(first.id, 'a-j1');
+    expect(useApp.getState().packet.items[0]).toEqual({ id: first.id, templateId: first.templateId, accountId: 'a-j1' });
   });
 
   it('saves the account a form fell back to when none was picked', async () => {
     const services = createDemoServices();
-    const unpicked: PacketItem[] = [{ templateId: 'tpl-px310-0826' }];
+    const unpicked: PacketItem[] = [{ id: 'pi-u', templateId: 'tpl-px310-0826' }];
     const saved = await saveDraft({ services, packet: packet({ items: unpicked }), fills: fillsFor(client, unpicked), contactId: 'c-jordan', me, owner: me });
     expect(saved.documents[0].accountId).toBe(client.accounts[0].accountid);
   });
@@ -96,7 +96,7 @@ describe('resuming a draft', () => {
 });
 
 describe('snapshotDiff', () => {
-  const its: PacketItem[] = [{ templateId: 'tpl-ev1120-0326' }];
+  const its: PacketItem[] = [{ id: 'pi-b', templateId: 'tpl-ev1120-0326' }];
 
   it('lists CRM values that changed, including ones now empty, and never SSNs', () => {
     const snap = prefillSnapshot(fillsFor(client, its));
@@ -171,5 +171,73 @@ describe('deleting drafts and packets', () => {
     expect(one.draftFiles![0].name).toMatch(/^DRAFT PX-310 IRA distribution – \w{8}\.pdf$/);
     const names = new Set([...one.draftFiles!, ...two.draftFiles!].map((f) => f.name));
     expect(names.size).toBe(4);
+  });
+});
+
+describe('copies of a form', () => {
+  const empty = () => useApp.setState({ packet: packet({ items: [] }) });
+
+  it('adds a copy on the next unused account, starting from the last copy’s values', () => {
+    empty();
+    expect(useApp.getState().addToPacket('tpl-px310-0826')).toBe('added');
+    const first = useApp.getState().packet.items[0];
+    expect(useApp.getState().addToPacket('tpl-px310-0826')).toBe('present');
+    useApp.getState().setValue('swp.amount', '500');
+    expect(useApp.getState().addToPacket('tpl-px310-0826', undefined, { duplicate: true })).toBe('added');
+    const [, second] = useApp.getState().packet.items;
+    expect(second).toMatchObject({ templateId: 'tpl-px310-0826', copy: 2 });
+    expect(second.id).not.toBe(first.id);
+    // Praxis' own IRA first, then the other Traditional IRA.
+    expect([first.accountId, second.accountId]).toEqual(['a-j3', 'a-j1']);
+    expect(useApp.getState().packet.values[`${second.id}/swp.amount`]).toBe('500');
+  });
+
+  it('removes, moves and re-accounts one copy only', () => {
+    empty();
+    const add = () => useApp.getState().addToPacket('tpl-px310-0826', undefined, { duplicate: true });
+    add();
+    add();
+    add();
+    const [a, b, c] = useApp.getState().packet.items;
+    useApp.getState().setValue(`${b.id}/swp.amount`, '1');
+    useApp.getState().setPacketAccount(c.id, 'a-j2');
+    useApp.getState().moveInPacket(c.id, -1);
+    expect(useApp.getState().packet.items.map((i) => i.id)).toEqual([a.id, c.id, b.id]);
+    expect(useApp.getState().packet.items.map((i) => i.accountId)).toEqual([a.accountId, 'a-j2', b.accountId]);
+    useApp.getState().removeFromPacket(b.id);
+    expect(useApp.getState().packet.items.map((i) => i.id)).toEqual([a.id, c.id]);
+    expect(Object.keys(useApp.getState().packet.values).some((k) => k.startsWith(b.id))).toBe(false);
+    expect(useApp.getState().packet.items[1].copy).toBe(3);
+  });
+
+  it('refuses a 21st form', () => {
+    empty();
+    for (let i = 0; i < PACKET_LIMIT; i++) expect(useApp.getState().addToPacket('tpl-ev1120-0326', undefined, { duplicate: true })).toBe('added');
+    expect(useApp.getState().addToPacket('tpl-px310-0826')).toBe('full');
+    expect(useApp.getState().packet.items).toHaveLength(PACKET_LIMIT);
+  });
+
+  it('resumes a draft with the same copies, accounts and values', async () => {
+    const services = createDemoServices();
+    const its: PacketItem[] = [
+      { id: 'pi-a', templateId: 'tpl-px310-0826', accountId: 'a-j3' },
+      { id: 'pi-b', templateId: 'tpl-px310-0826', accountId: 'a-j1', copy: 2 },
+    ];
+    const values = { 'swp.amount': '500', 'pi-b/swp.amount': '750' };
+    const fills = fillsFor(client, its, values);
+    const saved = await saveDraft({ services, packet: packet({ items: its, values }), fills, contactId: 'c-jordan', me, owner: me });
+    expect(saved.documents.map((d) => [d.itemId, d.copy])).toEqual([['pi-a', undefined], ['pi-b', 2]]);
+    useApp.getState().loadRequest(saved);
+    expect(useApp.getState().packet.items).toEqual(its);
+    expect(useApp.getState().packet.values).toEqual(values);
+    const docs = await fillPacket(services, fills, 'fillable');
+    expect(new Set(docs.map((d) => d.fileName)).size).toBe(2);
+  });
+
+  it('gives older drafts item ids', () => {
+    useApp.getState().loadRequest({ ...({} as SignatureRequest), id: 'r-old', title: 'Old', values: {}, attachments: [], audit: [], status: 'Drafted', createdOn: '', documents: [{ templateId: 'tpl-ev1120-0326', name: 'x', formNumber: 'EV-1120', revision: '03/2026' }] });
+    const [item] = useApp.getState().packet.items;
+    expect(item.id).toMatch(/^pi-/);
+    expect(item.copy).toBeUndefined();
   });
 });

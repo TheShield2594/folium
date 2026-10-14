@@ -3,7 +3,7 @@ import { CLIENTS, FIRM, TEMPLATES, USERS } from '../services/demo/seed';
 import { outputGate, runChecks, summarize, type CheckResult } from './checks';
 import { formatValue, resolveDateLimit, validateFormat } from './format';
 import { buildCondition, conditionTerms, evaluateCondition, explainCondition, parseCondition, resolvePath } from './paths';
-import { fieldKey, inputsNeeded, mappingWarnings, migrateAccountValues, prefillForm, prefillPacket, termLabels, validateMapping } from './prefill';
+import { fieldKey, inputsNeeded, mappingWarnings, migrateAccountValues, prefillForm, prefillPacket, seedCopyValues, termLabels, validateMapping } from './prefill';
 import { carryForward, diffRevision } from './revisions';
 import { assignSigners, rolesForPacket, validateSigners } from './signers';
 import { buildEnvelopeDefinition, placementsToTabs } from '../services/docusign/tabs';
@@ -259,6 +259,52 @@ describe('prefill', () => {
       expect(mappingWarnings(a.mapping)).toEqual([]);
       const shared = { ...a.mapping, fields: [{ pdfField: 'AcctNo', source: 'account.ev_accountno', required: false, key: 'acct' }] };
       expect(mappingWarnings(shared)).toHaveLength(1);
+    });
+  });
+
+  describe('copies of one form', () => {
+    const swp = tpl('tpl-px310-0826');
+    const acct = (id: string) => client.accounts.find((a) => a.accountid === id)!;
+    const val = (fill: ReturnType<typeof prefillForm>, pdf: string) => fill.fields.find((f) => f.mapping.pdfField === pdf)!;
+    const items = [
+      { template: swp, account: acct('a-j1'), itemId: 'pi-1' },
+      { template: swp, account: acct('a-j3'), itemId: 'pi-2', copy: 2 },
+    ];
+
+    it('keeps advisor values typed on copy 2 off copy 1, and client data shared', () => {
+      const [one, two] = prefillPacket(items, scope, { 'swp.amount': '500', 'pi-2/swp.amount': '750' });
+      expect(val(one, 'SWP_Amount').value).toBe('500');
+      expect(val(two, 'SWP_Amount').value).toBe('750');
+      expect(val(two, 'SWP_Amount').key).toBe('pi-2/swp.amount');
+      expect(val(one, 'Owner_Name_Full').key).toBe(val(two, 'Owner_Name_Full').key);
+      expect([one.itemId, two.itemId, two.copy]).toEqual(['pi-1', 'pi-2', 2]);
+    });
+
+    it('scopes account values by account, not by copy', () => {
+      const [one, two] = prefillPacket(items, scope, {});
+      const acctField = swp.mapping.fields.find((m) => m.source === 'account.ev_accountno')!;
+      expect(val(one, acctField.pdfField).value).toBe('IRA-22-4471');
+      expect(val(two, acctField.pdfField).value).toBe('PX-7712-0045');
+    });
+
+    it('starts a copy from the original’s values', () => {
+      const seeded = seedCopyValues(swp, { 'swp.amount': '500', 'swp.monthly': 'Yes', 'contact.fullname': 'J' }, 'pi-2');
+      expect(seeded).toEqual({ 'pi-2/swp.amount': '500', 'pi-2/swp.monthly': 'Yes' });
+      expect(seedCopyValues(swp, seeded, 'pi-3', 'pi-2')).toEqual({ 'pi-3/swp.amount': '500', 'pi-3/swp.monthly': 'Yes' });
+    });
+
+    it('shares a field marked shareAcrossCopies', () => {
+      const shared = { ...swp, mapping: { ...swp.mapping, fields: swp.mapping.fields.map((m) => (m.key === 'swp.start' ? { ...m, shareAcrossCopies: true } : m)) } };
+      const [, two] = prefillPacket([{ template: shared, itemId: 'pi-1' }, { template: shared, itemId: 'pi-2', copy: 2 }], scope, { 'swp.start': '2026-11-02' });
+      expect(val(two, 'SWP_Start').value).toBe('2026-11-02');
+    });
+
+    it('checks each copy on its own, and warns when two copies share an account', () => {
+      const fills = prefillPacket([items[0], { ...items[1], account: acct('a-j1') }], scope, { 'swp.monthly': 'Yes' });
+      const results = runChecks(fills, { scope, values: { 'swp.monthly': 'Yes' }, latestFor: () => undefined });
+      expect(results.find((r) => r.id === 'pi-1:check:0')?.level).toBe('pass');
+      expect(results.find((r) => r.id === 'pi-2:check:0')?.level).toBe('block');
+      expect(results.find((r) => r.id.startsWith('same-account:'))).toMatchObject({ level: 'warn', itemId: 'pi-2' });
     });
   });
 

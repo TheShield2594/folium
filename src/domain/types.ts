@@ -84,6 +84,11 @@ export interface FieldMapping {
    */
   lockWhen?: string;
   /**
+   * On a second or later copy of a form in one packet, advisor-entered values are kept
+   * per copy. Set this for the rare advisor value that must match on every copy.
+   */
+  shareAcrossCopies?: boolean;
+  /**
    * Overlay box for flat (scanned) or XFA PDFs that have no fillable field, in PDF
    * points from the page's top-left. Fillable PDFs take positions from their widgets.
    */
@@ -227,7 +232,14 @@ export interface ClientRecord {
 // Packets & requests
 
 export interface PacketItem {
+  /** This instance of the form in the packet. Copies of one form have different ids. */
+  id: string;
   templateId: string;
+  /**
+   * 2 and up for an added copy of a form already in the packet ("Add another copy").
+   * A copy keeps its own advisor-entered values (see `fieldKey`).
+   */
+  copy?: number;
   /** Which account this form is about, if the form is account-specific. */
   accountId?: string;
   /** Set when a resumed draft's account is no longer active and Folium picked another. */
@@ -289,6 +301,10 @@ export interface RequestDocument {
   revision: string;
   /** The account the form is about, so a resumed draft reopens on the same one. */
   accountId?: string;
+  /** The packet item this was, so a resumed draft keeps each copy's own values. */
+  itemId?: string;
+  /** Set on an added copy of a form (2 and up). */
+  copy?: number;
 }
 
 export interface Attachment {

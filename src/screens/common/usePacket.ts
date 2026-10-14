@@ -20,7 +20,7 @@ export function usePacketView(): PacketView | undefined {
   return useMemo(() => {
     if (!scope) return undefined;
     const items = packet.items
-      .map((i) => ({ template: templates.find((t) => t.id === i.templateId)!, account: scope.client.accounts.find((a) => a.accountid === i.accountId) }))
+      .map((i) => ({ template: templates.find((t) => t.id === i.templateId)!, account: scope.client.accounts.find((a) => a.accountid === i.accountId), itemId: i.id, copy: i.copy }))
       .filter((i) => i.template);
     const fills = prefillPacket(items, scope, packet.values);
     const checks = runChecks(fills, { scope, values: packet.values, latestFor: (n) => latestLive(templates, n) });

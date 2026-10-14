@@ -9,6 +9,7 @@ import { currentTemplates, latestLive, useApp, useScope, visibleTemplates } from
 import { Badge, Button, Empty, IconButton, Meter, SearchField, Select } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
 import { NoClient } from '../common/NoClient';
+import { addForm } from '../common/addForm';
 import { PacketInspector } from './PacketInspector';
 import { QuickLook } from './QuickLook';
 import { RequestFormSheet } from './RequestFormSheet';
@@ -36,8 +37,7 @@ export function LibraryScreen() {
   const favorites = useApp((s) => s.favorites);
   const recent = useApp((s) => s.recent);
   const packet = useApp((s) => s.packet);
-  const addToPacket = useApp((s) => s.addToPacket);
-  const removeFromPacket = useApp((s) => s.removeFromPacket);
+  const removeTemplateFromPacket = useApp((s) => s.removeTemplateFromPacket);
   const toggleFavorite = useApp((s) => s.toggleFavorite);
   const scope = useScope();
   const navigate = useNavigate();
@@ -163,7 +163,7 @@ export function LibraryScreen() {
                               className="add"
                               aria-pressed={inPacket}
                               aria-label={inPacket ? `Remove ${t.name} from packet` : `Add ${t.name} to packet`}
-                              onClick={() => (inPacket ? removeFromPacket(t.id) : addToPacket(t.id))}
+                              onClick={() => (inPacket ? removeTemplateFromPacket(t.id) : addForm(t.id))}
                             >
                               <Icon name={inPacket ? 'check' : 'plus'} size={16} strokeWidth={2.4} />
                             </button>
@@ -211,7 +211,7 @@ export function LibraryScreen() {
         <QuickLook
           template={peek}
           inPacket={packet.items.some((i) => i.templateId === peek.id)}
-          onAdd={() => addToPacket(peek.id)}
+          onAdd={() => addForm(peek.id)}
           onClose={() => setPeek(undefined)}
           latest={latestLive(templates, peek.formNumber)}
         />
