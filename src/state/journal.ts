@@ -1,3 +1,5 @@
+import { fieldKey } from '../domain/prefill';
+import type { FieldFormat, FormTemplate } from '../domain/types';
 import type { Packet } from './store';
 
 // A copy of the open packet in sessionStorage, so a reload, an expired sign-in or a
@@ -5,8 +7,10 @@ import type { Packet } from './store';
 // the same tab and is cleared when the tab closes. It's cleared after a send and on
 // Discard, too. Attachment bytes aren't kept here; saved drafts store them in SharePoint.
 //
-// Values that look like SSNs or tax IDs are left out, so the browser never holds one
-// at rest (see the compliance note on #23). They come back from CRM, or are re-entered.
+// SSNs and tax IDs are left out, so the browser never holds one at rest (see the
+// compliance note on #23). They come back from CRM, or are re-entered. A value is left
+// out when its field's format says it's one, and, as a backstop, when its key looks
+// like one.
 
 export interface Journal {
   v: 1;
@@ -21,11 +25,24 @@ export interface Journal {
 const PREFIX = 'folium.journal.';
 const keyFor = (userId: string) => `${PREFIX}${userId}`;
 
-/** Value keys that hold an SSN or TIN (`contact.ev_ssn`, `bene.Prim.1.ssn`, `own.tin`). */
+/** Value keys that look like an SSN or TIN (`contact.ev_ssn`, `bene.Prim.1.ssn`, `own.tin`). */
 const SENSITIVE = /ssn|(^|[.:_\]])tin($|[._])/i;
+const SENSITIVE_FORMATS = new Set<FieldFormat>(['ssn', 'ssnOrTin', 'ein', 'ssnLast4']);
 
-export function redactPacket(packet: Packet): Packet {
-  const values = Object.fromEntries(Object.entries(packet.values).filter(([k]) => !SENSITIVE.test(k)));
+/** Value keys of the packet's fields that hold an SSN, EIN or TIN, by their mapped format or source. */
+export function sensitiveKeys(packet: Packet, templates: FormTemplate[]): Set<string> {
+  const keys = new Set<string>();
+  for (const item of packet.items) {
+    const t = templates.find((x) => x.id === item.templateId);
+    for (const m of t?.mapping.fields ?? []) {
+      if ((m.format && SENSITIVE_FORMATS.has(m.format)) || /ev_ssn|ssnLast4/.test(m.source)) keys.add(fieldKey(m, t!, item.accountId));
+    }
+  }
+  return keys;
+}
+
+export function redactPacket(packet: Packet, sensitive: Set<string> = new Set()): Packet {
+  const values = Object.fromEntries(Object.entries(packet.values).filter(([k]) => !sensitive.has(k) && !SENSITIVE.test(k)));
   return { ...packet, values };
 }
 
@@ -37,10 +54,11 @@ function store(storage?: Storage): Storage | undefined {
   }
 }
 
-export function writeJournal(j: Omit<Journal, 'v' | 'savedAt'> & { savedAt?: string }, storage?: Storage) {
+export function writeJournal(j: Omit<Journal, 'v' | 'savedAt'> & { savedAt?: string; sensitive?: Set<string> }, storage?: Storage) {
   const s = store(storage);
   if (!s) return;
-  const entry: Journal = { v: 1, ...j, packet: redactPacket(j.packet), savedAt: j.savedAt ?? new Date().toISOString() };
+  const { sensitive, ...rest } = j;
+  const entry: Journal = { v: 1, ...rest, packet: redactPacket(j.packet, sensitive), savedAt: j.savedAt ?? new Date().toISOString() };
   try {
     s.setItem(keyFor(j.userId), JSON.stringify(entry));
   } catch {

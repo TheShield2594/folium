@@ -261,7 +261,7 @@ function LeavePacketSheet({ reason, onChoice }: { reason: 'switch' | 'open-draft
           <Button variant="bordered" disabled={busy} onClick={() => onChoice('discard')}>
             {reason === 'navigate' ? 'Leave without saving' : 'Discard'}
           </Button>
-          <Button variant="filled" busy={busy} onClick={save}>
+          <Button variant="filled" busy={busy} disabled={!ready} onClick={save}>
             Save draft
           </Button>
         </>

@@ -690,10 +690,47 @@ function cleanLimits(l: FieldLimits): FieldLimits | undefined {
   return Object.keys(out).length ? out : undefined;
 }
 
+/**
+ * A number box for a limit. What the admin types stays on screen (including a lone "-"
+ * on the way to a negative); only a finite number, or an empty box, is saved.
+ */
+function LimitNumber({ id, value, mode, onCommit }: { id: string; value: number | undefined; mode: 'decimal' | 'count'; onCommit: (v: number | undefined) => void }) {
+  const [text, setText] = useState(value === undefined ? '' : String(value));
+  // Follow outside changes (Clear limits, "Use the PDF's limit") without fighting the typing.
+  useEffect(() => {
+    setText((t) => (parseLimit(t, mode) === value ? t : value === undefined ? '' : String(value)));
+  }, [value, mode]);
+  const parsed = parseLimit(text, mode);
+  const invalid = text.trim() !== '' && parsed === undefined;
+  return (
+    <>
+      <TextInput
+        id={id}
+        inputMode={mode === 'count' ? 'numeric' : 'decimal'}
+        value={text}
+        aria-invalid={invalid || undefined}
+        onChange={(e) => {
+          setText(e.target.value);
+          const v = parseLimit(e.target.value, mode);
+          if (e.target.value.trim() === '' || v !== undefined) onCommit(v);
+        }}
+      />
+      {invalid && <span className="err">{mode === 'count' ? 'Enter a whole number of characters.' : 'Enter a number.'}</span>}
+    </>
+  );
+}
+
+function parseLimit(text: string, mode: 'decimal' | 'count'): number | undefined {
+  const t = text.trim();
+  if (!t) return undefined;
+  const n = Number(t);
+  if (!Number.isFinite(n)) return undefined;
+  return mode === 'count' && (!Number.isInteger(n) || n < 0) ? undefined : n;
+}
+
 function LimitsSheet({ field, pdfMaxLength, onChange, onClose }: { field: FieldMapping; pdfMaxLength?: number; onChange: (l: FieldLimits | undefined) => void; onClose: () => void }) {
   const l = field.limits ?? {};
   const set = (patch: Partial<FieldLimits>) => onChange(cleanLimits({ ...l, ...patch }));
-  const num = (v: string) => (v.trim() === '' ? undefined : Number(v));
   const numeric = NUMERIC.includes(field.format);
   return (
     <Sheet
@@ -714,10 +751,10 @@ function LimitsSheet({ field, pdfMaxLength, onChange, onClose }: { field: FieldM
         {numeric && (
           <div className="grid-2">
             <Field label="Lowest" htmlFor="lim-min" help={field.format === 'percent' ? 'Default 0' : undefined}>
-              <TextInput id="lim-min" inputMode="decimal" value={l.min ?? ''} onChange={(e) => set({ min: num(e.target.value) })} />
+              <LimitNumber id="lim-min" mode="decimal" value={l.min} onCommit={(min) => set({ min })} />
             </Field>
             <Field label="Highest" htmlFor="lim-max" help={field.format === 'percent' ? 'Default 100' : undefined}>
-              <TextInput id="lim-max" inputMode="decimal" value={l.max ?? ''} onChange={(e) => set({ max: num(e.target.value) })} />
+              <LimitNumber id="lim-max" mode="decimal" value={l.max} onCommit={(max) => set({ max })} />
             </Field>
           </div>
         )}
@@ -743,10 +780,10 @@ function LimitsSheet({ field, pdfMaxLength, onChange, onClose }: { field: FieldM
         )}
         <div className="grid-2">
           <Field label="Fewest characters" htmlFor="lim-minlen" optional>
-            <TextInput id="lim-minlen" inputMode="numeric" value={l.minLength ?? ''} onChange={(e) => set({ minLength: num(e.target.value) })} />
+            <LimitNumber id="lim-minlen" mode="count" value={l.minLength} onCommit={(minLength) => set({ minLength })} />
           </Field>
           <Field label="Most characters" htmlFor="lim-maxlen" optional help={pdfMaxLength ? `The PDF box allows ${pdfMaxLength}.` : 'Measured on the printed value.'}>
-            <TextInput id="lim-maxlen" inputMode="numeric" value={l.maxLength ?? ''} onChange={(e) => set({ maxLength: num(e.target.value) })} />
+            <LimitNumber id="lim-maxlen" mode="count" value={l.maxLength} onCommit={(maxLength) => set({ maxLength })} />
           </Field>
         </div>
         {pdfMaxLength && l.maxLength !== pdfMaxLength && (

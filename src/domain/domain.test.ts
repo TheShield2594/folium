@@ -67,6 +67,9 @@ describe('format', () => {
     expect(validateFormat('42', 'integer')).toBeUndefined();
     expect(validateFormat('4.2', 'integer')).toMatch(/whole number/);
     expect(validateFormat('abc', 'integer')).toBeTruthy();
+    expect(validateFormat('1,200', 'integer')).toBeUndefined();
+    expect(validateFormat('-1,234,567', 'integer')).toBeUndefined();
+    for (const bad of [',', '1,,2', ',5', '12,34', '1234,567', '-']) expect(validateFormat(bad, 'integer')).toBe('Enter a whole number.');
     expect(validateFormat('4.25', 'decimal')).toBeUndefined();
     expect(validateFormat('-0.5', 'decimal')).toBeUndefined();
     expect(validateFormat('4.2.5', 'decimal')).toBeTruthy();

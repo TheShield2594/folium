@@ -55,9 +55,14 @@ export function guardServices(services: Services, opts: GuardOptions = {}): Serv
       const call = (...args: unknown[]) => (value as (...a: unknown[]) => Promise<unknown>).apply(target, args);
       wrapped[name] = async (...args: unknown[]) => {
         const once = () => call(...args);
+        // A call can't be cancelled, but once the time limit passes no further retry starts.
+        let timedOut = false;
         try {
-          const run = READS.has(op) ? () => withRetry(once, { op, ...opts.retry }) : once;
-          const result = await withTimeout(run, LONG.has(op) ? limits.long : limits.normal, op);
+          const run = READS.has(op) ? () => withRetry(once, { op, ...opts.retry, cancelled: () => timedOut }) : once;
+          const result = await withTimeout(run, LONG.has(op) ? limits.long : limits.normal, op).catch((e) => {
+            timedOut = true;
+            throw e;
+          });
           reportSuccess();
           return result;
         } catch (e) {

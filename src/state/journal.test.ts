@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PacketItem } from '../domain/types';
 import { createDemoServices, resetDemo } from '../services/demo';
 import { CLIENTS, TEMPLATES } from '../services/demo/seed';
-import { ago, clearJournal, newerThanDraft, readJournal, redactPacket, writeJournal } from './journal';
+import { ago, clearJournal, newerThanDraft, readJournal, redactPacket, sensitiveKeys, writeJournal } from './journal';
 import { startJournal, useApp, type Packet } from './store';
 
 const items: PacketItem[] = [{ templateId: 'tpl-ev1120-0326' }, { templateId: 'tpl-px310-0826', accountId: 'a-j3' }];
@@ -26,6 +26,26 @@ describe('packet journal', () => {
   it('keeps SSNs and tax IDs out of the browser', () => {
     const r = redactPacket(packet({ values }));
     expect(r.values).toEqual({ 'bene.Prim.1.pct': '100', 'withholding.federal': '10' });
+  });
+
+  it('leaves out values of SSN, EIN and TIN fields whatever their key is called', () => {
+    const t = {
+      ...TEMPLATES[0],
+      id: 'tpl-tax',
+      mapping: { ...TEMPLATES[0].mapping, fields: [{ pdfField: 'Owner_TaxID', source: 'advisor', required: false, key: 'ownerTaxId', format: 'ein' as const }, { pdfField: 'Note', source: 'advisor', required: false, key: 'note' }] },
+    };
+    const p = packet({ items: [{ templateId: 'tpl-tax' }], values: { ownerTaxId: '12-3456789', note: 'hello' } });
+    expect(sensitiveKeys(p, [t])).toEqual(new Set(['ownerTaxId']));
+    writeJournal({ userId: 'u', contactId: 'c', packet: { ...p, dirty: true }, sensitive: sensitiveKeys(p, [t]) });
+    expect(readJournal('u')!.packet.values).toEqual({ note: 'hello' });
+  });
+
+  it('keeps the restore offer when the client can’t be opened', async () => {
+    const services = createDemoServices();
+    const offer = { v: 1 as const, userId: 'u', contactId: 'c-missing', packet: packet({ dirty: true }), savedAt: new Date().toISOString() };
+    useApp.setState({ services, contactId: 'c-jordan', pendingRestore: offer, packet: packet({ items: [] }) });
+    await expect(useApp.getState().restoreJournal()).rejects.toBeTruthy();
+    expect(useApp.getState().pendingRestore).toBe(offer);
   });
 
   it('round-trips: save → reload → restore → discard', async () => {

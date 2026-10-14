@@ -193,7 +193,8 @@ function shapeError(v: string, format: FieldFormat | undefined, limits: FieldLim
       return checkRange(n, min, max, 'a percentage', format);
     }
     case 'integer': {
-      if (!/^-?[\d,]+$/.test(v)) return 'Enter a whole number.';
+      // Plain digits, or digits grouped in thousands (1,200), never a stray comma.
+      if (!/^-?(\d{1,3}(,\d{3})+|\d+)$/.test(v)) return 'Enter a whole number.';
       return checkRange(toNum(v), limits?.min, limits?.max, 'a whole number', format);
     }
     case 'decimal': {

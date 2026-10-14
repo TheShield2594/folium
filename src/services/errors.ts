@@ -129,6 +129,8 @@ export interface RetryOptions {
   onlineWaitMs?: number;
   wait?: (ms: number) => Promise<void>;
   waitOnline?: (ms: number) => Promise<void>;
+  /** Set by the caller once it has given up (its time limit passed); no further attempt starts. */
+  cancelled?: () => boolean;
 }
 
 /**
@@ -149,6 +151,7 @@ export async function withRetry<T>(fn: () => Promise<T>, opts: RetryOptions): Pr
       if (!RETRYABLE.has(last.kind) || i === attempts - 1) throw last;
       if (last.kind === 'offline') await waitOnline(opts.onlineWaitMs ?? TIMEOUT.normal);
       else await wait((opts.baseMs ?? 500) * 2 ** i);
+      if (opts.cancelled?.()) throw last;
     }
   }
   throw last;

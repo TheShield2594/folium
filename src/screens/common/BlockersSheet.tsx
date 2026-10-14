@@ -30,7 +30,7 @@ export function BlockersSheet({ title, blockers, fills, onJump, onClose }: { tit
           <Button variant="gray" onClick={onClose}>
             Close
           </Button>
-          <Button variant="filled" iconAfter="arrowRight" onClick={() => jump(blockers[0])}>
+          <Button variant="filled" iconAfter="arrowRight" disabled={!blockers.length} onClick={() => blockers[0] && jump(blockers[0])}>
             Go to first
           </Button>
         </>

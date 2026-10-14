@@ -14,7 +14,7 @@ import type {
   UserProfile,
 } from '../domain/types';
 import type { Services } from '../services/types';
-import { clearJournal, debounced, newerThanDraft, readJournal, worthKeeping, writeJournal, type Journal } from './journal';
+import { clearJournal, debounced, newerThanDraft, readJournal, sensitiveKeys, worthKeeping, writeJournal, type Journal } from './journal';
 
 // Small persisted per-viewer conveniences (favorites, recents, theme). Never business data.
 function readLocal<T>(key: string, fallback: T): T {
@@ -242,13 +242,13 @@ export const useApp = create<AppState>((set, get) => ({
   async restoreJournal() {
     const j = get().pendingRestore;
     if (!j) return;
-    set({ pendingRestore: undefined });
     if (get().contactId !== j.contactId) {
       // The packet on screen is the one being replaced; the restore banner was the question.
       set({ packet: emptyPacket() });
-      await get().openContact(j.contactId);
+      // Keep the offer if the client can't be opened (a failed load throws; the banner reports it).
+      if (!(await get().openContact(j.contactId))) return;
     }
-    set({ packet: { ...emptyPacket(), ...j.packet, dirty: true } });
+    set({ pendingRestore: undefined, packet: { ...emptyPacket(), ...j.packet, dirty: true } });
   },
   discardJournal() {
     const { pendingRestore, me } = get();
@@ -383,9 +383,9 @@ export const useApp = create<AppState>((set, get) => ({
  */
 export function startJournal(): () => void {
   const write = () => {
-    const { me, contactId, packet, client, pendingRestore } = useApp.getState();
+    const { me, contactId, packet, client, pendingRestore, templates } = useApp.getState();
     if (!me) return;
-    if (contactId && worthKeeping(packet)) writeJournal({ userId: me.systemuserid, contactId, contactName: client?.contact.fullname, packet });
+    if (contactId && worthKeeping(packet)) writeJournal({ userId: me.systemuserid, contactId, contactName: client?.contact.fullname, packet, sensitive: sensitiveKeys(packet, templates) });
     // Leave an offered copy alone until the advisor answers the banner.
     else if (!pendingRestore) clearJournal(me.systemuserid);
   };

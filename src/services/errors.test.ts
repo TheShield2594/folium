@@ -83,6 +83,22 @@ describe('withRetry', () => {
     }
   });
 
+  it('starts no further attempt once the caller has given up', async () => {
+    let n = 0;
+    let gaveUp = false;
+    await expect(
+      withRetry(
+        async () => {
+          n++;
+          gaveUp = true; // the caller's time limit passes during the first attempt
+          throw new TypeError('Failed to fetch');
+        },
+        { op: 'read', ...noWait, cancelled: () => gaveUp },
+      ),
+    ).rejects.toMatchObject({ kind: 'offline' });
+    expect(n).toBe(1);
+  });
+
   it('waits for the network before trying again when offline', async () => {
     const waitOnline = vi.fn(async () => undefined);
     let n = 0;
