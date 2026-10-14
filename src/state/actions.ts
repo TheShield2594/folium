@@ -143,6 +143,7 @@ export async function saveDraft(opts: {
     documents: fills.map((f) => ({ templateId: f.template.id, name: f.template.name, formNumber: f.template.formNumber, revision: f.template.revision, accountId: f.accountId, itemId: f.itemId, ...(f.copy ? { copy: f.copy } : {}) })),
     values: { ...packet.values },
     state: packet.state,
+    personBlocks: packet.personBlocks,
     prefillSnapshot: prefillSnapshot(fills),
     attachments,
     sharedWith: packet.sharedWith,

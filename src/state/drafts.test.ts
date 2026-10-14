@@ -260,3 +260,14 @@ describe('packet state', () => {
     expect(useApp.getState().packet.state).toBe('VA');
   });
 });
+
+describe('person blocks on a draft', () => {
+  it('resumes knowing who filled each block', async () => {
+    const services = createDemoServices();
+    const its: PacketItem[] = [{ id: 'pi-b', templateId: 'tpl-ev1120-0326' }];
+    const personBlocks = { 'Primary beneficiary 2': { contactId: 'c-ruth', name: 'Ruth Miller', role: 'Trusted contact' } };
+    const saved = await saveDraft({ services, packet: packet({ items: its, personBlocks }), fills: fillsFor(client, its), contactId: 'c-jordan', me, owner: me });
+    useApp.getState().loadRequest((await services.requests.get(saved.id))!);
+    expect(useApp.getState().packet.personBlocks).toEqual(personBlocks);
+  });
+});

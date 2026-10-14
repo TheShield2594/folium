@@ -4,7 +4,7 @@ import type { FieldMapping } from './types';
 import { outputGate, runChecks, summarize, type CheckResult } from './checks';
 import { formatValue, resolveDateLimit, validateFormat } from './format';
 import { buildCondition, conditionTerms, evaluateCondition, explainCondition, parseCondition, resolvePath } from './paths';
-import { choiceDisplay, choiceOptions, fieldKey, inputsNeeded, mappingWarnings, migrateAccountValues, prefillForm, prefillPacket, seedCopyValues, termLabels, validateMapping } from './prefill';
+import { choiceDisplay, choiceOptions, fieldKey, fillBlockFromPerson, personBlocks, relatedPeople, inputsNeeded, mappingWarnings, migrateAccountValues, prefillForm, prefillPacket, seedCopyValues, termLabels, validateMapping } from './prefill';
 import { carryForward, diffRevision } from './revisions';
 import { assignSigners, rolesForPacket, validateSigners } from './signers';
 import { buildEnvelopeDefinition, placementsToTabs } from '../services/docusign/tabs';
@@ -339,6 +339,28 @@ describe('prefill', () => {
         { value: 'single', label: 'single' },
         { value: 'married', label: 'married' },
       ]);
+    });
+  });
+
+  describe('person blocks', () => {
+    const withSon = { ...client, connections: [...client.connections, { role: 'Son', contact: { ...client.connections[0].contact, contactid: 'c-ben', fullname: 'Ben Miller', firstname: 'Ben', birthdate: '1995-02-03', ev_ssn: '123-45-6789' }, ev_sharepct: 50 }] };
+    const sc = { ...scope, client: withSon };
+
+    it('lists the client and every related person', () => {
+      expect(relatedPeople(withSon).map((p) => `${p.name} · ${p.role}`)).toEqual(['Jordan A. Miller · Client', 'Sam Miller · Spouse', 'Sam Miller · Joint owner', 'Ruth Miller-Kauffman · Trusted contact', 'Ben Miller · Son']);
+    });
+
+    it('fills beneficiary 2 from any connection, and clears it for someone new', () => {
+      const fill = prefillForm(bene, sc, {});
+      expect(personBlocks([fill])).toEqual(['Primary beneficiary 1', 'Primary beneficiary 2', 'Primary beneficiary 3', 'Contingent beneficiary 1', 'Contingent beneficiary 2']);
+      const son = relatedPeople(withSon).find((p) => p.role === 'Son')!;
+      const values = fillBlockFromPerson([fill], 'Primary beneficiary 2', son);
+      expect(values).toEqual({ 'bene.Prim.2.name': 'Ben Miller', 'bene.Prim.2.rel': 'Son', 'bene.Prim.2.dob': '1995-02-03', 'bene.Prim.2.ssn': '123-45-6789', 'bene.Prim.2.pct': '50' });
+      const after = prefillForm(bene, sc, values);
+      expect(after.fields.find((f) => f.mapping.pdfField === 'Bene2_DOB')?.display).toBe('02/03/1995');
+      expect(Object.values(fillBlockFromPerson([fill], 'Primary beneficiary 2', undefined)).every((v) => v === '')).toBe(true);
+      // Beneficiary 1 reads the spouse from CRM; filling it from the son overrides it.
+      expect(fillBlockFromPerson([fill], 'Primary beneficiary 1', son)['bene.Prim.1.name']).toBe('Ben Miller');
     });
   });
 

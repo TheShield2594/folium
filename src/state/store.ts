@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { create } from 'zustand';
 import type { ResolveScope } from '../domain/paths';
-import { copyScope, migrateAccountValues, seedCopyValues } from '../domain/prefill';
+import { copyScope, migrateAccountValues, seedCopyValues, type PersonPick } from '../domain/prefill';
 import { normalizeState, pickVariant } from '../domain/states';
 import type {
   Attachment,
@@ -45,6 +45,8 @@ export interface Packet {
    * advisor sets it when what matters is where the application is signed.
    */
   state?: string;
+  /** Who filled each person block, by block (per copy on an added copy). */
+  personBlocks?: Record<string, PersonPick>;
   /** Set when the packet was opened from (or saved as) a draft request. */
   requestId?: string;
   attachments: Attachment[];
@@ -135,6 +137,8 @@ interface AppState {
   moveInPacket(itemId: string, delta: number): void;
   setPacketAccount(itemId: string, accountId: string): void;
   setValue(key: string, value: string | undefined): void;
+  /** Set several values at once (filling a person block). */
+  setValues(patch: Record<string, string | undefined>): void;
   setPacket(p: Partial<Packet>): void;
   clearPacket(): void;
   loadPacket(saved: SavedPacket): void;
@@ -393,6 +397,14 @@ export const useApp = create<AppState>((set, get) => ({
     else values[key] = value;
     set({ packet: { ...get().packet, dirty: true, values } });
   },
+  setValues(patch) {
+    const values = { ...get().packet.values };
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined) delete values[k];
+      else values[k] = v;
+    }
+    set({ packet: { ...get().packet, dirty: true, values } });
+  },
   setPacket(p) {
     const work = (Object.keys(p) as (keyof Packet)[]).some((k) => !CLEAN_KEYS.has(k));
     set({ packet: { ...get().packet, ...p, dirty: p.dirty ?? (work || get().packet.dirty) } });
@@ -441,6 +453,7 @@ export const useApp = create<AppState>((set, get) => ({
         attachments: req.attachments,
         sharedWith: req.sharedWith ?? [],
         state: req.state,
+        personBlocks: req.personBlocks,
         snapshot: req.prefillSnapshot,
         // A send that stopped after DocuSign created the envelope picks up where it left off.
         send: req.status === 'Drafted' && req.envelopeId && req.envelopePhase === 'created' ? { phase: 'created', envelopeId: req.envelopeId, at: req.audit.at(-1)?.at ?? req.createdOn } : undefined,

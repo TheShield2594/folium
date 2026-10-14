@@ -376,6 +376,8 @@ export interface SignatureRequest {
   uploadedToOnBase: boolean;
   uploadedBy?: string;
   uploadedOn?: string;
+  /** Who filled each person block ("Primary beneficiary 2" → Sam Miller, Spouse), so a resumed draft shows it. */
+  personBlocks?: Record<string, { contactId?: string; name: string; role: string }>;
   /** The state the packet's forms must be approved in, when the advisor changed it from the client's. */
   state?: string;
   /** Field values the advisor entered, keyed by canonical key, so a draft can be resumed. */

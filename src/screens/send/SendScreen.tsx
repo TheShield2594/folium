@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { outputGate, summarize } from '../../domain/checks';
+import { relatedPeople } from '../../domain/prefill';
 import { expiresOnFrom } from '../../domain/requests';
 import { accessCodeWarnings, assignSigners, envelopeSigners, generateAccessCode, recordedSigners, roleLabel, rolesForPacket, validateSigners } from '../../domain/signers';
 import type { SignatureRequest, SignerAssignment, VerificationMethod } from '../../domain/types';
@@ -38,6 +39,7 @@ export function SendScreen() {
 
   const existing = packet.requestId ? requests.find((r) => r.id === packet.requestId) : undefined;
   const needs = useMemo(() => (view && scope ? rolesForPacket(view.templates, scope) : []), [view, scope]);
+  const people = useMemo(() => (scope ? relatedPeople(scope.client) : []), [scope]);
   const [signers, setSigners] = useState<SignerAssignment[]>([]);
   const [anyOrder, setAnyOrder] = useState(false);
   const [ccMe, setCcMe] = useState(true);
@@ -302,8 +304,26 @@ export function SendScreen() {
                           <TextInput aria-label={`${roleLabel(s.role)} name`} value={s.name} onChange={(e) => update(i, { name: e.target.value })} placeholder="Full name" style={{ fontWeight: 600 }} />
                         </div>
                         <span className="t-footnote c3">
-                          {roleLabel(s.role)} · {forms.map((f) => f.formNumber).join(', ')}
+                          {roleLabel(s.role)} · {[...new Set(forms.map((f) => f.formNumber))].join(', ')}
                         </span>
+                        {people.length > 1 && (
+                          <Select
+                            aria-label={`Choose the ${roleLabel(s.role)}`}
+                            value=""
+                            onChange={(e) => {
+                              const p = people[Number(e.target.value)];
+                              if (p) update(i, { name: p.name, email: p.contact?.emailaddress1 ?? '', phone: p.contact?.mobilephone ?? (s.auth === 'phone' ? p.contact?.telephone1 : undefined), contactId: p.contactId });
+                            }}
+                            style={{ minHeight: 30, fontSize: 13 }}
+                          >
+                            <option value="">Choose person…</option>
+                            {people.map((p, k) => (
+                              <option key={`${p.contactId}-${p.role}`} value={String(k)}>
+                                {p.name} · {p.role}
+                              </option>
+                            ))}
+                          </Select>
+                        )}
                         {(codes[s.role] || s.inSession) && (
                           <span className="row wrap" style={{ gap: 4 }}>
                             {codes[s.role] && (

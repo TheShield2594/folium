@@ -113,7 +113,7 @@ export function PdfView({ template, fields = [], placements = [], width = 640, a
                       const shown = f.origin === 'signer' ? '' : maskSensitive ? maskValue(f.display, f.mapping.format) : f.display;
                       return (
                         <button
-                          key={`${f.key}-${j}`}
+                          key={`${f.mapping.pdfField}-${j}`}
                           type="button"
                           className={`hl hl-${tone}${activeKey === f.key ? ' active' : ''}`}
                           style={{ left: r.x * s, top: r.y * s, width: Math.max(r.width * s, 10), height: Math.max(r.height * s, 10), fontSize: Math.max(8, Math.min(11, r.height * s * 0.62)) }}

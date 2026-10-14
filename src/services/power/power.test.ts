@@ -12,13 +12,17 @@ const FORMATTED = '@OData.Community.Display.V1.FormattedValue';
 const rows: Record<string, Record<string, unknown>> = {};
 const updates: { table: string; id: string; data: Record<string, unknown> }[] = [];
 const queries: { table: string; filter?: string }[] = [];
+/** Connection rows a query returns, by the column its filter is on. */
+const connectionRows: Record<string, Record<string, unknown>[]> = {};
 const ok = <T,>(data: T) => ({ success: true, data });
 
 vi.mock('@microsoft/power-apps/app', () => ({ getContext: vi.fn() }));
 vi.mock('@microsoft/power-apps/data', () => ({
   getClient: () => ({
     retrieveRecordAsync: async (_t: string, id: string) => ok({ ...rows[id] }),
-    retrieveMultipleRecordsAsync: async (table: string, opts: { filter?: string }) => (queries.push({ table, filter: opts?.filter }), ok([])),
+    retrieveMultipleRecordsAsync: async (table: string, opts: { filter?: string }) => (
+      queries.push({ table, filter: opts?.filter }), ok(table === 'connections' ? (connectionRows[opts?.filter?.split(' ')[0] ?? ''] ?? []) : [])
+    ),
     deleteRecordAsync: async () => {
       throw new Error('Folium never hard-deletes');
     },
@@ -39,6 +43,28 @@ beforeEach(() => {
   updates.length = 0;
   rows['c-1'] = { contactid: 'c-1', fullname: 'Jordan Miller', familystatuscode: 2, [`familystatuscode${FORMATTED}`]: 'Married' };
   rows['c-2'] = { contactid: 'c-2', fullname: 'Alex Kim', familystatuscode: 100000007, [`familystatuscode${FORMATTED}`]: 'Domestic partner' };
+});
+
+describe('connections', () => {
+  it('loads related people in both directions, once each', async () => {
+    rows['c-3'] = { contactid: 'c-3', fullname: 'Ben Miller' };
+    connectionRows._record1id_value = [{ _record2id_value: 'c-2', [`_record2roleid_value${FORMATTED}`]: 'Spouse' }];
+    connectionRows._record2id_value = [
+      { _record1id_value: 'c-3', [`_record1roleid_value${FORMATTED}`]: 'Son', ev_sharepct: '50' },
+      // The reciprocal row Dataverse keeps for the spouse.
+      { _record1id_value: 'c-2', [`_record1roleid_value${FORMATTED}`]: 'Spouse' },
+    ];
+    try {
+      const { connections } = await createPowerServices().crm.getClient('c-1');
+      expect(connections.map((c) => [c.role, c.contact.contactid, c.ev_sharepct])).toEqual([
+        ['Spouse', 'c-2', undefined],
+        ['Son', 'c-3', 50],
+      ]);
+    } finally {
+      delete connectionRows._record1id_value;
+      delete connectionRows._record2id_value;
+    }
+  });
 });
 
 describe('choice columns', () => {

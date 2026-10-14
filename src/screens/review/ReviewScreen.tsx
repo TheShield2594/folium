@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { FieldState } from '../../domain/prefill';
 import { defaultDraftTitle } from '../../domain/drafts';
-import { choiceOptions, inputsNeeded, snapshotDiff } from '../../domain/prefill';
+import { blockKey, choiceOptions, copyScope, fillBlockFromPerson, inputsNeeded, personBlocks, relatedPeople, snapshotDiff } from '../../domain/prefill';
 import type { SignatureRequest } from '../../domain/types';
 import { formLabel, outputGate, summarize, type CheckResult } from '../../domain/checks';
 import { sourceKind } from '../../domain/paths';
@@ -26,6 +26,7 @@ export function ReviewScreen() {
   const client = useApp((s) => s.client);
   const packet = useApp((s) => s.packet);
   const setValue = useApp((s) => s.setValue);
+  const setValues = useApp((s) => s.setValues);
   const setPacket = useApp((s) => s.setPacket);
   const contactId = useApp((s) => s.contactId);
   const me = useApp((s) => s.me);
@@ -203,6 +204,29 @@ export function ReviewScreen() {
       .catch(() => undefined);
   }
 
+  /**
+   * Fill a person block on the open form from someone related to the client. Forms
+   * that share the block's keys follow (the same beneficiary 2 everywhere); an added
+   * copy keeps its own.
+   */
+  function pickPerson(block: string, choice: string) {
+    if (!view || !fill) return;
+    const scope = copyScope({ id: fill.itemId, copy: fill.copy });
+    const same = view.fills.filter((f) => copyScope({ id: f.itemId, copy: f.copy }) === scope);
+    const people = relatedPeople(client!);
+    const k = blockKey(block, fill);
+    const { [k]: _old, ...rest } = packet.personBlocks ?? {};
+    if (choice === 'crm') {
+      // Back to what the template maps: drop the overrides.
+      setValues(Object.fromEntries(Object.keys(fillBlockFromPerson(same, block, undefined)).map((key) => [key, undefined])));
+      setPacket({ personBlocks: rest });
+      return;
+    }
+    const person = choice === 'new' ? undefined : people[Number(choice)];
+    setValues(fillBlockFromPerson(same, block, person));
+    setPacket({ personBlocks: { ...rest, [k]: person ? { contactId: person.contactId, name: person.name, role: person.role } : { name: 'Someone new', role: '' } } });
+  }
+
   /** The choices a set of boxes or a radio group sharing a key offers, across the packet. */
   const choicesFor = (key: string) => choiceOptions(view!.fills.flatMap((x) => x.fields).filter((x) => x.key === key));
 
@@ -360,6 +384,32 @@ export function ReviewScreen() {
                   </div>
                 </div>
               ))}
+            </section>
+          )}
+
+          {fill && personBlocks([fill]).length > 0 && (
+            <section className="card card-pad stack-3" aria-labelledby="people-h">
+              <h2 id="people-h" className="t-headline">People on this form</h2>
+              <p className="t-footnote c3">Fill a whole block from anyone related to {client.contact.firstname}, or clear it for someone new.</p>
+              {personBlocks([fill]).map((block) => {
+                const pick = packet.personBlocks?.[blockKey(block, fill)];
+                const people = relatedPeople(client);
+                return (
+                  <div key={block} className="field">
+                    <label htmlFor={`pb-${cssKey(block)}`}>{block}</label>
+                    <Select id={`pb-${cssKey(block)}`} value="" onChange={(e) => e.target.value && pickPerson(block, e.target.value)}>
+                      <option value="">{pick ? `${pick.name}${pick.role ? ` · ${pick.role}` : ''}` : 'As on the form · Fill from…'}</option>
+                      {people.map((p, i) => (
+                        <option key={`${p.contactId}-${p.role}`} value={String(i)}>
+                          {p.name} · {p.role}
+                        </option>
+                      ))}
+                      <option value="new">Someone new (clear the block)</option>
+                      {pick && <option value="crm">Undo: as the form maps it</option>}
+                    </Select>
+                  </div>
+                );
+              })}
             </section>
           )}
 

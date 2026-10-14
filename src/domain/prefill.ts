@@ -1,6 +1,6 @@
 import { formatValue, prettifyFieldName, validateFormat } from './format';
 import { ConditionError, conditionTerms, describeSource, evaluateCondition, explainCondition, parseCondition, resolvePath, sourceKind, type ResolveScope, type TermLabel } from './paths';
-import type { Account, FieldMapping, FormTemplate, TemplateMapping } from './types';
+import type { Account, ClientRecord, Contact, FieldMapping, FormTemplate, TemplateMapping } from './types';
 
 export type FieldOrigin = 'crm' | 'rep' | 'firm' | 'computed' | 'static' | 'edited' | 'advisor' | 'signer' | 'missing';
 
@@ -314,6 +314,60 @@ export function inputsNeeded(fills: FormFill[]): { key: string; fields: FieldSta
   return [...byKey.entries()]
     .map(([key, fields]) => ({ key, fields, required: fields.some((f) => f.required || (f.formatError && f.value)) }))
     .sort((a, b) => Number(b.required) - Number(a.required));
+}
+
+// ---------------------------------------------------------------- Person blocks
+
+/** Someone a person block (a beneficiary, a joint owner) can be filled from. */
+export interface Person {
+  /** Contact id, when the person is in Dynamics. */
+  contactId?: string;
+  name: string;
+  /** Their relationship to the client ("Spouse", "Son"), or "Client" for the client. */
+  role: string;
+  contact?: Contact;
+  sharePct?: number;
+}
+
+/** Who filled a block, kept with the packet and its draft. */
+export interface PersonPick {
+  contactId?: string;
+  name: string;
+  role: string;
+}
+
+/** The client and everyone connected to them, for "Fill from…" and signer pickers. */
+export function relatedPeople(client: ClientRecord): Person[] {
+  const me: Person = { contactId: client.contact.contactid, name: client.contact.fullname, role: 'Client', contact: client.contact };
+  return [me, ...client.connections.map((c): Person => ({ contactId: c.contact.contactid, name: c.contact.fullname, role: c.role, contact: c.contact, sharePct: c.ev_sharepct }))];
+}
+
+/** The person blocks on some forms, in the order they first appear. */
+export function personBlocks(fills: FormFill[]): string[] {
+  return [...new Set(fills.flatMap((f) => f.fields.map((x) => x.mapping.person?.block).filter((b): b is string => !!b)))];
+}
+
+/** Where a block's pick is kept: per copy on an added copy of a form, like its values. */
+export const blockKey = (block: string, fill: Pick<FormFill, 'itemId' | 'copy'>) => {
+  const scope = copyScope({ id: fill.itemId, copy: fill.copy });
+  return scope ? copyKey(scope, block) : block;
+};
+
+/**
+ * The values that fill a person block from one person: each field in the block gets the
+ * person's value for its `person.attr` (a contact column, `role` or `ev_sharepct`).
+ * With no person ("Someone new"), the block is cleared for the advisor to type.
+ */
+export function fillBlockFromPerson(fills: FormFill[], block: string, person: Person | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const f of fills.flatMap((x) => x.fields)) {
+    const attr = f.mapping.person?.block === block ? f.mapping.person.attr : undefined;
+    if (!attr || f.locked) continue;
+    let v: unknown = '';
+    if (person) v = attr === 'role' ? person.role : attr === 'ev_sharepct' ? person.sharePct : attr === 'fullname' ? person.name : person.contact?.[attr];
+    out[f.key] = v === undefined || v === null ? '' : String(v);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- Draft snapshots
