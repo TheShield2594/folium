@@ -153,3 +153,50 @@ export function signingEventMessage(event: string | undefined, name: string): { 
       return { done: false, text: `DocuSign came back with “${event ?? 'no result'}”.`, audit: 'In-session signing ended' };
   }
 }
+
+// ---------------------------------------------------------------- Draft retention
+
+/** How long the firm may keep an unsent draft, in days after its last save. 0 turns drafts off. */
+export const RETENTION_OPTIONS = [90, 60, 30, 10, 7, 0] as const;
+export const DEFAULT_RETENTION_DAYS = 90;
+
+/** The firm's retention period, falling back to the default for a missing or unknown value. */
+export function retentionDays(firm: { draftRetentionDays?: number } | undefined): number {
+  const d = firm?.draftRetentionDays;
+  return d !== undefined && (RETENTION_OPTIONS as readonly number[]).includes(d) ? d : DEFAULT_RETENTION_DAYS;
+}
+
+/** Whether advisors can save and share drafts at all (retention isn't 0). */
+export const draftsAllowed = (firm: { draftRetentionDays?: number } | undefined) => retentionDays(firm) > 0;
+
+/**
+ * When a draft saved on `savedOn` expires. Every save restarts the clock. Undefined
+ * when retention is 0 (nothing is kept as a draft).
+ */
+export function draftExpiry(savedOn: string | Date, days: number): string | undefined {
+  if (!days) return undefined;
+  return new Date(new Date(savedOn).getTime() + days * DAY).toISOString();
+}
+
+/**
+ * Whether the retention clean-up may delete a request: only unsent drafts. A packet
+ * downloaded to sign in person is a record of what was printed, and a draft whose
+ * envelope DocuSign already holds is halfway through a send; neither expires.
+ */
+export const isRetainable = (r: Pick<SignatureRequest, 'status' | 'inPerson' | 'envelopeId'>) => r.status === 'Drafted' && !r.inPerson && !r.envelopeId;
+
+export interface DraftExpiryInfo {
+  expiresOn: string;
+  /** Whole days left, rounded up; 0 or less once it's past. */
+  daysLeft: number;
+  /** 7 days or fewer left: the reminder email has gone out. */
+  soon: boolean;
+}
+
+/** Expiry for a draft the clean-up will delete; undefined for anything else or when no date is set. */
+export function draftExpiryInfo(req: Pick<SignatureRequest, 'status' | 'inPerson' | 'envelopeId' | 'expiresOn'>, now: Date = new Date()): DraftExpiryInfo | undefined {
+  if (!isRetainable(req) || !req.expiresOn) return undefined;
+  const ms = new Date(req.expiresOn).getTime() - now.getTime();
+  const daysLeft = Math.ceil(ms / DAY);
+  return { expiresOn: req.expiresOn, daysLeft, soon: daysLeft <= 7 };
+}

@@ -1,5 +1,6 @@
 import { defaultDraftTitle, shortDraftId } from '../domain/drafts';
 import { formLabel } from '../domain/checks';
+import { DEFAULT_RETENTION_DAYS, draftExpiry, isRetainable } from '../domain/requests';
 import { prefillSnapshot, type FormFill } from '../domain/prefill';
 import type { Attachment, AuditEvent, SignatureRequest, UserProfile } from '../domain/types';
 import { fillPdf, mergePdfs } from '../pdf/fill';
@@ -107,6 +108,8 @@ export async function saveDraft(opts: {
   sendSetup?: SendSetup;
   /** Extra detail for the audit entry, e.g. why the draft was saved automatically. */
   auditNote?: string;
+  /** The firm's draft retention (`retentionDays(firm)`): a retainable draft expires this many days after this save. Default 90. */
+  retentionDays?: number;
   /** Called once the row is saved, before the draft PDFs are written, so a failed write can be retried against the same row. */
   onSaved?: (req: SignatureRequest) => void;
 }): Promise<SignatureRequest> {
@@ -136,6 +139,7 @@ export async function saveDraft(opts: {
     attachments: [],
     audit: [],
   };
+  const now = new Date().toISOString();
   const req: SignatureRequest = {
     ...base,
     title,
@@ -150,9 +154,14 @@ export async function saveDraft(opts: {
     draftFolderUrl: folder,
     audit: [
       ...base.audit,
+      // An upgrade to current form revisions (made since the last save) is recorded with it.
+      ...(packet.formsUpdated ? [audit(me, 'Forms updated', packet.formsUpdated)] : []),
       audit(me, existing ? 'Draft updated' : 'Draft saved', [me.systemuserid !== owner.systemuserid ? `on behalf of ${owner.fullname}` : '', opts.auditNote ?? ''].filter(Boolean).join(' · ') || undefined),
     ],
   };
+  // Every save restarts the retention clock. Rows the clean-up never deletes (printed to
+  // sign in person, mid-send) keep whatever date they have: an envelope's own expiry.
+  if (isRetainable(req)) req.expiresOn = draftExpiry(now, opts.retentionDays ?? DEFAULT_RETENTION_DAYS);
   const saved = await services.requests.save(req);
   opts.onSaved?.(saved);
   if (!opts.writePdfs) return saved;
@@ -164,4 +173,18 @@ export async function saveDraft(opts: {
     draftFiles.push({ name, ...(await services.drafts.saveDraft(contactId, name, d.pdf)) });
   }
   return services.requests.save({ ...saved, draftFiles: [...(existing?.draftFiles ?? []).filter((f) => !draftFiles.some((x) => x.name === f.name)), ...draftFiles] });
+}
+
+/**
+ * Delete a draft: its PDFs in SharePoint, then the row (a soft delete, so Undo brings the
+ * row back; the PDFs are rewritten at its next Save draft). Attachments stay until the
+ * retention flow deletes the row for good, so Undo still has them. Returns the PDFs that
+ * couldn't be deleted.
+ */
+export async function deleteDraft(services: Services, req: SignatureRequest): Promise<{ name: string; url: string }[]> {
+  const failed: { name: string; url: string }[] = [];
+  for (const f of req.draftFiles ?? []) await services.drafts.removeFile(f.url).catch(() => failed.push(f));
+  if (req.draftFiles?.length) await services.requests.save({ ...req, draftFiles: failed.length ? failed : undefined });
+  await services.requests.remove(req.id);
+  return failed;
 }

@@ -3,7 +3,7 @@ import { toNumber } from './format';
 import { evaluateCondition, type ResolveScope } from './paths';
 import { copyScope, valuesForAccount, type FormFill } from './prefill';
 import { availableIn, describeStates, normalizeState } from './states';
-import type { Check, FormTemplate } from './types';
+import type { Attachment, Check, FormTemplate } from './types';
 
 export type CheckLevel = 'pass' | 'warn' | 'block';
 
@@ -28,6 +28,8 @@ export interface CheckContext {
   state?: string;
   /** States the acting advisor is licensed in; empty or missing skips the licensing check. */
   licensedStates?: string[];
+  /** Forms in the packet whose template no longer exists (by name), so they block instead of vanishing. */
+  missingForms?: string[];
 }
 
 function valueOf(fill: FormFill, pdfField: string): string | undefined {
@@ -110,18 +112,31 @@ function runTemplateCheck(check: Check, fill: FormFill, ctx: CheckContext, idx: 
 export function runChecks(fills: FormFill[], ctx: CheckContext): CheckResult[] {
   const results: CheckResult[] = [];
 
-  // 1. Every form is the current revision in the SharePoint library.
+  // 1. Every form is the current revision in the SharePoint library. A retired form
+  // with no successor can't be updated, only removed.
   const stale = fills.filter((f) => {
     const latest = ctx.latestFor(f.template.formNumber);
     return f.template.status === 'Retired' || (latest && latest.id !== f.template.id);
   });
+  const gone = stale.filter((f) => !ctx.latestFor(f.template.formNumber));
+  const describe = (f: FormFill) => (gone.includes(f) ? `${formLabel(f)}: no longer available – remove it to continue` : `${formLabel(f)} (${f.template.revision})`);
   results.push({
     id: 'current-revisions',
     level: stale.length ? 'block' : 'pass',
     title: stale.length ? `${stale.length} form${stale.length > 1 ? 's are' : ' is'} out of date` : 'Every form is the current version',
-    detail: stale.length ? stale.map((s) => `${s.template.name} (${s.template.revision})`).join(', ') : 'Checked against the Marketing library in SharePoint.',
+    detail: stale.length ? stale.map(describe).join(', ') : 'Checked against the Marketing library in SharePoint.',
     templateId: stale[0]?.template.id,
+    itemId: stale[0]?.itemId,
   });
+  if (ctx.missingForms?.length) {
+    const n = ctx.missingForms.length;
+    results.push({
+      id: 'missing-forms',
+      level: 'block',
+      title: `${n} form${n > 1 ? 's are' : ' is'} no longer in the library`,
+      detail: `${ctx.missingForms.join(', ')}. Remove ${n > 1 ? 'them' : 'it'} to continue.`,
+    });
+  }
 
   // 2. Required fields.
   for (const fill of fills) {
@@ -271,4 +286,37 @@ export function outputGate(results: CheckResult[], mode: OutputMode, opts: { blo
     default:
       return { allowed: !open, blockers, draftMark: false };
   }
+}
+
+// ---------------------------------------------------------------- Attachments
+
+export interface AttachmentLimits {
+  maxFiles: number;
+  maxMB: number;
+}
+
+/** DocuSign envelope limits Folium enforces unless the firm sets its own (Laser App uses the same). */
+export const DEFAULT_ATTACHMENT_LIMITS: AttachmentLimits = { maxFiles: 10, maxMB: 30 };
+
+export const MB = 1024 * 1024;
+
+/** The firm policy's limits over the defaults. */
+export function attachmentLimits(policy?: { maxAttachments?: number; maxAttachmentsMB?: number }): AttachmentLimits {
+  return { maxFiles: policy?.maxAttachments || DEFAULT_ATTACHMENT_LIMITS.maxFiles, maxMB: policy?.maxAttachmentsMB || DEFAULT_ATTACHMENT_LIMITS.maxMB };
+}
+
+/** Total size of a list of attachments, in MB. */
+export const attachmentsMB = (list: Pick<Attachment, 'size'>[]) => list.reduce((n, a) => n + a.size, 0) / MB;
+
+/** Block results for an envelope with too many supporting documents, or too large a total. */
+export function checkAttachments(list: Pick<Attachment, 'size'>[], limits: AttachmentLimits = DEFAULT_ATTACHMENT_LIMITS): CheckResult[] {
+  const out: CheckResult[] = [];
+  if (list.length > limits.maxFiles) {
+    out.push({ id: 'attachments:count', level: 'block', title: `${list.length} supporting documents attached`, detail: `An envelope can carry ${limits.maxFiles}. Remove ${list.length - limits.maxFiles}.` });
+  }
+  const mb = attachmentsMB(list);
+  if (mb > limits.maxMB) {
+    out.push({ id: 'attachments:size', level: 'block', title: `Supporting documents total ${mb.toFixed(1)} MB`, detail: `An envelope can carry ${limits.maxMB} MB of them. Remove or shrink some.` });
+  }
+  return out;
 }

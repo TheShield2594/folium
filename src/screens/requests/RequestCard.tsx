@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { applyEnvelopeStatus, expiryInfo } from '../../domain/requests';
+import { draftFreshness } from '../../domain/drafts';
+import { canDownload } from '../../domain/policy';
+import { applyEnvelopeStatus, draftExpiryInfo, expiryInfo } from '../../domain/requests';
 import { roleLabel } from '../../domain/signers';
 import type { SignatureRequest } from '../../domain/types';
 import { useServices } from '../../services';
@@ -8,7 +9,9 @@ import { audit } from '../../state/actions';
 import { useApp } from '../../state/store';
 import { Badge, Button, Field, IconButton, Menu, Select, Sheet, TextArea, TextInput, downloadBytes, toast } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
+import { FreshnessBadge } from '../common/UpgradeSheet';
 import { useDraftActions } from '../common/useDraftActions';
+import { useOpenDraft } from '../common/useOpenDraft';
 import { SignNowButtons } from './InSessionSigning';
 
 export const fmtWhen = (iso?: string) =>
@@ -42,18 +45,24 @@ export function expiryLabel(r: SignatureRequest, now = new Date()): { text: stri
   return { text: e.daysLeft <= 1 ? `expires ${fmtDay(e.expiresOn)} (tomorrow)` : `expires ${fmtDay(e.expiresOn)}`, tone: e.soon ? 'warn' : undefined };
 }
 
+/** "deleted Jan 11" for an unsent draft under the firm's retention. */
+function draftExpiryLabel(r: SignatureRequest, now = new Date()): { text: string; tone?: 'warn' } | undefined {
+  const e = draftExpiryInfo(r, now);
+  if (!e) return undefined;
+  return { text: e.daysLeft <= 0 ? 'draft expires today' : `draft kept until ${fmtDay(e.expiresOn)}`, tone: e.soon ? 'warn' : undefined };
+}
+
 export function RequestCard({ req, showClient, clientName }: { req: SignatureRequest; showClient?: boolean; clientName?: string }) {
   const services = useServices();
   const me = useApp((s) => s.me);
   const users = useApp((s) => s.users);
   const refreshRequests = useApp((s) => s.refreshRequests);
-  const loadRequest = useApp((s) => s.loadRequest);
-  const openContact = useApp((s) => s.openContact);
-  const contactId = useApp((s) => s.contactId);
   const requests = useApp((s) => s.requests);
+  const templates = useApp((s) => s.templates);
   const client = useApp((s) => s.client);
   const drafts = useDraftActions();
-  const navigate = useNavigate();
+  const opener = useOpenDraft();
+  const canDownloadSigned = canDownload('signed', useApp((s) => s.policy));
   const [busy, setBusy] = useState<string>();
   const [sheet, setSheet] = useState<'void' | 'correct'>();
   const r = req;
@@ -61,7 +70,7 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
   const info = statusInfo(r);
   const signed = r.signers.filter((s) => s.status === 'signed').length;
   const order = ['Drafted', 'Sent', 'Viewed', 'Signed'] as const;
-  const expiry = expiryLabel(r);
+  const expiry = expiryLabel(r) ?? draftExpiryLabel(r);
   const reached = r.status === 'Declined' || r.status === 'Voided' || r.status === 'Expired' ? 1 : order.indexOf(r.status as (typeof order)[number]);
   const ownerName = users.find((u) => u.systemuserid === r.ownerId)?.fullname;
 
@@ -128,18 +137,7 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
       await save({ ...r, lastReminderOn: new Date().toISOString(), audit: [...r.audit, audit(me, 'Resent')] }, 'Resent to signers who haven’t signed');
     });
 
-  async function openDraft(asNew?: boolean) {
-    try {
-      // Opening a draft replaces the packet on screen: ask first if it has unsaved work.
-      if (!(await useApp.getState().confirmReplacePacket('open-draft'))) return;
-      if (r.contactId !== contactId && !(await openContact(r.contactId))) return;
-      loadRequest(asNew ? { ...r, id: '', values: r.values } : r);
-      if (asNew) useApp.getState().setPacket({ requestId: undefined, sharedWith: [], snapshot: undefined });
-      navigate('/review');
-    } catch {
-      toast.error('That client isn’t available to you.');
-    }
-  }
+  const openDraft = (asNew?: boolean) => opener.open(r, asNew);
 
   const steps = [
     { label: 'Drafted', at: r.createdOn, done: true },
@@ -181,6 +179,7 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
           </div>
         </div>
         <div className="row">
+          {r.status === 'Drafted' && <FreshnessBadge f={draftFreshness(r, templates)} />}
           <Badge tone={info.tone}>{info.label}</Badge>
           <Menu
             trigger={(p) => <IconButton icon="ellipsis" label="More actions" {...p} />}
@@ -223,13 +222,17 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
               <>
                 Filed in OnBase by {r.uploadedBy} on {fmtDay(r.uploadedOn)}.
               </>
-            ) : (
+            ) : canDownloadSigned ? (
               <>Download the completed envelope (forms + certificate) and upload it to OnBase.</>
+            ) : (
+              <>Your firm doesn’t allow PDF downloads from Folium. File the completed envelope in OnBase from DocuSign.</>
             )}
           </span>
-          <Button variant={r.uploadedToOnBase ? 'gray' : 'filled'} icon="download" busy={busy === 'dl'} onClick={download}>
-            Download signed PDF
-          </Button>
+          {canDownloadSigned && (
+            <Button variant={r.uploadedToOnBase ? 'gray' : 'filled'} icon="download" busy={busy === 'dl'} onClick={download}>
+              Download signed PDF
+            </Button>
+          )}
           <label className="row t-callout" style={{ minHeight: 44, cursor: 'pointer', fontWeight: 600 }}>
             <input type="checkbox" className="check" checked={r.uploadedToOnBase} disabled={busy === 'onbase'} onChange={(e) => markOnBase(e.target.checked)} />
             Uploaded to OnBase
@@ -378,6 +381,7 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
         />
       )}
       {drafts.sheet}
+      {opener.sheet}
     </article>
   );
 }

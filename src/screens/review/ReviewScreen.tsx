@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { FieldState } from '../../domain/prefill';
-import { defaultDraftTitle } from '../../domain/drafts';
+import { defaultDraftTitle, upgradePacketItems, type UpgradeReport } from '../../domain/drafts';
+import { canDownload, sharingAllowed } from '../../domain/policy';
+import { draftsAllowed, retentionDays } from '../../domain/requests';
 import { blockKey, choiceOptions, copyScope, fillBlockFromPerson, inputsNeeded, personBlocks, relatedPeople, snapshotDiff } from '../../domain/prefill';
 import type { SignatureRequest } from '../../domain/types';
 import { formLabel, outputGate, summarize, type CheckResult } from '../../domain/checks';
@@ -18,7 +20,9 @@ import { PdfView } from '../common/PdfView';
 import { NameSheet } from '../common/NameSheet';
 import { ShareSheet } from '../common/ShareSheet';
 import { Steps } from '../common/Steps';
-import { usePacketView } from '../common/usePacket';
+import { UpgradeSheet } from '../common/UpgradeSheet';
+import { missingLabel, usePacketView } from '../common/usePacket';
+import { fmtDay } from '../requests/RequestCard';
 import { AttachmentsCard } from './AttachmentsCard';
 import { FieldEditor, FieldInput } from './FieldEditor';
 
@@ -35,6 +39,9 @@ export function ReviewScreen() {
   const firm = useApp((s) => s.firm);
   const requests = useApp((s) => s.requests);
   const setPacketAccount = useApp((s) => s.setPacketAccount);
+  const removeFromPacket = useApp((s) => s.removeFromPacket);
+  const upgradePacket = useApp((s) => s.upgradePacket);
+  const templates = useApp((s) => s.templates);
   const owner = useActingFor();
   const services = useServices();
   const view = usePacketView();
@@ -52,6 +59,12 @@ export function ReviewScreen() {
   const [busy, setBusy] = useState<string>();
   const [sharing, setSharing] = useState(false);
   const [naming, setNaming] = useState(false);
+  /** The changes "Update" would make, shown before they're made. */
+  const [upgrade, setUpgrade] = useState<UpgradeReport>();
+  // With retention set to 0 the firm keeps no drafts: no Save draft, no Share.
+  const policy = useApp((s) => s.policy);
+  const canSaveDrafts = draftsAllowed(policy);
+  const canShare = sharingAllowed(policy);
   /** Set when an output was refused, to list what's blocking it. */
   const [blocked, setBlocked] = useState<{ title: string; blockers: CheckResult[] }>();
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -159,11 +172,12 @@ export function ReviewScreen() {
         owner,
         existing,
         writePdfs: true,
+        retentionDays: retentionDays(policy),
         // Keep the row's identity even if writing the PDFs fails, so a retry updates it.
-        onSaved: (row) => setPacket({ requestId: row.id, title: row.title, attachments: row.attachments, snapshot: row.prefillSnapshot, dirty: false }),
+        onSaved: (row) => setPacket({ requestId: row.id, title: row.title, attachments: row.attachments, snapshot: row.prefillSnapshot, formsUpdated: undefined, dirty: false }),
       });
-      setPacket({ requestId: saved.id, title: saved.title, attachments: saved.attachments, snapshot: saved.prefillSnapshot, dirty: false });
-      toast.ok(`Draft saved to ${client!.contact.firstname}’s SharePoint folder`);
+      setPacket({ requestId: saved.id, title: saved.title, attachments: saved.attachments, snapshot: saved.prefillSnapshot, formsUpdated: undefined, dirty: false });
+      toast.ok(saved.expiresOn ? `Saved to ${client!.contact.firstname}’s SharePoint folder. Kept until ${fmtDay(saved.expiresOn)}.` : `Draft saved to ${client!.contact.firstname}’s SharePoint folder`);
     } finally {
       await refreshRequests().catch(() => undefined);
       setBusy(undefined);
@@ -171,7 +185,7 @@ export function ReviewScreen() {
   }
 
   async function download(mode: 'fillable' | 'flatten' | 'print') {
-    if (!view) return;
+    if (!view || !canDownload(mode, policy)) return;
     // Anything a client could wet-sign needs every blocking check cleared first.
     const gate = outputGate(view.checks, mode, { blockFillable: firm?.blockFillableWhenIncomplete });
     if (!gate.allowed) {
@@ -244,34 +258,45 @@ export function ReviewScreen() {
     );
   }
 
+  // The firm decides which PDFs can leave Folium (`pdfDownload`); e-signature always can.
+  const downloads = [
+    ...(canDownload('fillable', policy) ? [{ label: sum?.blocking ? 'Fillable PDF (marked draft)' : 'Fillable PDF (editable)', icon: 'doc' as const, onSelect: () => download('fillable') }] : []),
+    ...(canDownload('flatten', policy)
+      ? [{ label: sum?.blocking ? `Flattened PDF to sign in person (${sum.blocking} to fix)` : 'Flattened PDF to sign in person', icon: 'lock' as const, onSelect: () => download('flatten') }]
+      : []),
+    ...(canDownload('print', policy) ? [{ label: sum?.blocking ? `Print… (${sum.blocking} to fix)` : 'Print…', icon: 'printer' as const, onSelect: () => download('print') }] : []),
+  ];
+
   const width = zoom === 'fit' ? Math.min(Math.max(canvasW - 48, 320), 860) : 980;
 
   return (
     <>
       <Toolbar title="Prefill & review" subtitle={`${client.contact.fullname} · ${view.fills.length} ${view.fills.length === 1 ? 'form' : 'forms'}`} back={{ label: 'Forms', to: '/' }}>
         <Steps current={1} />
-        <Menu
-          trigger={(p) => (
-            <Button variant="gray" icon="download" busy={busy === 'download'} {...p}>
-              Download
-            </Button>
-          )}
-          items={[
-            { label: sum?.blocking ? 'Fillable PDF (marked draft)' : 'Fillable PDF (editable)', icon: 'doc', onSelect: () => download('fillable') },
-            { label: sum?.blocking ? `Flattened PDF to sign in person (${sum.blocking} to fix)` : 'Flattened PDF to sign in person', icon: 'lock', onSelect: () => download('flatten') },
-            { label: sum?.blocking ? `Print… (${sum.blocking} to fix)` : 'Print…', icon: 'printer', onSelect: () => download('print') },
-          ]}
-        />
-        <Menu
-          trigger={(p) => <IconButton icon="ellipsis" label="More" {...p} />}
-          items={[
-            { label: 'Save draft to SharePoint', icon: 'folder', onSelect: onSaveDraft },
-            { label: 'Share with a colleague…', icon: 'share', onSelect: () => setSharing(true) },
-          ]}
-        />
-        <Button variant="gray" icon="folder" busy={busy === 'draft'} onClick={onSaveDraft} className="hide-narrow">
-          Save draft
-        </Button>
+        {downloads.length > 0 && (
+          <Menu
+            trigger={(p) => (
+              <Button variant="gray" icon="download" busy={busy === 'download'} {...p}>
+                Download
+              </Button>
+            )}
+            items={downloads}
+          />
+        )}
+        {(canSaveDrafts || canShare) && (
+          <Menu
+            trigger={(p) => <IconButton icon="ellipsis" label="More" {...p} />}
+            items={[
+              ...(canSaveDrafts ? [{ label: 'Save draft to SharePoint', icon: 'folder' as const, onSelect: onSaveDraft }] : []),
+              ...(canShare ? [{ label: 'Share with a colleague…', icon: 'share' as const, onSelect: () => setSharing(true) }] : []),
+            ]}
+          />
+        )}
+        {canSaveDrafts && (
+          <Button variant="gray" icon="folder" busy={busy === 'draft'} onClick={onSaveDraft} className="hide-narrow">
+            Save draft
+          </Button>
+        )}
         <Button variant="filled" iconAfter="chevronRight" onClick={() => navigate('/send')}>
           Signers
         </Button>
@@ -335,6 +360,17 @@ export function ReviewScreen() {
               choices={choicesFor(selectedField.key)}
             />
           )}
+
+          {view.missing.map((item) => (
+            <section key={item.id} className="banner" role="alert" style={{ alignItems: 'flex-start', flexDirection: 'column', gap: 8 }}>
+              <span className="t-callout">
+                <Icon name="warning" size={16} /> <strong>{missingLabel(item)}</strong> is no longer in the library, so it can’t be shown or sent.
+              </span>
+              <Button variant="gray" size="sm" icon="trash" onClick={() => removeFromPacket(item.id)}>
+                Remove it from the packet
+              </Button>
+            </section>
+          ))}
 
           {replaced.map((item) => {
             const f = view.fills.find((x) => x.itemId === item.id);
@@ -457,6 +493,19 @@ export function ReviewScreen() {
                     </span>
                   </>
                 );
+                if (c.id === 'current-revisions' && c.level === 'block') {
+                  const preview = upgradePacketItems(packet.items, packet.values, templates).report;
+                  return (
+                    <div key={c.id} className="check-row">
+                      {content}
+                      {preview.forms.some((f) => f.state === 'newer') && (
+                        <Button variant="tinted" size="sm" onClick={() => setUpgrade(preview)}>
+                          Update
+                        </Button>
+                      )}
+                    </div>
+                  );
+                }
                 return c.level !== 'pass' && (c.fieldKey || c.templateId) ? (
                   <button key={c.id} className="check-row" onClick={() => focusKey(c.fieldKey, c.itemId ?? c.templateId)}>
                     {content}
@@ -495,8 +544,19 @@ export function ReviewScreen() {
           )}
         </aside>
       </div>
-      {sharing && <ShareSheet onClose={() => setSharing(false)} />}
+      {sharing && canShare && <ShareSheet onClose={() => setSharing(false)} />}
       {blocked && <BlockersSheet title={blocked.title} blockers={blocked.blockers} fills={view.fills} onJump={(c) => focusKey(c.fieldKey, c.itemId ?? c.templateId)} onClose={() => setBlocked(undefined)} />}
+      {upgrade && (
+        <UpgradeSheet
+          report={upgrade}
+          onClose={() => setUpgrade(undefined)}
+          onUpdate={() => {
+            setUpgrade(undefined);
+            const done = upgradePacket().forms.filter((f) => f.state === 'newer').length;
+            toast.ok(`Updated ${done} ${done === 1 ? 'form' : 'forms'} to the current version.${canSaveDrafts && packet.requestId ? ' Save draft to keep it.' : ''}`);
+          }}
+        />
+      )}
       {naming && (
         <NameSheet
           title="Save draft"

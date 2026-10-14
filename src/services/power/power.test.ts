@@ -15,19 +15,42 @@ const queries: { table: string; filter?: string }[] = [];
 /** Connection rows a query returns, by the column its filter is on. */
 const connectionRows: Record<string, Record<string, unknown>[]> = {};
 const ok = <T,>(data: T) => ({ success: true, data });
+/** `ev_foliumsetting` rows, by ID. */
+const settingRows: Record<string, Record<string, unknown>> = {};
+/** What the SharePoint connector answers to a file lookup, and the files it was asked to delete. */
+let fileLookup: { success: boolean; data?: { Id: string }; error?: Record<string, unknown> } = { success: true, data: { Id: 'item-1' } };
+const deletedFiles: string[] = [];
 
 vi.mock('@microsoft/power-apps/app', () => ({ getContext: vi.fn() }));
 vi.mock('@microsoft/power-apps/data', () => ({
   getClient: () => ({
     retrieveRecordAsync: async (_t: string, id: string) => ok({ ...rows[id] }),
-    retrieveMultipleRecordsAsync: async (table: string, opts: { filter?: string }) => (
-      queries.push({ table, filter: opts?.filter }), ok(table === 'connections' ? (connectionRows[opts?.filter?.split(' ')[0] ?? ''] ?? []) : [])
-    ),
+    retrieveMultipleRecordsAsync: async (table: string, opts: { filter?: string }) => {
+      queries.push({ table, filter: opts?.filter });
+      if (table === 'ev_foliumsettings') {
+        const name = /ev_name eq '([^']+)'/.exec(opts?.filter ?? '')?.[1];
+        return ok(Object.values(settingRows).filter((r) => !name || r.ev_name === name));
+      }
+      return ok(table === 'connections' ? (connectionRows[opts?.filter?.split(' ')[0] ?? ''] ?? []) : []);
+    },
+    executeAsync: async (req: { connectorOperation: { operationName: string; parameters: { id?: string } } }) => {
+      const { operationName, parameters } = req.connectorOperation;
+      if (operationName === 'GetFileMetadataByPath') return fileLookup;
+      if (operationName === 'DeleteFile') return deletedFiles.push(parameters.id ?? ''), ok({});
+      throw new Error(`Unexpected connector call ${operationName}`);
+    },
+    createRecordAsync: async (table: string, data: Record<string, unknown>) => {
+      if (table !== 'ev_foliumsettings') throw new Error(`Unexpected create on ${table}`);
+      const id = `set-${Object.keys(settingRows).length + 1}`;
+      settingRows[id] = { ...data, ev_foliumsettingid: id };
+      return ok({ ev_foliumsettingid: id });
+    },
     deleteRecordAsync: async () => {
       throw new Error('Folium never hard-deletes');
     },
     updateRecordAsync: async (table: string, id: string, data: Record<string, unknown>) => {
       updates.push({ table, id, data });
+      if (settingRows[id]) return (settingRows[id] = { ...settingRows[id], ...data }), ok({});
       const next = { ...rows[id], ...data };
       next[`familystatuscode${FORMATTED}`] = { 1: 'Single', 2: 'Married', 3: 'Divorced', 4: 'Widowed' }[data.familystatuscode as number];
       rows[id] = next;
@@ -139,5 +162,44 @@ describe('signature request rows', () => {
     expect(row.ev_status).toBe(SIGNATURE_STATUS_OPTIONS.Expired);
     expect(row.ev_expireson).toBe(r.expiresOn);
     expect(new Set(Object.values(SIGNATURE_STATUS_OPTIONS)).size).toBe(Object.keys(SIGNATURE_STATUS_OPTIONS).length);
+  });
+});
+
+describe('firm policy row', () => {
+  it('reads defaults until a Policy row exists, then round-trips it beside the Firm row', async () => {
+    for (const k of Object.keys(settingRows)) delete settingRows[k];
+    const { directory } = createPowerServices();
+    expect(await directory.getPolicy()).toEqual({ sharing: 'groups', repDataVisibility: 'assistants', pdfDownload: 'all' });
+    await directory.saveFirm(FIRM);
+    const policy = { sharing: 'off' as const, repDataVisibility: 'groupMembers' as const, pdfDownload: 'signedOnly' as const, draftRetentionDays: 30, lockMessage: true };
+    await directory.savePolicy(policy);
+    expect(Object.values(settingRows).map((r) => r.ev_name).sort()).toEqual(['Firm', 'Policy']);
+    expect(await directory.getPolicy()).toEqual(policy);
+    // The firm profile still reads its own row.
+    expect((await directory.getFirm()).name).toBe(FIRM.name);
+    // Saving again updates the same row.
+    await directory.savePolicy({ ...policy, sharing: 'anyone' });
+    expect(Object.keys(settingRows)).toHaveLength(2);
+    expect((await directory.getPolicy()).sharing).toBe('anyone');
+  });
+});
+
+describe('deleting draft PDFs', () => {
+  const url = 'https://everence.sharepoint.com/sites/CRM/contact/Jordan/DRAFT%20EV-1120.pdf';
+
+  it('deletes the file it finds, and treats a missing file as already deleted', async () => {
+    const { drafts } = createPowerServices();
+    deletedFiles.length = 0;
+    fileLookup = { success: true, data: { Id: 'item-1' } };
+    await drafts.removeFile(url);
+    expect(deletedFiles).toEqual(['item-1']);
+    fileLookup = { success: false, error: { status: 404, message: 'File not found' } };
+    await expect(drafts.removeFile(url)).resolves.toBeUndefined();
+  });
+
+  it('reports any other lookup failure, so the file stays on record', async () => {
+    const { drafts } = createPowerServices();
+    fileLookup = { success: false, error: { status: 429, message: 'Too many requests' } };
+    await expect(drafts.removeFile(url)).rejects.toThrow();
   });
 });

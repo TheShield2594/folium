@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { FirmProfile } from '../../domain/types';
+import type { FirmProfile, SendingDefaults } from '../../domain/types';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
 import { useApp } from '../../state/store';
@@ -32,6 +32,9 @@ export function AdminFirm() {
   useEffect(() => setF(firm), [firm]);
   if (!f) return null;
   const dirty = JSON.stringify(f) !== JSON.stringify(firm);
+  const sending = f.sending ?? {};
+  /** Set one Send screen setting; an empty value goes back to the default. */
+  const setSending = (patch: Partial<SendingDefaults>) => setF({ ...f, sending: { ...sending, ...patch } });
 
   return (
     <>
@@ -107,6 +110,30 @@ export function AdminFirm() {
               </Field>
             </section>
           )}
+
+          <section className="card card-pad stack-4" aria-labelledby="send-h">
+            <div>
+              <h2 id="send-h" className="t-title3">Sending</h2>
+              <p className="t-footnote c3" style={{ marginTop: 4 }}>
+                Defaults for every envelope. Tokens: <span className="mono">{'{client.firstname}'}</span>, <span className="mono">{'{client.lastname}'}</span>, <span className="mono">{'{forms}'}</span>,{' '}
+                <span className="mono">{'{formCount}'}</span>, <span className="mono">{'{advisor.fullname}'}</span>, <span className="mono">{'{advisor.signature}'}</span>, <span className="mono">{'{firm.name}'}</span>. A token with no value is left blank.
+              </p>
+            </div>
+            <Field label="Email subject" htmlFor="f-subj" help="Blank: “Forms to sign: …”. Cut to 100 characters.">
+              <TextInput id="f-subj" value={sending.subjectTemplate ?? ''} placeholder="Forms to sign: {forms}" onChange={(e) => setSending({ subjectTemplate: e.target.value || undefined })} />
+            </Field>
+            <Field label="Email note" htmlFor="f-msg" help="Blank: Folium’s standard note with the advisor’s sign-off. The disclosure above is always added. Administration › Settings can lock it.">
+              <TextArea id="f-msg" rows={6} value={sending.messageTemplate ?? ''} placeholder={'Hi {client.firstname},\n\nHere are the forms we talked about…\n\n{advisor.signature}'} onChange={(e) => setSending({ messageTemplate: e.target.value || undefined })} />
+            </Field>
+          </section>
+          <div className="list">
+            <SwitchRow
+              label="Signers sign in any order by default"
+              detail="Off: DocuSign routes envelopes in the order on the Send screen. Advisors can set their own default in Settings and change it on each envelope."
+              checked={!!sending.defaultAnyOrder}
+              onChange={(v) => setSending({ defaultAnyOrder: v || undefined })}
+            />
+          </div>
         </div>
       </div>
     </>

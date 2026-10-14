@@ -17,7 +17,7 @@ export const DATAVERSE = {
   /** Folium role/group/defaults per systemuser (one row per user). */
   profile: 'ev_foliumprofiles',
   group: 'ev_foliumgroups',
-  /** Single-row firm settings. */
+  /** Firm settings: one row per `ev_name` ("Firm", "Policy"). */
   settings: 'ev_foliumsettings',
 } as const;
 

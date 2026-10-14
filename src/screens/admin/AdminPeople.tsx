@@ -30,6 +30,7 @@ const CATEGORIES: FormCategory[] = ['Account maintenance', 'Beneficiary', 'Distr
 export function AdminPeople() {
   const users = useApp((s) => s.users);
   const groups = useApp((s) => s.groups);
+  const policy = useApp((s) => s.policy);
   const reloadDirectory = useApp((s) => s.reloadDirectory);
   const services = useServices();
   const [tab, setTab] = useState<'groups' | 'users'>('groups');
@@ -106,7 +107,7 @@ export function AdminPeople() {
           ) : (
             <div className="list">
               {filteredUsers.map((u) => {
-                const forWhom = u.role === 'Assistant' ? actableUsers(u, users, groups) : [];
+                const forWhom = u.role === 'Assistant' ? actableUsers(u, users, groups, policy) : [];
                 return (
                   <button key={u.systemuserid} className="list-row" onClick={() => setEditUser(u)} style={{ padding: '12px 16px' }}>
                     <Avatar name={u.fullname} size={34} alt={u.role !== 'User'} />

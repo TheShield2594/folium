@@ -18,12 +18,12 @@ Use Everence's publisher prefix if it isn't `ev_`, and change `src/services/powe
 | ev_name | Text | Title |
 | ev_contact | Lookup → contact | |
 | ev_status | Choice | Drafted · Sent · Viewed · Signed · Declined · Voided · Expired. Option values 100000000 upward in this order; `SIGNATURE_STATUS_OPTIONS` in `config.ts` must match. |
-| ev_expireson | Date/time | When the envelope lapses. Set on send, then from DocuSign's `expireDateTime`. For "expiring this week" views and the reminder flow. |
+| ev_expireson | Date/time (indexed) | On a sent request, when the envelope lapses: set on send, then from DocuSign's `expireDateTime`. On an unsent draft, when draft retention deletes it: the last save plus the firm's retention period (`draftRetentionDays`). Empty for drafts the clean-up never deletes (printed to sign in person, or mid-send with an `ev_envelopeid`). For "expiring this week" views, the reminder flows and the draft clean-up flow (DEPLOY.md §5a). |
 | ev_provider | Text | `DocuSign` |
 | ev_envelopeid | Text (indexed) | For Connect updates |
 | ev_senton / ev_signedon | Date/time | |
 | ev_uploadedtoonbase | Yes/No | Manual in v1 |
-| ev_payload | Multiline | `SignatureRequest` JSON: documents + revisions, signers, values entered, attachments metadata, owner/preparer, sharedWith, audit |
+| ev_payload | Multiline | `SignatureRequest` JSON: documents + revisions, signers, values entered, attachments metadata (`storedAt` for the SharePoint copy), `draftFiles` (the DRAFT PDFs written to the contact's folder, for clean-up), owner/preparer, sharedWith, audit |
 
 Later: `ev_onbasehandle` (phase 2).
 
@@ -39,9 +39,12 @@ Later: `ev_onbasehandle` (phase 2).
 
 `ev_name`, `ev_region`, `ev_payload` (`UserGroup`: members, source/category limits).
 
-## ev_foliumsetting — single row
+## ev_foliumsetting — one row per kind of setting
 
-`ev_name` = "Firm", `ev_payload` (`FirmProfile`).
+Folium finds each row by `ev_name`; changing them needs no release, and Dataverse auditing on the table records who changed what.
+
+- `ev_name` = "Firm", `ev_payload` (`FirmProfile`): firm data for `firm.*` fields, the envelope disclosure, Send screen defaults (`sending`: `defaultAnyOrder`, `subjectTemplate`, `messageTemplate`), `blockFillableWhenIncomplete`, `idleAutoSave`. Administration › Firm profile. (#26 turns this into one row per Everence entity.)
+- `ev_name` = "Policy", `ev_payload` (`FirmPolicy`): firm-wide rules shared by every firm profile: `sharing` (`off` · `groups` · `anyone`, default `groups`), `repDataVisibility` (`assistants` · `groupMembers`, default `assistants`), `pdfDownload` (`all` · `signedOnly` · `none`, default `all`), `draftRetentionDays` (90 default, 60, 30, 10, 7 or 0), `lockMessage`, `maxAttachments`, `maxAttachmentsMB`. Administration › Settings. A missing row means every default.
 
 ## ev_formrequest
 

@@ -1,11 +1,15 @@
 import { useMemo } from 'react';
 import { create } from 'zustand';
+import { upgradeAuditDetail, upgradePacketItems, type UpgradeReport } from '../domain/drafts';
 import type { ResolveScope } from '../domain/paths';
+import { actableUsers, DEFAULT_POLICY } from '../domain/policy';
 import { carryVariantValues, copyScope, migrateAccountValues, seedCopyValues, type PersonPick } from '../domain/prefill';
+import { currentTemplates, latestLive } from '../domain/revisions';
 import { normalizeState, pickVariant } from '../domain/states';
 import type {
   Attachment,
   ClientRecord,
+  FirmPolicy,
   FirmProfile,
   FormTemplate,
   PacketItem,
@@ -57,6 +61,8 @@ export interface Packet {
   dirty?: boolean;
   /** A DocuSign send in flight, kept here (and in the journal) so it survives a reload. */
   send?: SendState;
+  /** Revision changes from "Update to current forms", recorded in the audit trail at the next save. */
+  formsUpdated?: string;
 }
 
 /**
@@ -87,7 +93,12 @@ interface AppState {
   users: UserProfile[];
   groups: UserGroup[];
   firm?: FirmProfile;
-  /** The User an Assistant is working for; equals `me` for Users. */
+  /** Firm-wide rules (sharing, rep data, downloads, retention). Defaults until boot loads them. */
+  policy: FirmPolicy;
+  /**
+   * The User whose book and rep data the work is for: the User an Assistant works for,
+   * or (when the policy allows) another User in a User's groups. Usually `me` for Users.
+   */
   actingForId?: string;
 
   templates: FormTemplate[];
@@ -143,6 +154,8 @@ interface AppState {
   clearPacket(): void;
   loadPacket(saved: SavedPacket): void;
   loadRequest(req: SignatureRequest): void;
+  /** Move out-of-date forms in the open packet to the current revisions ("Update" in Review). */
+  upgradePacket(): UpgradeReport;
 
   toggleFavorite(templateId: string): void;
   markUsed(templateIds: string[]): void;
@@ -217,6 +230,7 @@ let openSeq = 0;
 
 export const useApp = create<AppState>((set, get) => ({
   ready: false,
+  policy: DEFAULT_POLICY,
   users: [],
   groups: [],
   templates: [],
@@ -234,17 +248,16 @@ export const useApp = create<AppState>((set, get) => ({
     applyTheme(get().theme);
     set({ services });
     try {
-      const [me, users, groups, firm, templates, packets] = await Promise.all([
+      const [me, users, groups, firm, policy, templates, packets] = await Promise.all([
         services.directory.currentUser(),
         services.directory.listUsers(),
         services.directory.listGroups(),
         services.directory.getFirm(),
+        services.directory.getPolicy(),
         services.templates.list(),
         services.packets.list(),
       ]);
-      const savedActing = readLocal<string | undefined>('folium.actingFor', undefined);
-      const actingForId = me.role === 'Assistant' ? (actableUsers(me, users, groups).some((u) => u.systemuserid === savedActing) ? savedActing : actableUsers(me, users, groups)[0]?.systemuserid) : me.systemuserid;
-      set({ me, users, groups, firm, templates, packets, actingForId, ready: true });
+      set({ me, users, groups, firm, policy, templates, packets, actingForId: actingForFor(me, users, groups, policy), ready: true });
       const journal = readJournal(me.systemuserid);
       if (journal && worthKeeping(journal.packet)) set({ pendingRestore: journal });
       const start = contactId ?? readLocal<string | undefined>('folium.lastContact', undefined);
@@ -265,8 +278,10 @@ export const useApp = create<AppState>((set, get) => ({
 
   async reloadDirectory() {
     const s = get().services!;
-    const [me, users, groups, firm] = await Promise.all([s.directory.currentUser(), s.directory.listUsers(), s.directory.listGroups(), s.directory.getFirm()]);
-    set({ me, users, groups, firm });
+    const [me, users, groups, firm, policy] = await Promise.all([s.directory.currentUser(), s.directory.listUsers(), s.directory.listGroups(), s.directory.getFirm(), s.directory.getPolicy()]);
+    // A policy change can take away someone the user was working as.
+    const keep = actableUsers(me, users, groups, policy).some((u) => u.systemuserid === get().actingForId);
+    set({ me, users, groups, firm, policy, ...(keep ? {} : { actingForId: actingForFor(me, users, groups, policy) }) });
   },
 
   setActingFor(userId) {
@@ -448,7 +463,8 @@ export const useApp = create<AppState>((set, get) => ({
     const items = normalizeItems(
       req.documents.map((d) => {
         const t = templates.find((x) => x.id === d.templateId);
-        const base = { id: d.itemId, templateId: d.templateId, copy: d.copy };
+        // A template that no longer exists keeps its name, so Review can say which form it was.
+        const base = { id: d.itemId, templateId: d.templateId, copy: d.copy, ...(t ? {} : { missing: { name: d.name, formNumber: d.formNumber, revision: d.revision } }) };
         if (isActive(d.accountId)) return { ...base, accountId: d.accountId };
         // The saved account was closed or moved: suggest one and have Review ask.
         const accountId = t ? suggestAccount(t, client, taken.get(d.templateId)) : undefined;
@@ -477,6 +493,14 @@ export const useApp = create<AppState>((set, get) => ({
         dirty: false,
       },
     });
+  },
+
+  upgradePacket() {
+    const { packet, templates } = get();
+    const { items, values, report } = upgradePacketItems(packet.items, packet.values, templates);
+    const detail = upgradeAuditDetail(report);
+    if (detail) set({ packet: { ...packet, items, values, dirty: true, formsUpdated: [packet.formsUpdated, detail].filter(Boolean).join('; ') } });
+    return report;
   },
 
   toggleFavorite(id) {
@@ -532,12 +556,15 @@ export function startJournal(): () => void {
 
 // ------------------------------------------------------------------ selectors
 
-/** Users an Assistant can act for: every User in a group they belong to. */
-export function actableUsers(me: UserProfile, users: UserProfile[], groups: UserGroup[]): UserProfile[] {
-  if (me.role !== 'Assistant') return [me];
-  const mine = groups.filter((g) => g.memberIds.includes(me.systemuserid));
-  const ids = new Set(mine.flatMap((g) => g.memberIds));
-  return users.filter((u) => u.role === 'User' && ids.has(u.systemuserid));
+// Moved to the domain with the firm policy; re-exported for existing callers.
+export { actableUsers } from '../domain/policy';
+
+/** Who to work as after sign-in: the last choice if it's still allowed, else an Assistant's first User, else yourself. */
+function actingForFor(me: UserProfile, users: UserProfile[], groups: UserGroup[], policy: FirmPolicy): string | undefined {
+  const can = actableUsers(me, users, groups, policy);
+  const saved = readLocal<string | undefined>('folium.actingFor', undefined);
+  if (can.some((u) => u.systemuserid === saved)) return saved;
+  return me.role === 'Assistant' ? can[0]?.systemuserid : me.systemuserid;
 }
 
 /** The advisor whose details prefill `rep.*` fields and who owns the work. */
@@ -562,21 +589,5 @@ export function visibleTemplates(me: UserProfile | undefined, groups: UserGroup[
   return templates.filter((t) => (!sources.length || sources.includes(t.source)) && (!cats.length || cats.includes(t.category)));
 }
 
-const today = () => new Date().toISOString().slice(0, 10);
-
-/**
- * The revision advisors should use for a form number: the Live revision with the
- * latest effective date that has arrived. A revision published with a future
- * effective date takes over automatically on that day.
- */
-export function latestLive(templates: FormTemplate[], formNumber: string, on = today()) {
-  return templates
-    .filter((t) => t.formNumber === formNumber && t.status === 'Live' && t.effectiveDate <= on)
-    .sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate))[0];
-}
-
-/** One current revision per form number. */
-export function currentTemplates(templates: FormTemplate[], on = today()): FormTemplate[] {
-  const nums = [...new Set(templates.map((t) => t.formNumber))];
-  return nums.map((n) => latestLive(templates, n, on)).filter((t): t is FormTemplate => !!t);
-}
+// Moved to the domain so domain code doesn't import the store; re-exported for existing callers.
+export { currentTemplates, latestLive } from '../domain/revisions';

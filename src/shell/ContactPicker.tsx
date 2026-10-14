@@ -66,7 +66,7 @@ export function ContactPicker({ onClose }: { onClose: () => void }) {
                   <div className="t-headline">{c.fullname}</div>
                   <div className="t-footnote c3 ellipsis">
                     <span className="mono">{c.ev_clientid}</span> · {[c.address1_city, c.address1_stateorprovince].filter(Boolean).join(', ')}
-                    {me?.role === 'Assistant' && c.ownerid === actingForId ? ' · in your advisor’s book' : ''}
+                    {actingForId !== me?.systemuserid && c.ownerid === actingForId ? (me?.role === 'Assistant' ? ' · in your advisor’s book' : ' · in your colleague’s book') : ''}
                   </div>
                 </div>
                 {c.contactid === current && <Icon name="check" size={18} className="c-accent" />}

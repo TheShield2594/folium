@@ -1,6 +1,7 @@
 import { getContext } from '@microsoft/power-apps/app';
 import { getClient, type DataClient } from '@microsoft/power-apps/data';
-import type { Account, Connection, Contact, FirmProfile, FormTemplate, SavedPacket, SignatureRequest, TemplateMapping, UserGroup, UserProfile } from '../../domain/types';
+import type { Account, Connection, Contact, FirmPolicy, FirmProfile, FormTemplate, SavedPacket, SignatureRequest, TemplateMapping, UserGroup, UserProfile } from '../../domain/types';
+import { withPolicyDefaults } from '../../domain/policy';
 import { mapDocuSignStatus } from '../../domain/requests';
 import { buildEnvelopeDefinition, ROLE_SEPARATOR } from '../docusign/tabs';
 import { classifyError, FoliumError } from '../errors';
@@ -42,6 +43,24 @@ export function createPowerServices(): Services {
   async function loadProfiles(): Promise<{ row: ProfileRow; profile: UserProfile }[]> {
     const rows = unwrap(await client.retrieveMultipleRecordsAsync<ProfileRow>(DATAVERSE.profile, {}), 'Load users');
     return rows.map((row) => ({ row, profile: payloadRow<UserProfile>(row) }));
+  }
+
+  // `ev_foliumsetting` holds one row per kind of setting, named by `ev_name`: "Firm"
+  // (the firm profile) and "Policy" (firm-wide rules).
+  type SettingRow = { ev_foliumsettingid: string; ev_payload?: string };
+  async function settingRow(name: string, what: string): Promise<SettingRow | undefined> {
+    const rows = unwrap(await client.retrieveMultipleRecordsAsync<SettingRow>(DATAVERSE.settings, { filter: `ev_name eq '${name}'`, top: 1 }), what);
+    return rows[0];
+  }
+  async function readSetting<T>(name: string, what: string): Promise<T | undefined> {
+    const row = await settingRow(name, what);
+    return row ? payloadRow<T>(row) : undefined;
+  }
+  async function writeSetting(name: string, value: unknown, what: string) {
+    const existing = await settingRow(name, what);
+    const row = { ev_name: name, ev_payload: JSON.stringify(value) };
+    if (existing) unwrap(await client.updateRecordAsync(DATAVERSE.settings, existing.ev_foliumsettingid, row), what);
+    else unwrap(await client.createRecordAsync(DATAVERSE.settings, row), what);
   }
 
   const directory: DirectoryService = {
@@ -97,15 +116,18 @@ export function createPowerServices(): Services {
       unwrap(await client.deleteRecordAsync(DATAVERSE.group, id), 'Delete group');
     },
     async getFirm() {
-      const rows = unwrap(await client.retrieveMultipleRecordsAsync<{ ev_payload: string }>(DATAVERSE.settings, { top: 1 }), 'Load firm');
-      return payloadRow<FirmProfile>(rows[0] ?? {});
+      return (await readSetting<FirmProfile>('Firm', 'Load firm')) ?? ({} as FirmProfile);
     },
     async saveFirm(f) {
-      const rows = unwrap(await client.retrieveMultipleRecordsAsync<{ ev_foliumsettingid: string }>(DATAVERSE.settings, { top: 1 }), 'Load firm');
-      const row = { ev_name: 'Firm', ev_payload: JSON.stringify(f) };
-      if (rows[0]) unwrap(await client.updateRecordAsync(DATAVERSE.settings, rows[0].ev_foliumsettingid, row), 'Save firm');
-      else unwrap(await client.createRecordAsync(DATAVERSE.settings, row), 'Create firm');
+      await writeSetting('Firm', f, 'Save firm');
       return f;
+    },
+    async getPolicy() {
+      return withPolicyDefaults(await readSetting<Partial<FirmPolicy>>('Policy', 'Load settings'));
+    },
+    async savePolicy(p) {
+      await writeSetting('Policy', p, 'Save settings');
+      return p;
     },
   };
 
@@ -269,6 +291,18 @@ export function createPowerServices(): Services {
       const created = await connector<{ Id: string }>(CONNECTORS.sharePoint, 'CreateFile', { dataset: SHAREPOINT.crmSite, folderPath, name: fileName, body: bytes }, `Save ${fileName}`);
       return { itemId: created.Id, url: `${folder}/${encodeURIComponent(fileName)}` };
     },
+    async removeFile(url) {
+      const path = decodeURIComponent(new URL(url).pathname.replace(new URL(SHAREPOINT.crmSite).pathname, ''));
+      const meta = await client.executeAsync<Record<string, unknown>, { Id: string }>({ connectorOperation: { tableName: CONNECTORS.sharePoint, operationName: 'GetFileMetadataByPath', parameters: { dataset: SHAREPOINT.crmSite, path } } });
+      if (!meta.success) {
+        // Already gone (deleted by hand or by the retention flow): nothing to do. Anything
+        // else (throttling, auth) throws, so the caller keeps the file on record.
+        const err = meta.error as { status?: unknown; message?: string } | undefined;
+        if (err?.status === 404 || err?.status === '404' || /\b404\b|not found/i.test(err?.message ?? '')) return;
+        unwrap(meta, 'Find draft PDF');
+      }
+      await connector(CONNECTORS.sharePoint, 'DeleteFile', { dataset: SHAREPOINT.crmSite, id: meta.data.Id }, 'Delete draft PDF');
+    },
     async getFile(itemId) {
       const content = await connector<string | Uint8Array>(CONNECTORS.sharePoint, 'GetFileContent', { dataset: SHAREPOINT.crmSite, id: itemId }, 'Download attachment');
       return typeof content === 'string' ? Uint8Array.from(atob(content), (ch) => ch.charCodeAt(0)) : content;
@@ -277,7 +311,8 @@ export function createPowerServices(): Services {
 
   // ---------------------------------------------------------------- Requests & packets
   // Deletes are soft: the row is deactivated (statecode 1) and lists read active rows
-  // only, so Undo reactivates the same row. Hard deletion comes with retention (#19).
+  // only, so Undo reactivates the same row. The retention flow (DEPLOY.md) deletes expired
+  // drafts for good.
   const ACTIVE = 'statecode eq 0';
   const deactivate = (table: string, id: string, what: string) => client.updateRecordAsync(table, id, { statecode: 1, statuscode: 2 }).then((r) => unwrap(r, what));
   const reactivate = (table: string, id: string, what: string) => client.updateRecordAsync(table, id, { statecode: 0, statuscode: 1 }).then((r) => unwrap(r, what));

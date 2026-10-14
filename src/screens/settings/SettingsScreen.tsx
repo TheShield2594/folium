@@ -13,6 +13,7 @@ export function SettingsScreen() {
   const me = useApp((s) => s.me);
   const users = useApp((s) => s.users);
   const groups = useApp((s) => s.groups);
+  const firm = useApp((s) => s.firm);
   const theme = useApp((s) => s.theme);
   const setTheme = useApp((s) => s.setTheme);
   const reloadDirectory = useApp((s) => s.reloadDirectory);
@@ -107,6 +108,17 @@ export function SettingsScreen() {
                     </option>
                   ))}
                   <option value={0}>Never</option>
+                </Select>
+              </Field>
+              <Field label="Signers sign" htmlFor="u-order" help="You can still change it on each envelope.">
+                <Select
+                  id="u-order"
+                  value={p.defaultAnyOrder === undefined ? 'firm' : p.defaultAnyOrder ? 'any' : 'order'}
+                  onChange={(e) => set({ defaultAnyOrder: e.target.value === 'firm' ? undefined : e.target.value === 'any' })}
+                >
+                  <option value="firm">As the firm sets it ({firm?.sending?.defaultAnyOrder ? 'any order' : 'in order'})</option>
+                  <option value="order">In order</option>
+                  <option value="any">In any order</option>
                 </Select>
               </Field>
               <div className="span-2">
