@@ -1,4 +1,6 @@
 import type { Services } from '../types';
+import { createUsageQueue, type UsageQueue } from '../usage';
+import { demoUsageWriter } from './index';
 
 // Simulated failures for trying the recovery paths by hand, in demo mode only:
 //
@@ -67,7 +69,7 @@ export function injectFaults(services: Services, plan: FaultPlan, now: () => num
     return out as unknown as Services;
   }
 
-  for (const area of ['directory', 'crm', 'templates', 'drafts', 'requests', 'packets', 'signing'] as const) {
+  for (const area of ['directory', 'crm', 'templates', 'drafts', 'requests', 'packets', 'signing', 'feedback'] as const) {
     const target = services[area] as unknown as Record<string, unknown>;
     const wrapped: Record<string, unknown> = {};
     for (const [name, fn] of Object.entries(target)) {
@@ -84,5 +86,14 @@ export function injectFaults(services: Services, plan: FaultPlan, now: () => num
     }
     out[area] = wrapped;
   }
+  // Usage writes fail (or hang) too, to show they never hold up the advisor.
+  (services.usage as Partial<UsageQueue>).dispose?.();
+  out.usage = createUsageQueue(async (events) => {
+    if (active()) {
+      if (plan.mode === 'slow') await new Promise(() => undefined);
+      throw failureFor(plan.mode);
+    }
+    return demoUsageWriter(events);
+  });
   return out as unknown as Services;
 }

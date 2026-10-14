@@ -134,6 +134,18 @@ export function AdminFirm() {
               onChange={(v) => setSending({ defaultAnyOrder: v || undefined })}
             />
           </div>
+
+          <section className="card card-pad stack-4" aria-labelledby="rep-h">
+            <div>
+              <h2 id="rep-h" className="t-title3">Reports</h2>
+              <p className="t-footnote c3" style={{ marginTop: 4 }}>
+                Form usage, people, e-signature and quality reports live in Power BI (see docs/REPORTS.md). With a link here, Administrators and people given the reporting role in Users &amp; groups see Reports in the sidebar.
+              </p>
+            </div>
+            <Field label="Power BI report link" htmlFor="f-reports" optional help="The report’s URL in the Power BI service. Blank hides the Reports link.">
+              <TextInput id="f-reports" type="url" value={f.reportsUrl ?? ''} placeholder="https://app.powerbi.com/groups/…/reports/…" onChange={(e) => setF({ ...f, reportsUrl: e.target.value.trim() || undefined })} />
+            </Field>
+          </section>
         </div>
       </div>
     </>

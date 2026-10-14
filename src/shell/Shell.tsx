@@ -1,12 +1,14 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { FoliumMark } from '../brand/FoliumMark';
+import { canOpenReports } from '../domain/reports';
 import { useServices } from '../services';
 import { actableUsers, useActingFor, useApp } from '../state/store';
 import { Avatar, IconButton, Select } from '../ui/controls';
 import { Icon, type IconName } from '../ui/Icon';
 import { CommandPalette } from './CommandPalette';
 import { ContactPicker } from './ContactPicker';
+import { FeedbackNotices } from '../screens/common/MyFeedback';
 import { ConnectionBanner, IdleAutoSave, RestoreBanner } from './Recovery';
 
 function NavItem({ to, icon, children, count, alert, end }: { to: string; icon: IconName; children: ReactNode; count?: number; alert?: boolean; end?: boolean }) {
@@ -20,8 +22,21 @@ function NavItem({ to, icon, children, count, alert, end }: { to: string; icon: 
   );
 }
 
+/** A sidebar link that opens outside Folium (the Power BI report). */
+function ExternalNavItem({ href, icon, children }: { href: string; icon: IconName; children: ReactNode }) {
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="nav-item">
+      <Icon name={icon} size={18} />
+      <span className="grow ellipsis">{children}</span>
+      <Icon name="arrowUpRight" size={14} className="c3" />
+    </a>
+  );
+}
+
 export function Sidebar() {
   const me = useApp((s) => s.me);
+  const firm = useApp((s) => s.firm);
+  const reports = canOpenReports(me, firm);
   const users = useApp((s) => s.users);
   const groups = useApp((s) => s.groups);
   const client = useApp((s) => s.client);
@@ -121,12 +136,29 @@ export function Sidebar() {
             <NavItem to="/admin/people" icon="people">
               Users & groups
             </NavItem>
+            <NavItem to="/admin/feedback" icon="flag">
+              Form feedback
+            </NavItem>
             <NavItem to="/admin/firm" icon="building">
               Firm profile
             </NavItem>
             <NavItem to="/admin/settings" icon="lock">
               Settings
             </NavItem>
+            {reports && (
+              <ExternalNavItem href={firm!.reportsUrl!} icon="chart">
+                Reports
+              </ExternalNavItem>
+            )}
+          </div>
+        )}
+
+        {me?.role !== 'Admin' && reports && (
+          <div className="sidebar-section">
+            <h2>Reporting</h2>
+            <ExternalNavItem href={firm!.reportsUrl!} icon="chart">
+              Reports
+            </ExternalNavItem>
           </div>
         )}
       </div>
@@ -198,6 +230,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <ConnectionBanner />
         <RestoreBanner />
         <IdleAutoSave />
+        <FeedbackNotices />
         {children}
       </div>
       {paletteOpen && <CommandPalette onClose={() => setPalette(false)} />}

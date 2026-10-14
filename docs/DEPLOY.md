@@ -20,7 +20,7 @@ Commit `power.config.json`. Set `appSettings.showHeader` to `false` so Folium's 
 
 ## 2. Create the tables
 
-Create the tables in [DATAVERSE.md](DATAVERSE.md) in a Folium solution. Add a Folium security role (read on contact, financial account, connection, document location; full access to the `ev_` Folium tables at the levels described in the security issue).
+Create the tables in [DATAVERSE.md](DATAVERSE.md) in a Folium solution, including the alternate key on `ev_usageevent.ev_dedupekey`. Add a Folium security role (read on contact, financial account, connection, document location; full access to the `ev_` Folium tables at the levels described in the security issue, except `ev_usageevent`, which is Create only, and `ev_formrequest`, which is Create plus Read on their own rows). Add a **Folium Reporting** role with organisation-wide Read on the tables the report uses ([REPORTS.md](REPORTS.md)) for managers, and give it to Admins too.
 
 ## 3. Add data sources
 
@@ -28,7 +28,7 @@ Create the tables in [DATAVERSE.md](DATAVERSE.md) in a Folium solution. Add a Fo
 # Dataverse tables
 for t in contact ev_financialaccount connection systemuser sharepointdocumentlocation \
          ev_formtemplate ev_signaturerequest ev_formpacket ev_foliumprofile ev_foliumgroup \
-         ev_foliumsetting ev_formrequest; do
+         ev_foliumsetting ev_formrequest ev_usageevent; do
   pac code add-data-source -a dataverse -t $t
 done
 
@@ -97,6 +97,8 @@ Create a Power Automate flow:
 2. Find the `ev_signaturerequest` row by `ev_envelopeid`.
 3. Update `ev_status` (`sent`→Sent, `delivered`→Viewed, `completed`→Signed, `declined`→Declined, `voided`→Voided, or **Expired** when `voidedReason` mentions expiry), `ev_signedon`, `ev_expireson` (from `expireDateTime`), and append to the audit in `ev_payload` (set `status`, `expiresOn` and `voidedReason` there too). Write the option values from `SIGNATURE_STATUS_OPTIONS` in `config.ts`, the same ones `mapDocuSignStatus` in `src/domain/requests.ts` implies. Confirm DocuSign's expiry wording in the sandbox before relying on it.
 
+4. **Usage events.** For a status change to Viewed, Signed, Declined, Voided or Expired, add one `ev_usageevent` row per document in the payload's `documents`, in order, with an **upsert on the alternate key** (*Upsert a row* / `PATCH ev_usageevents(ev_dedupekey='…')`): `ev_dedupekey` = `<request id>|request.<viewed|signed|declined|voided|expired>|<templateId>|<position from 0>`, `ev_eventtype` from `USAGE_EVENT_OPTIONS`, `ev_occurredon` from DocuSign's time for that change, `ev_user` the payload's `preparedById` (else `ownerId`), `ev_actingfor` the `ownerId` when it differs, and the template, form number, revision, contact and request columns as in DATAVERSE.md. Folium's **Check status** builds the same keys (`dedupeKey` in `src/domain/usage.ts`), so whichever reports first wins and the other changes nothing.
+
 Optional: a scheduled flow that emails (or messages in Teams) the owning advisor when an open request's `ev_expireson` is 7 days away, with the client's name and a link.
 
 Add the flow's URL as a Connect configuration in DocuSign Admin. Until it exists, **Check status** on each request polls DocuSign, which is the brief's acceptable v1 fallback.
@@ -121,6 +123,21 @@ Deleting a draft in Folium already removes its DRAFT PDFs (`DraftStore.removeFil
 ## 5b. Out-of-date drafts (optional notification)
 
 Folium marks drafts whose forms have a newer Live revision ("1 of 3 forms updated", "Out of date") and offers **Update to current forms** when one is opened. To tell advisors sooner, add a flow triggered when an `ev_formtemplate` row's `ev_status` changes to Live: list Drafted `ev_signaturerequest` rows whose `ev_payload` contains the superseded template's ID (the new row's `supersedesId`), group them by owner, and send each a Teams or Outlook note: "2 of your drafts use a form that changed." No app change is needed.
+
+## 5c. Usage records (retention)
+
+Folium records form use and e-signature steps in `ev_usageevent` for the reports ([REPORTS.md](REPORTS.md)). Rows name the advisor, form and request; they hold no client details or form values. Writing them never holds anything up: Folium queues them in memory and writes every 10 seconds, at 25 rows or when the page closes; a failed write is tried once more and then dropped, and nothing is shown to the advisor.
+
+Create a Dataverse **bulk-delete job** (Power Platform admin center › Environment › Settings › Data management › Bulk deletion), recurring weekly: `ev_usageevent` where `ev_occurredon` is older than the firm's `usageRetentionMonths` (Administration › Settings › Usage records, 36 months by default). The job's period is set by hand: change it when the setting changes. Ask Compliance for the period, and whether the contact lookup is needed or the request lookup is enough.
+
+## 5d. Form feedback notifications (optional)
+
+Requests and problem reports land in Administration › Form feedback without any flow. Two optional Power Automate flows close the loop:
+
+1. **Tell Marketing.** Trigger: *When a row is added* to `ev_formrequest`. Post to the Marketing forms channel in Teams (or email the shared mailbox): kind (`ev_kind`), form (`ev_formnumber`, `ev_revision`, `ev_name`), category, the note, who sent it (`ev_requester`), and a link to `…/#/admin/feedback?form=<form number>`.
+2. **Tell the advisor.** Trigger: *When a row is modified* on `ev_formrequest`, filtered to `ev_status` changing to Fixed in revision or Won't fix (`FEEDBACK_STATUS_OPTIONS`). Email or Teams-message the `ev_requester` with the form, the new status and the reply (`resolution` in `ev_payload`).
+
+Folium also tells the advisor in the app: the next time they open Folium after a report is closed, and under Settings › Forms you reported.
 
 ## 6. Put it on the Contact form
 
@@ -147,7 +164,7 @@ npm run build
 pac code push
 ```
 
-Share the app with the Folium security group: membership of that Entra ID group is what gives someone Folium, and removing them (or disabling their account when they leave) ends it the same day. There are no seats or expiry dates to manage. Admins then: set the Firm profile and Settings (sharing, downloads, retention, who may edit their own rep details, when people count as dormant), create groups, give each person a role, and map the first templates (Template library › New from Marketing). To load people from Laser App's user export, save it as CSV with the columns `email, role, groups, repCode, branch` and use Users & groups › Import; it's previewed against the directory before anything is saved.
+Share the app with the Folium security group: membership of that Entra ID group is what gives someone Folium, and removing them (or disabling their account when they leave) ends it the same day. There are no seats or expiry dates to manage. Admins then: set the Firm profile (including the Power BI report link, once [REPORTS.md](REPORTS.md) is published) and Settings (sharing, downloads, retention, usage records, who may edit their own rep details, when people count as dormant), create groups, give each person a role, and map the first templates (Template library › New from Marketing). To load people from Laser App's user export, save it as CSV with the columns `email, role, groups, repCode, branch` and use Users & groups › Import; it's previewed against the directory before anything is saved.
 
 ## Fonts
 

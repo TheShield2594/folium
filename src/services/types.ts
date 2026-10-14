@@ -17,6 +17,8 @@ import type {
 } from '../domain/types';
 import type { DirectoryUser } from '../domain/advisor';
 import type { DocuSignSetup } from '../domain/docusign';
+import type { FormFeedback } from '../domain/feedback';
+import type { UsageEvent } from '../domain/usage';
 
 /** Dataverse reads for the client the advisor is working on. */
 export interface CrmService {
@@ -41,8 +43,31 @@ export interface TemplateLibrary {
   saveDetails(templateId: string, details: TemplateDetails): Promise<FormTemplate>;
   /** Create a template row for an incoming file (optionally as a new revision of an existing form). */
   register(file: IncomingFile, init: Partial<FormTemplate>): Promise<FormTemplate>;
-  /** Ask Marketing for a form that isn't in the library yet. */
-  requestForm(req: { name: string; issuer?: string; note?: string; requestedBy: string }): Promise<void>;
+}
+
+/**
+ * `ev_formrequest` rows: requests for forms that aren't in the library ("Ask Marketing
+ * to add it") and problem reports on forms that are. Build rows with `formRequest` and
+ * `problemReport` (domain/feedback), which keep field values out.
+ */
+export interface FeedbackStore {
+  submit(f: Omit<FormFeedback, 'id'>): Promise<FormFeedback>;
+  /** Everything, for Administration › Form feedback (Admins and the reporting role). */
+  list(): Promise<FormFeedback[]>;
+  /** What this person sent, so they see when it's fixed. */
+  listMine(userId: string): Promise<FormFeedback[]>;
+  /** Status, resolution note and fixing revision. */
+  update(f: FormFeedback): Promise<FormFeedback>;
+}
+
+/**
+ * `ev_usageevent` rows (see domain/usage). `track` queues and returns at once: it never
+ * throws, never waits on Dataverse and never shows anything to the advisor.
+ */
+export interface UsageLog {
+  track(events: UsageEvent[]): void;
+  /** Write what's waiting now (the queue also does this on its own). */
+  flush(): Promise<void>;
 }
 
 export type TemplateDetails = Pick<FormTemplate, 'states' | 'variantGroup'>;
@@ -201,6 +226,9 @@ export interface Services {
   requests: RequestStore;
   packets: PacketStore;
   signing: SigningProvider;
+  feedback: FeedbackStore;
+  /** Not guarded like the others: a failure here is dropped, not reported. */
+  usage: UsageLog;
   /** Bytes of files attached in this session. Saved drafts also store them in SharePoint (`Attachment.storedAt`). */
   attachments: Map<string, { meta: Attachment; bytes: Uint8Array }>;
 }

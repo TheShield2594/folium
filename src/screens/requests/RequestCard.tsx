@@ -6,7 +6,7 @@ import { roleLabel } from '../../domain/signers';
 import type { SignatureRequest } from '../../domain/types';
 import { useServices } from '../../services';
 import { audit } from '../../state/actions';
-import { useApp } from '../../state/store';
+import { requestForms, track, trackStatus, useApp } from '../../state/store';
 import { Badge, Button, Field, IconButton, Menu, Select, Sheet, TextArea, TextInput, downloadBytes, toast } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
 import { FreshnessBadge } from '../common/UpgradeSheet';
@@ -117,7 +117,11 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
   const refresh = (quiet?: boolean) =>
     withBusy('status', async () => {
       const { next, changed, message } = applyEnvelopeStatus(r, await services.signing.getStatus(r.envelopeId!));
-      if (changed) return save(next, message);
+      if (changed) {
+        await save(next, message);
+        trackStatus(r, next);
+        return;
+      }
       if (next.expiresOn !== r.expiresOn) await save(next);
       if (!quiet) toast.ok(message);
     });
@@ -355,6 +359,7 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
             withBusy('void', async () => {
               await services.signing.void(r.envelopeId!, reason);
               await save({ ...r, status: 'Voided', voidedReason: reason, audit: [...r.audit, audit(me, 'Voided', reason)] }, 'Envelope voided');
+              track('request.voided', requestForms(r, templates), { requestId: r.id });
               setSheet(undefined);
             })
           }

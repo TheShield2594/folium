@@ -11,7 +11,7 @@ import { sourceKind } from '../../domain/paths';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
 import { audit, packetAsOnePdf, saveDraft } from '../../state/actions';
-import { useActingFor, useApp } from '../../state/store';
+import { track, useActingFor, useApp } from '../../state/store';
 import { Button, Empty, IconButton, Menu, Segmented, Select, downloadBytes, openPdf, toast } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
 import { BlockersSheet } from '../common/BlockersSheet';
@@ -25,6 +25,7 @@ import { missingLabel, usePacketView } from '../common/usePacket';
 import { fmtDay } from '../requests/RequestCard';
 import { AttachmentsCard } from './AttachmentsCard';
 import { FieldEditor, FieldInput } from './FieldEditor';
+import { ReportProblemSheet } from './ReportProblemSheet';
 
 export function ReviewScreen() {
   const client = useApp((s) => s.client);
@@ -59,6 +60,8 @@ export function ReviewScreen() {
   const [busy, setBusy] = useState<string>();
   const [sharing, setSharing] = useState(false);
   const [naming, setNaming] = useState(false);
+  /** "Report a problem": the packet item and the PDF fields to start with. */
+  const [reporting, setReporting] = useState<{ itemId: string; fieldKeys: string[] }>();
   /** The changes "Update" would make, shown before they're made. */
   const [upgrade, setUpgrade] = useState<UpgradeReport>();
   // With retention set to 0 the firm keeps no drafts: no Save draft, no Share.
@@ -172,6 +175,7 @@ export function ReviewScreen() {
         owner,
         existing,
         writePdfs: true,
+        trackUsage: true,
         retentionDays: retentionDays(policy),
         // Keep the row's identity even if writing the PDFs fails, so a retry updates it.
         onSaved: (row) => setPacket({ requestId: row.id, title: row.title, attachments: row.attachments, snapshot: row.prefillSnapshot, formsUpdated: undefined, dirty: false }),
@@ -199,6 +203,10 @@ export function ReviewScreen() {
       if (mode === 'print') openPdf(bytes);
       else downloadBytes(bytes, name);
       markUsed(view.templates.map((t) => t.id));
+      track(mode === 'fillable' ? 'pdf.fillable' : mode === 'flatten' ? 'pdf.flattened' : 'pdf.print', view.fills.map((f) => f.template), {
+        requestId: packet.requestId,
+        detail: { mode: mode === 'fillable' && gate.draftMark ? 'fillable-draft' : mode },
+      });
       if (gate.draftMark) recordIncompleteDownload(gate.blockers);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not build the PDF');
@@ -283,15 +291,14 @@ export function ReviewScreen() {
             items={downloads}
           />
         )}
-        {(canSaveDrafts || canShare) && (
-          <Menu
-            trigger={(p) => <IconButton icon="ellipsis" label="More" {...p} />}
-            items={[
-              ...(canSaveDrafts ? [{ label: 'Save draft to SharePoint', icon: 'folder' as const, onSelect: onSaveDraft }] : []),
-              ...(canShare ? [{ label: 'Share with a colleague…', icon: 'share' as const, onSelect: () => setSharing(true) }] : []),
-            ]}
-          />
-        )}
+        <Menu
+          trigger={(p) => <IconButton icon="ellipsis" label="More" {...p} />}
+          items={[
+            ...(canSaveDrafts ? [{ label: 'Save draft to SharePoint', icon: 'folder' as const, onSelect: onSaveDraft }] : []),
+            ...(canShare ? [{ label: 'Share with a colleague…', icon: 'share' as const, onSelect: () => setSharing(true) }] : []),
+            ...(fill ? [{ label: `Report a problem with ${fill.template.formNumber}…`, icon: 'flag' as const, onSelect: () => setReporting({ itemId: fill.itemId, fieldKeys: [] }) }] : []),
+          ]}
+        />
         {canSaveDrafts && (
           <Button variant="gray" icon="folder" busy={busy === 'draft'} onClick={onSaveDraft} className="hide-narrow">
             Save draft
@@ -358,6 +365,7 @@ export function ReviewScreen() {
               onClose={() => (setSelected(undefined), setEditorKey(undefined))}
               usedOn={view.fills.filter((f) => f.fields.some((x) => x.key === selectedField.key)).map(formLabel)}
               choices={choicesFor(selectedField.key)}
+              onReport={() => setReporting({ itemId: selectedField.itemId, fieldKeys: [selectedField.mapping.pdfField] })}
             />
           )}
 
@@ -546,6 +554,20 @@ export function ReviewScreen() {
       </div>
       {sharing && canShare && <ShareSheet onClose={() => setSharing(false)} />}
       {blocked && <BlockersSheet title={blocked.title} blockers={blocked.blockers} fills={view.fills} onJump={(c) => focusKey(c.fieldKey, c.itemId ?? c.templateId)} onClose={() => setBlocked(undefined)} />}
+      {reporting &&
+        (() => {
+          const at = view.fills.find((f) => f.itemId === reporting.itemId);
+          if (!at) return null;
+          return (
+            <ReportProblemSheet
+              template={at.template}
+              fieldKeys={reporting.fieldKeys}
+              otherForms={view.fills.filter((f) => f.itemId !== at.itemId).map((f) => f.template.formNumber)}
+              accountType={at.account?.ev_accounttype}
+              onClose={() => setReporting(undefined)}
+            />
+          );
+        })()}
       {upgrade && (
         <UpgradeSheet
           report={upgrade}

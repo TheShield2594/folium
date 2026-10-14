@@ -8,6 +8,7 @@ import { classifyError, isConsentRequired } from '../../services/errors';
 import { resetDemo, setDemoUser } from '../../services/demo';
 import { Toolbar } from '../../shell/Shell';
 import { useApp, type Theme } from '../../state/store';
+import { MyFormReports } from '../common/MyFeedback';
 import { RepAudit, RepDetails } from '../common/RepDetails';
 import { StatesPicker } from '../common/StatesPicker';
 import { Avatar, Badge, Button, Field, Segmented, Select, TextArea, toast } from '../../ui/controls';
@@ -173,6 +174,7 @@ export function SettingsScreen() {
             </div>
           </section>
 
+          <MyFormReports />
           {services.mode === 'demo' && (
             <section className="card card-pad stack-4" aria-labelledby="demo-h">
               <div className="row-3">

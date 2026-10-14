@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { isOpen, type FormFeedback } from '../../domain/feedback';
 import { prettifyFieldName } from '../../domain/format';
 import { parseIdSource } from '../../domain/idDocuments';
 import { mappingWarnings, prefillForm } from '../../domain/prefill';
@@ -20,6 +21,7 @@ import { describeStates, parseStatesFromTitle } from '../../domain/states';
 import { StatesPicker } from '../common/StatesPicker';
 
 type Tab = 'fields' | 'signers' | 'checks' | 'details' | 'test';
+const fieldRowId = (pdfField: string) => `map-${pdfField.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
 const FORMATS: [FieldFormat | '', string][] = [
   ['', 'Text'],
   ['date', 'Date'],
@@ -59,6 +61,22 @@ export function TemplateEditor() {
   const [limitsFor, setLimitsFor] = useState<string>();
   const [conditionsFor, setConditionsFor] = useState<string>();
   const [optionsFor, setOptionsFor] = useState<string>();
+  /** `?field=` (from Form feedback): open with that field selected. */
+  const [params] = useSearchParams();
+  const focusField = params.get('field') ?? undefined;
+  /** Open problem reports on this revision. */
+  const [problems, setProblems] = useState<FormFeedback[]>([]);
+  useEffect(() => {
+    if (!id) return;
+    let live = true;
+    services.feedback
+      .list()
+      .then((all) => live && setProblems(all.filter((f) => f.kind === 'problem' && f.templateId === id && isOpen(f))))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [id, services]);
 
   // Load the mapping when the editor opens a template, not on every refresh of the
   // template list, so a refresh from elsewhere never throws away unsaved edits.
@@ -67,6 +85,16 @@ export function TemplateEditor() {
     const t = useApp.getState().templates.find((x) => x.id === templateId);
     if (t) setMapping(structuredClone(t.mapping));
   }, [templateId]);
+
+  // Land on the reported field: Fields tab, every field shown, the row selected and in view.
+  const mappingReady = !!mapping;
+  useEffect(() => {
+    if (!focusField || !mappingReady) return;
+    setTab('fields');
+    setFilter('all');
+    setSel(focusField);
+    requestAnimationFrame(() => document.getElementById(fieldRowId(focusField))?.scrollIntoView({ block: 'center' }));
+  }, [focusField, mappingReady]);
 
   // Diff the PDF's actual fields against the previous revision's mapping.
   const diff = useMemo(() => {
@@ -161,6 +189,11 @@ export function TemplateEditor() {
     <>
       <Toolbar title={`${template.formNumber} · Rev ${template.revision}`} subtitle={template.name} back={{ label: 'Library', to: '/admin/templates' }}>
         <Badge tone={STATUS_TONE[template.status]}>{template.status}</Badge>
+        {problems.length > 0 && (
+          <Button variant="tinted" size="sm" icon="flag" onClick={() => navigate(`/admin/feedback?form=${encodeURIComponent(template.formNumber)}`)}>
+            {problems.length} open {problems.length === 1 ? 'problem' : 'problems'}
+          </Button>
+        )}
         <Button variant="gray" disabled={!dirty} busy={busy === 'save'} onClick={() => save()}>
           Save
         </Button>
@@ -283,12 +316,13 @@ export function TemplateEditor() {
                           const ch = changeOf(m.pdfField);
                           const custom = !KNOWN_SOURCES.has(m.source);
                           return (
-                            <tr key={m.pdfField} className={sel === m.pdfField ? 'sel' : undefined} onClick={() => setSel(m.pdfField)}>
+                            <tr key={m.pdfField} id={fieldRowId(m.pdfField)} className={sel === m.pdfField ? 'sel' : undefined} onClick={() => setSel(m.pdfField)}>
                               <td>
                                 <div className="mono t-footnote">{m.pdfField}</div>
                                 {ch && ch.change !== 'unchanged' && (
                                   <Badge tone={CHANGE_TONE[ch.change]}>{ch.change === 'renamed' ? `renamed from ${ch.previousName}` : ch.change}</Badge>
                                 )}
+                                {problems.some((p) => p.fieldKeys?.includes(m.pdfField)) && <Badge tone="danger">reported</Badge>}
                               </td>
                               <td>
                                 <TextInput aria-label={`Label for ${m.pdfField}`} value={m.label ?? ''} placeholder={prettifyFieldName(m.pdfField)} onChange={(e) => patchField(m.pdfField, { label: e.target.value || undefined })} />

@@ -7,6 +7,7 @@ import { withDocuSignDefaults, type DocuSignSetup } from '../domain/docusign';
 import { carryVariantValues, copyScope, migrateAccountValues, seedCopyValues, type PersonPick } from '../domain/prefill';
 import { currentTemplates, latestLive } from '../domain/revisions';
 import { normalizeState, pickVariant } from '../domain/states';
+import { statusEvents, usageEvents, type UsageEventType } from '../domain/usage';
 import type {
   Attachment,
   ClientRecord,
@@ -384,6 +385,7 @@ export const useApp = create<AppState>((set, get) => ({
     if (sameForm && !opts?.duplicate) return 'present';
     if (packet.items.length >= PACKET_LIMIT) return 'full';
     const id = newItemId();
+    if (t) track('form.added', [t]);
     if (!copies.length) {
       set({ packet: { ...packet, dirty: true, items: [...packet.items, { id, templateId, accountId: accountId ?? (t ? suggestAccount(t, client) : undefined) }] } });
       return 'added';
@@ -539,6 +541,56 @@ export const useApp = create<AppState>((set, get) => ({
     set({ paletteOpen: open });
   },
 }));
+
+// ------------------------------------------------------------------ usage
+
+type FormRef = Pick<FormTemplate, 'id' | 'formNumber' | 'revision' | 'source' | 'issuer' | 'category'>;
+
+/**
+ * Record that something happened to these forms (`ev_usageevent`, see domain/usage).
+ * Queued and written in the background: it never throws and never waits.
+ */
+export function track(type: UsageEventType, forms: FormRef[], extra: { requestId?: string; detail?: Record<string, unknown> } = {}): void {
+  try {
+    const s = useApp.getState();
+    if (!s.services || !s.me) return;
+    const actingFor = s.users.find((u) => u.systemuserid === s.actingForId) ?? s.me;
+    s.services.usage.track(usageEvents(type, { user: s.me, actingFor, groups: s.groups, contactId: s.contactId, requestId: extra.requestId }, forms, { detail: extra.detail }));
+  } catch {
+    /* never in the way */
+  }
+}
+
+/** A request's forms as templates, falling back to what the request saved for a template that's gone. */
+export function requestForms(req: Pick<SignatureRequest, 'documents'>, templates: FormTemplate[]): FormRef[] {
+  return req.documents.map((d) => {
+    const t = templates.find((x) => x.id === d.templateId);
+    return t ?? { id: d.templateId, formNumber: d.formNumber, revision: d.revision, source: 'Everence', category: 'Account maintenance' as const };
+  });
+}
+
+/**
+ * Record what DocuSign reported for a request (viewed, signed, declined, voided,
+ * expired). Rows are the preparer's, for the owner, with DocuSign's times and the
+ * request's dedupe keys, so Check status and the Connect flow (#5) never count one twice.
+ */
+export function trackStatus(prev: SignatureRequest, next: SignatureRequest): void {
+  try {
+    const s = useApp.getState();
+    if (!s.services) return;
+    const events = statusEvents(prev, next);
+    if (!events.length) return;
+    const forms = requestForms(next, s.templates);
+    const user = s.users.find((u) => u.systemuserid === next.preparedById) ?? s.users.find((u) => u.systemuserid === next.ownerId) ?? s.me;
+    if (!user) return;
+    const owner = s.users.find((u) => u.systemuserid === next.ownerId);
+    for (const e of events) {
+      s.services.usage.track(usageEvents(e.type, { user, actingFor: owner, groups: s.groups, contactId: next.contactId, requestId: next.id, at: e.at }, forms));
+    }
+  } catch {
+    /* never in the way */
+  }
+}
 
 // ------------------------------------------------------------------ journal
 

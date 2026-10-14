@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { DEFAULT_ATTACHMENT_LIMITS } from '../../domain/checks';
 import { consentUrl, DEFAULT_REDIRECT_URL, docuSignProblems, DOCUSIGN_ENVIRONMENTS, withDocuSignDefaults, type DocuSignEnvironment, type DocuSignSetup } from '../../domain/docusign';
+import { DEFAULT_USAGE_RETENTION_MONTHS, usageRetentionMonths } from '../../domain/policy';
 import { RETENTION_OPTIONS, retentionDays } from '../../domain/requests';
 import { dormantDays } from '../../domain/users';
 import type { FirmPolicy, PdfDownloadPolicy, RepDataVisibility, SharingPolicy } from '../../domain/types';
@@ -142,6 +143,22 @@ export function AdminSettings() {
                 {RETENTION_OPTIONS.map((d) => (
                   <option key={d} value={d}>
                     {d === 0 ? 'Don’t keep drafts' : `${d} days${d === 90 ? ' (default)' : ''}`}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </section>
+
+          <section className="card card-pad stack-3" aria-labelledby="usage-h">
+            <h2 id="usage-h" className="t-title3">Usage records</h2>
+            <p className="t-footnote c3">
+              Folium records which forms are used and how e-signature goes, for the usage reports. The records name the advisor, form and request, never client details or form values. A bulk-delete job in Dataverse removes them after this long (DEPLOY.md).
+            </p>
+            <Field label="Keep usage records for" htmlFor="p-usage">
+              <Select id="p-usage" value={String(usageRetentionMonths(p))} onChange={(e) => set({ usageRetentionMonths: Number(e.target.value) })}>
+                {[12, 24, 36, 60, 84].map((m) => (
+                  <option key={m} value={m}>
+                    {m} months{m === DEFAULT_USAGE_RETENTION_MONTHS ? ' (default)' : ''}
                   </option>
                 ))}
               </Select>

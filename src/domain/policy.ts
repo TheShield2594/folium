@@ -18,8 +18,13 @@ export function withPolicyDefaults(p: Partial<FirmPolicy> | undefined): FirmPoli
     repDataVisibility: pick(p?.repDataVisibility, ['assistants', 'groupMembers'], DEFAULT_POLICY.repDataVisibility),
     pdfDownload: pick(p?.pdfDownload, ['all', 'signedOnly', 'none'], DEFAULT_POLICY.pdfDownload),
     dormantAfterDays: p?.dormantAfterDays && p.dormantAfterDays > 0 ? p.dormantAfterDays : undefined,
+    usageRetentionMonths: p?.usageRetentionMonths && p.usageRetentionMonths > 0 ? p.usageRetentionMonths : undefined,
   };
 }
+
+/** How long usage events are kept: 36 months unless the firm says otherwise (to confirm with Compliance). */
+export const DEFAULT_USAGE_RETENTION_MONTHS = 36;
+export const usageRetentionMonths = (p: Pick<FirmPolicy, 'usageRetentionMonths'> | undefined) => p?.usageRetentionMonths ?? DEFAULT_USAGE_RETENTION_MONTHS;
 
 const groupsOf = (userId: string, groups: UserGroup[]) => groups.filter((g) => g.memberIds.includes(userId));
 

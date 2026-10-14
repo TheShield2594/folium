@@ -8,11 +8,12 @@ import { consentUrl, methodSetUp } from '../../domain/docusign';
 import { expiresOnFrom, retentionDays } from '../../domain/requests';
 import { accessCodeWarnings, assignSigners, envelopeSigners, generateAccessCode, recordedSigners, roleLabel, rolesForPacket, validateSigners } from '../../domain/signers';
 import type { SignatureRequest, SignerAssignment, VerificationMethod } from '../../domain/types';
+import { stableCheckId } from '../../domain/usage';
 import { useServices } from '../../services';
 import { classifyError, isConsentRequired } from '../../services/errors';
 import { Toolbar } from '../../shell/Shell';
 import { attachmentBytes, audit, fillPacket, packetAsOnePdf, releaseEnvelope, saveDraft, unreachableAttachments, type SendSetup } from '../../state/actions';
-import { useActingFor, useApp, useScope, type SendState } from '../../state/store';
+import { track, useActingFor, useApp, useScope, type SendState } from '../../state/store';
 import { Avatar, Button, Empty, Field, IconButton, Menu, Select, Sheet, SwitchRow, TextArea, TextInput, downloadBytes, toast } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
 import { NoClient } from '../common/NoClient';
@@ -138,6 +139,14 @@ export function SendScreen() {
   const attachedMB = attachmentsMB(packet.attachments);
   const envelopeMB = formBytes === undefined ? undefined : formBytes / MB + attachedMB;
   const canShare = sharingAllowed(policy);
+  // Why a send can't go, as stable IDs for usage reporting (which checks block most often).
+  const blockingIds = [
+    ...view.checks.filter((c) => c.level === 'block').map((c) => ({ id: stableCheckId(c.id), templateId: c.templateId })),
+    ...attachmentChecks.map((c) => ({ id: c.id, templateId: undefined })),
+    ...(problems.length ? [{ id: 'signers', templateId: undefined }] : []),
+    ...(!subject.trim() ? [{ id: 'subject', templateId: undefined }] : []),
+    ...(unreachable.length ? [{ id: 'attachments:unreachable', templateId: undefined }] : []),
+  ];
   const blockers = [
     ...(sum.blocking ? [`${sum.blocking} pre-send ${sum.blocking === 1 ? 'check needs' : 'checks need'} attention`] : []),
     ...attachmentChecks.map((c) => `${c.title}. ${c.detail}`),
@@ -158,6 +167,16 @@ export function SendScreen() {
       [next[i], next[j]] = [next[j], next[i]];
       return next.map((s, k) => ({ ...s, order: k + 1 }));
     });
+  }
+
+  /** Send pressed while something blocks it: say so, and record which checks (per form) stopped it. */
+  function blockedSend() {
+    if (!view) return;
+    for (const f of view.fills) {
+      const ids = [...new Set(blockingIds.filter((b) => !b.templateId || b.templateId === f.template.id).map((b) => b.id))];
+      track('send.blocked', [f.template], { requestId: packet.requestId, detail: { blockingChecks: ids } });
+    }
+    toast.error(blockers.length === 1 ? `Can’t send yet: ${blockers[0]}` : `Can’t send yet: ${blockers.length} things to fix, listed above the button.`);
   }
 
   /** The request row this packet is saved as, if any, read fresh so a retry never adds a second row. */
@@ -275,7 +294,11 @@ export function SendScreen() {
         expiresInDays: Number(expires),
         audit: [...draft.audit, audit(me, 'Sent with DocuSign', `${ordered.length} signer${ordered.length > 1 ? 's' : ''} · ${tabCount} tabs${me.systemuserid !== owner.systemuserid ? ` · for ${owner.fullname}` : ''}`)],
       };
-      await services.requests.save(sent);
+      const recorded = await services.requests.save(sent);
+      track('request.sent', view.fills.map((f) => f.template), {
+        requestId: recorded.id,
+        detail: { signerCount: ordered.length, auth: [...new Set(ordered.map((s) => (s.inSession ? `${s.auth}+inSession` : s.auth)))] },
+      });
       markUsed(view.templates.map((t) => t.id));
       clearPacket();
       await refreshRequests();
@@ -298,6 +321,7 @@ export function SendScreen() {
       const draft = await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing, sendSetup: sendSetup(), retentionDays: retentionDays(policy) });
       // A record of a printed packet, not abandoned work: retention doesn't delete it.
       await services.requests.save({ ...draft, inPerson: true, expiresOn: undefined, audit: [...draft.audit, audit(me, 'Downloaded to sign in person')] });
+      track('request.inperson', view.fills.map((f) => f.template), { requestId: draft.id, detail: { mode: 'flatten' } });
       setPacket({ requestId: draft.id, formsUpdated: undefined, dirty: false });
       markUsed(view.templates.map((t) => t.id));
       await refreshRequests();
@@ -535,7 +559,8 @@ export function SendScreen() {
                     </Button>
                   </>
                 ) : (
-                  <Button variant="filled" size="lg" block icon="send" busy={busy === 'send'} disabled={blockers.length > 0} onClick={send}>
+                  // aria-disabled rather than disabled, so pressing it while blocked can say why (and be counted).
+                  <Button variant="filled" size="lg" block icon="send" busy={busy === 'send'} aria-disabled={blockers.length > 0 || undefined} onClick={blockers.length ? blockedSend : send}>
                     Send with DocuSign
                   </Button>
                 )}

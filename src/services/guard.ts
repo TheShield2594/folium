@@ -1,8 +1,10 @@
 import { reportFailure, reportSuccess, TIMEOUT, toFoliumError, withRetry, withTimeout } from './errors';
 import type { Services } from './types';
 
-type Area = Exclude<keyof Services, 'mode' | 'attachments'>;
-const AREAS: Area[] = ['directory', 'crm', 'templates', 'drafts', 'requests', 'packets', 'signing'];
+// `usage` isn't guarded: its queue drops failures on purpose, and a usage write that
+// fails mustn't flag the connection as down.
+type Area = Exclude<keyof Services, 'mode' | 'attachments' | 'usage'>;
+const AREAS: Area[] = ['directory', 'crm', 'templates', 'drafts', 'requests', 'packets', 'signing', 'feedback'];
 
 /** Reads: safe to try again. Everything else is a write and runs once. */
 const READS = new Set([
@@ -22,6 +24,8 @@ const READS = new Set([
   'requests.listMine',
   'requests.get',
   'packets.list',
+  'feedback.list',
+  'feedback.listMine',
   'signing.getStatus',
   'signing.downloadCompleted',
 ]);

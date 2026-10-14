@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { formRequest } from '../../domain/feedback';
 import type { Services } from '../../services/types';
 import { useApp } from '../../state/store';
 import { Button, Field, Sheet, TextArea, TextInput, toast } from '../../ui/controls';
@@ -13,7 +14,7 @@ export function RequestFormSheet({ initial, onClose, services }: { initial?: str
   async function send() {
     setBusy(true);
     try {
-      await services.templates.requestForm({ name: name.trim(), issuer: issuer.trim() || undefined, note: note.trim() || undefined, requestedBy: me?.fullname ?? '' });
+      await services.feedback.submit(formRequest({ name, issuer, note }, { systemuserid: me?.systemuserid ?? '', fullname: me?.fullname ?? '' }));
       toast.ok('Sent to Marketing. You’ll see it in the library once it’s mapped.');
       onClose();
     } catch (e) {

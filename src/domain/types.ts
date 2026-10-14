@@ -461,6 +461,8 @@ export interface UserProfile extends Advisor {
   canEditRepData?: boolean;
   /** Who changed which rep field, and when (newest last). */
   repDataAudit?: RepDataChange[];
+  /** May open the firm's usage reports (the reporting role, #32). Admins always may. */
+  canViewReports?: boolean;
   /** Last day this person opened Folium (ISO timestamp, written at most once a day). */
   lastSeenOn?: string;
   /** Read-only, from the services: false when the profile is deactivated (`statecode` 1). */
@@ -514,6 +516,8 @@ export interface FirmProfile {
   idleAutoSaveMinutes?: number;
   /** Send screen defaults: what a new envelope starts with. The rules are in `FirmPolicy`. */
   sending?: SendingDefaults;
+  /** The Power BI usage report (docs/REPORTS.md), opened from the sidebar's Reports link. */
+  reportsUrl?: string;
 }
 
 /** Send screen defaults for the firm (Administration › Firm profile). */
@@ -563,4 +567,6 @@ export interface FirmPolicy {
   repDataSelfEdit?: boolean;
   /** Days without signing in before someone shows as dormant in Users & groups. Default 90. */
   dormantAfterDays?: number;
+  /** Months usage events (`ev_usageevent`) are kept before the bulk-delete job removes them. Default 36. */
+  usageRetentionMonths?: number;
 }
