@@ -28,5 +28,5 @@ export function nextFreeName(name: string, existingNames: string[]): string {
   }
 }
 
-/** A short, stable tag for a draft, used in its SharePoint file names. */
-export const shortDraftId = (id: string) => id.replace(/[^a-zA-Z0-9]/g, '').slice(-4).toLowerCase();
+/** A short, stable tag for a draft, used in its SharePoint file names (8 characters of the row ID). */
+export const shortDraftId = (id: string) => id.replace(/[^a-zA-Z0-9]/g, '').slice(-8).toLowerCase();

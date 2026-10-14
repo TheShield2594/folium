@@ -19,6 +19,8 @@ export interface FieldState {
   sourceLabel: string;
   /** What the CRM had, when the advisor overrode it. */
   crmValue?: string;
+  /** What the CRM has for this field, whatever the advisor did to it (empty for advisor/signer fields). */
+  crmBaseline?: string;
   required: boolean;
   missing: boolean;
   formatError?: string;
@@ -27,6 +29,8 @@ export interface FieldState {
 export interface FormFill {
   template: FormTemplate;
   account?: Account;
+  /** The account `account.*` fields resolved against, including the first-account fallback. */
+  accountId?: string;
   fields: FieldState[];
   filledCount: number;
   requiredCount: number;
@@ -122,6 +126,7 @@ export function prefillForm(
       origin,
       sourceLabel: describeSource(m.source),
       crmValue: origin === 'edited' ? crmValue : undefined,
+      crmBaseline: crmValue ?? '',
       required,
       missing,
       formatError: validateFormat(value, m.format),
@@ -132,6 +137,7 @@ export function prefillForm(
   return {
     template,
     account: scope.account,
+    accountId: template.mapping.fields.some((m) => m.source.startsWith('account.')) ? accountId : scope.account?.accountid,
     fields,
     filledCount: relevant.filter((f) => f.value.trim()).length,
     requiredCount: relevant.filter((f) => f.required).length,
@@ -190,13 +196,11 @@ const fromCrm = (f: FieldState) => {
   const kind = sourceKind(f.mapping.source);
   return (kind === 'crm' || kind === 'computed') && !f.mapping.source.includes('today') && !isSsn(f);
 };
-/** What CRM gave a field, whether or not the advisor overrode it. */
-const crmOf = (f: FieldState) => (f.origin === 'edited' ? (f.crmValue ?? '') : f.origin === 'crm' || f.origin === 'computed' ? f.value : '');
 
 /** CRM-derived value per field key, for `SignatureRequest.prefillSnapshot`. SSNs are never included. */
 export function prefillSnapshot(fills: FormFill[]): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const f of fills.flatMap((x) => x.fields)) if (fromCrm(f) && !(f.key in out)) out[f.key] = crmOf(f);
+  for (const f of fills.flatMap((x) => x.fields)) if (fromCrm(f) && !(f.key in out)) out[f.key] = f.crmBaseline ?? '';
   return out;
 }
 
@@ -216,7 +220,7 @@ export function snapshotDiff(snapshot: Record<string, string> | undefined, fills
     if (seen.has(f.key) || !fromCrm(f) || !(f.key in snapshot)) continue;
     seen.add(f.key);
     const saved = snapshot[f.key];
-    const now = crmOf(f);
+    const now = f.crmBaseline ?? '';
     if (saved !== now) out.push({ key: f.key, label: f.label, saved, now });
   }
   return out;

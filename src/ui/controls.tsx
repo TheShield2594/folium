@@ -254,7 +254,12 @@ export function Sheet({ title, onClose, children, footer, wide, icon }: { title:
 /** Ask before something destructive. Cancel comes first, so it has focus by default. */
 export function ConfirmSheet({ title, children, confirmLabel, onConfirm, onClose }: { title: string; children: ReactNode; confirmLabel: string; onConfirm: () => Promise<void> | void; onClose: () => void }) {
   const [busy, setBusy] = useState(false);
+  // Once the action has started it can't be called back, so don't let the sheet close mid-way.
+  const close = () => {
+    if (!busy) onClose();
+  };
   async function confirm() {
+    if (busy) return;
     setBusy(true);
     try {
       await onConfirm();
@@ -267,10 +272,10 @@ export function ConfirmSheet({ title, children, confirmLabel, onConfirm, onClose
   return (
     <Sheet
       title={title}
-      onClose={onClose}
+      onClose={close}
       footer={
         <>
-          <Button variant="gray" onClick={onClose}>
+          <Button variant="gray" disabled={busy} onClick={close}>
             Cancel
           </Button>
           <Button variant="danger" busy={busy} onClick={confirm}>

@@ -136,6 +136,7 @@ function SavePacketSheet({ onClose }: { onClose: () => void }) {
   const alt = nextFreeName(name, visible.map((p) => p.name));
 
   async function save(finalName: string, replacing?: SavedPacket) {
+    if (busy) return; // one save at a time
     setBusy(replacing ? 'replace' : 'save');
     const p: SavedPacket = {
       ...replacing,
@@ -174,15 +175,15 @@ function SavePacketSheet({ onClose }: { onClose: () => void }) {
       footer={
         clash ? (
           <>
-            <Button variant="gray" onClick={() => setClash(undefined)}>
+            <Button variant="gray" disabled={!!busy} onClick={() => setClash(undefined)}>
               Change name
             </Button>
             {canReplace(clash) && (
-              <Button variant="bordered" busy={busy === 'replace'} onClick={() => save(clash.name, clash)}>
+              <Button variant="bordered" disabled={!!busy} busy={busy === 'replace'} onClick={() => save(clash.name, clash)}>
                 Replace it
               </Button>
             )}
-            <Button variant="filled" busy={busy === 'save'} onClick={() => save(alt)}>
+            <Button variant="filled" disabled={!!busy} busy={busy === 'save'} onClick={() => save(alt)}>
               Save as “{alt}”
             </Button>
           </>

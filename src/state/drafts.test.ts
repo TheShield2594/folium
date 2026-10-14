@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { findNameClash, nextFreeName } from '../domain/drafts';
 import { prefillPacket, snapshotDiff, prefillSnapshot } from '../domain/prefill';
-import type { ClientRecord, PacketItem } from '../domain/types';
+import type { ClientRecord, PacketItem, SignatureRequest } from '../domain/types';
 import { createDemoServices, resetDemo } from '../services/demo';
 import { CLIENTS, FIRM, TEMPLATES, USERS } from '../services/demo/seed';
 import { attachmentBytes, saveDraft, unreachableAttachments } from './actions';
@@ -46,6 +46,24 @@ describe('resuming a draft', () => {
     // Picking an account clears the flag.
     useApp.getState().setPacketAccount(first.templateId, 'a-j1');
     expect(useApp.getState().packet.items[0]).toEqual({ templateId: first.templateId, accountId: 'a-j1' });
+  });
+
+  it('saves the account a form fell back to when none was picked', async () => {
+    const services = createDemoServices();
+    const unpicked: PacketItem[] = [{ templateId: 'tpl-px310-0826' }];
+    const saved = await saveDraft({ services, packet: packet({ items: unpicked }), fills: fillsFor(client, unpicked), contactId: 'c-jordan', me, owner: me });
+    expect(saved.documents[0].accountId).toBe(client.accounts[0].accountid);
+  });
+
+  it('hands back the saved row before writing PDFs, so a failed write can be retried on it', async () => {
+    const demo = createDemoServices();
+    const failing = async (): Promise<{ url: string }> => {
+      throw new Error('SharePoint unavailable');
+    };
+    const services = { ...demo, drafts: { ...demo.drafts, saveDraft: failing } };
+    let row: SignatureRequest | undefined;
+    await expect(saveDraft({ services, packet: packet(), fills: fillsFor(client, items), contactId: 'c-jordan', me, owner: me, writePdfs: true, onSaved: (r) => (row = r) })).rejects.toThrow(/SharePoint/);
+    expect(row && (await services.requests.get(row.id))?.title).toBe(row?.title);
   });
 
   it('keeps send setup with the draft', async () => {
@@ -96,9 +114,11 @@ describe('snapshotDiff', () => {
     expect(diff.some((d) => d.key.includes('ssn'))).toBe(false);
   });
 
-  it('ignores an advisor override: the diff is about what CRM says', () => {
-    const snap = prefillSnapshot(fillsFor(client, its, { 'contact.address1_city': 'Somewhere' }));
-    expect(snap['contact.address1_city']).toBe('Goshen');
+  it('ignores an advisor override or a cleared field: the diff is about what CRM says', () => {
+    expect(prefillSnapshot(fillsFor(client, its, { 'contact.address1_city': 'Somewhere' }))['contact.address1_city']).toBe('Goshen');
+    const cleared = prefillSnapshot(fillsFor(client, its, { 'contact.address1_city': '' }));
+    expect(cleared['contact.address1_city']).toBe('Goshen');
+    expect(snapshotDiff(cleared, fillsFor(client, its, { 'contact.address1_city': '' }))).toEqual([]);
   });
 });
 
@@ -148,7 +168,7 @@ describe('deleting drafts and packets', () => {
     const one = await saveDraft({ services, packet: packet({ title: 'IRA distribution' }), fills: fillsFor(client, items), contactId: 'c-jordan', me, owner: me, writePdfs: true });
     const two = await saveDraft({ services, packet: packet({ title: 'IRA distribution' }), fills: fillsFor(client, items), contactId: 'c-jordan', me, owner: me, writePdfs: true });
     expect(one.draftFiles).toHaveLength(2);
-    expect(one.draftFiles![0].name).toMatch(/^DRAFT PX-310 IRA distribution – \w{4}\.pdf$/);
+    expect(one.draftFiles![0].name).toMatch(/^DRAFT PX-310 IRA distribution – \w{8}\.pdf$/);
     const names = new Set([...one.draftFiles!, ...two.draftFiles!].map((f) => f.name));
     expect(names.size).toBe(4);
   });

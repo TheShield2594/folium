@@ -33,6 +33,7 @@ export function NameSheet<T extends Named>(props: {
   const alt = nextFreeName(name, existing.filter((x) => x.id !== exceptId).map((x) => x.name));
 
   async function run(key: string, fn: () => Promise<void>) {
+    if (busy) return; // one save at a time
     setBusy(key);
     try {
       await fn();
@@ -44,6 +45,7 @@ export function NameSheet<T extends Named>(props: {
   }
 
   function submit() {
+    if (busy) return;
     const c = findNameClash(name, existing, exceptId);
     if (c) return setClash(c);
     void run('save', () => props.onSave(name.trim().replace(/\s+/g, ' ')));
@@ -56,15 +58,15 @@ export function NameSheet<T extends Named>(props: {
       footer={
         clash ? (
           <>
-            <Button variant="gray" onClick={() => setClash(undefined)}>
+            <Button variant="gray" disabled={!!busy} onClick={() => setClash(undefined)}>
               Change name
             </Button>
             {props.replace?.allowed(clash) && (
-              <Button variant="bordered" busy={busy === 'replace'} onClick={() => run('replace', () => props.replace!.run(clash))}>
+              <Button variant="bordered" disabled={!!busy} busy={busy === 'replace'} onClick={() => run('replace', () => props.replace!.run(clash))}>
                 {props.replace.label}
               </Button>
             )}
-            <Button variant="filled" busy={busy === 'save'} onClick={() => run('save', () => props.onSave(alt))}>
+            <Button variant="filled" disabled={!!busy} busy={busy === 'save'} onClick={() => run('save', () => props.onSave(alt))}>
               Save as “{alt}”
             </Button>
           </>
@@ -88,7 +90,7 @@ export function NameSheet<T extends Named>(props: {
         }}
       >
         <Field label="Name" htmlFor="name-sheet">
-          <TextInput id="name-sheet" value={name} onChange={(e) => (setName(e.target.value), setClash(undefined))} />
+          <TextInput id="name-sheet" value={name} disabled={!!busy} onChange={(e) => (setName(e.target.value), setClash(undefined))} />
         </Field>
         {clash && (
           <div className="banner" role="alert">

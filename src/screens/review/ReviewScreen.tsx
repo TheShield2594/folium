@@ -133,11 +133,22 @@ export function ReviewScreen() {
     setBusy('draft');
     try {
       const existing = into ?? (packet.requestId ? requests.find((r) => r.id === packet.requestId) : undefined);
-      const saved = await saveDraft({ services, packet: { ...packet, title }, fills: view.fills, contactId, me, owner, existing, writePdfs: true });
+      const saved = await saveDraft({
+        services,
+        packet: { ...packet, title },
+        fills: view.fills,
+        contactId,
+        me,
+        owner,
+        existing,
+        writePdfs: true,
+        // Keep the row's identity even if writing the PDFs fails, so a retry updates it.
+        onSaved: (row) => setPacket({ requestId: row.id, title: row.title, attachments: row.attachments, snapshot: row.prefillSnapshot }),
+      });
       setPacket({ requestId: saved.id, title: saved.title, attachments: saved.attachments, snapshot: saved.prefillSnapshot });
-      await refreshRequests();
       toast.ok(`Draft saved to ${client!.contact.firstname}’s SharePoint folder`);
     } finally {
+      await refreshRequests().catch(() => undefined);
       setBusy(undefined);
     }
   }

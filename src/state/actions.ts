@@ -89,6 +89,8 @@ export async function saveDraft(opts: {
   existing?: SignatureRequest;
   writePdfs?: boolean;
   sendSetup?: SendSetup;
+  /** Called once the row is saved, before the draft PDFs are written, so a failed write can be retried against the same row. */
+  onSaved?: (req: SignatureRequest) => void;
 }): Promise<SignatureRequest> {
   const { services, packet, fills, contactId, me, owner, existing } = opts;
   const folder = await services.drafts.folderUrl(contactId);
@@ -120,7 +122,7 @@ export async function saveDraft(opts: {
     ...base,
     title,
     ...opts.sendSetup,
-    documents: fills.map((f) => ({ templateId: f.template.id, name: f.template.name, formNumber: f.template.formNumber, revision: f.template.revision, accountId: f.account?.accountid })),
+    documents: fills.map((f) => ({ templateId: f.template.id, name: f.template.name, formNumber: f.template.formNumber, revision: f.template.revision, accountId: f.accountId })),
     values: { ...packet.values },
     prefillSnapshot: prefillSnapshot(fills),
     attachments,
@@ -129,6 +131,7 @@ export async function saveDraft(opts: {
     audit: [...base.audit, audit(me, existing ? 'Draft updated' : 'Draft saved', me.systemuserid !== owner.systemuserid ? `on behalf of ${owner.fullname}` : undefined)],
   };
   const saved = await services.requests.save(req);
+  opts.onSaved?.(saved);
   if (!opts.writePdfs) return saved;
   // File names carry the draft's title and a short ID, so two drafts never overwrite each other.
   const docs = await fillPacket(services, fills, 'fillable', true);
