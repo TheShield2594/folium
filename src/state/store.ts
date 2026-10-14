@@ -243,9 +243,9 @@ export const useApp = create<AppState>((set, get) => ({
     const j = get().pendingRestore;
     if (!j) return;
     if (get().contactId !== j.contactId) {
-      // The packet on screen is the one being replaced; the restore banner was the question.
-      set({ packet: emptyPacket() });
-      // Keep the offer if the client can't be opened (a failed load throws; the banner reports it).
+      // openContact asks about unsaved work on screen first (Save draft / Discard / Cancel).
+      // Keep the offer if the advisor cancels or the client can't be opened (a failed load
+      // throws; the banner reports it).
       if (!(await get().openContact(j.contactId))) return;
     }
     set({ pendingRestore: undefined, packet: { ...emptyPacket(), ...j.packet, dirty: true } });
@@ -385,7 +385,7 @@ export function startJournal(): () => void {
   const write = () => {
     const { me, contactId, packet, client, pendingRestore, templates } = useApp.getState();
     if (!me) return;
-    if (contactId && worthKeeping(packet)) writeJournal({ userId: me.systemuserid, contactId, contactName: client?.contact.fullname, packet, sensitive: sensitiveKeys(packet, templates) });
+    if (contactId && worthKeeping(packet)) writeJournal({ userId: me.systemuserid, contactId, contactName: client?.contact.fullname, packet, sensitive: sensitiveKeys(templates) });
     // Leave an offered copy alone until the advisor answers the banner.
     else if (!pendingRestore) clearJournal(me.systemuserid);
   };

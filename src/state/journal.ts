@@ -29,21 +29,34 @@ const keyFor = (userId: string) => `${PREFIX}${userId}`;
 const SENSITIVE = /ssn|(^|[.:_\]])tin($|[._])/i;
 const SENSITIVE_FORMATS = new Set<FieldFormat>(['ssn', 'ssnOrTin', 'ein', 'ssnLast4']);
 
-/** Value keys of the packet's fields that hold an SSN, EIN or TIN, by their mapped format or source. */
-export function sensitiveKeys(packet: Packet, templates: FormTemplate[]): Set<string> {
-  const keys = new Set<string>();
-  for (const item of packet.items) {
-    const t = templates.find((x) => x.id === item.templateId);
-    for (const m of t?.mapping.fields ?? []) {
-      if ((m.format && SENSITIVE_FORMATS.has(m.format)) || /ev_ssn|ssnLast4/.test(m.source)) keys.add(fieldKey(m, t!, item.accountId));
+/** Whether a value key holds an SSN, EIN or TIN. */
+export type SensitiveTest = (key: string) => boolean;
+
+/**
+ * Value keys that hold an SSN, EIN or TIN, by the mapped format or source of any field
+ * in the library, not just the forms now in the packet: a value outlives the form it
+ * was entered on when that form is removed. Account fields are keyed per account
+ * (`account[<id>].<attr>`), so those match on the attribute.
+ */
+export function sensitiveKeys(templates: FormTemplate[]): SensitiveTest {
+  const exact = new Set<string>();
+  const accountAttrs = new Set<string>();
+  for (const t of templates) {
+    for (const m of t.mapping.fields) {
+      if (!((m.format && SENSITIVE_FORMATS.has(m.format)) || /ev_ssn|ssnLast4/.test(m.source))) continue;
+      exact.add(fieldKey(m, t));
+      if (!m.key && m.source.startsWith('account.')) accountAttrs.add(m.source.slice('account.'.length));
     }
   }
-  return keys;
+  return (key) => exact.has(key) || accountAttrs.has(/^account\[[^\]]+\]\.(.+)$/.exec(key)?.[1] ?? '');
 }
 
-export function redactPacket(packet: Packet, sensitive: Set<string> = new Set()): Packet {
-  const values = Object.fromEntries(Object.entries(packet.values).filter(([k]) => !sensitive.has(k) && !SENSITIVE.test(k)));
-  return { ...packet, values };
+const keep = (sensitive?: SensitiveTest) => ([k]: [string, string]) => !sensitive?.(k) && !SENSITIVE.test(k);
+
+/** The packet without SSN, EIN or TIN values, in what was entered and in the CRM snapshot. */
+export function redactPacket(packet: Packet, sensitive?: SensitiveTest): Packet {
+  const values = Object.fromEntries(Object.entries(packet.values).filter(keep(sensitive)));
+  return packet.snapshot ? { ...packet, values, snapshot: Object.fromEntries(Object.entries(packet.snapshot).filter(keep(sensitive))) } : { ...packet, values };
 }
 
 function store(storage?: Storage): Storage | undefined {
@@ -54,7 +67,7 @@ function store(storage?: Storage): Storage | undefined {
   }
 }
 
-export function writeJournal(j: Omit<Journal, 'v' | 'savedAt'> & { savedAt?: string; sensitive?: Set<string> }, storage?: Storage) {
+export function writeJournal(j: Omit<Journal, 'v' | 'savedAt'> & { savedAt?: string; sensitive?: SensitiveTest }, storage?: Storage) {
   const s = store(storage);
   if (!s) return;
   const { sensitive, ...rest } = j;

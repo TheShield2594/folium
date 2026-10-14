@@ -32,12 +32,25 @@ describe('packet journal', () => {
     const t = {
       ...TEMPLATES[0],
       id: 'tpl-tax',
-      mapping: { ...TEMPLATES[0].mapping, fields: [{ pdfField: 'Owner_TaxID', source: 'advisor', required: false, key: 'ownerTaxId', format: 'ein' as const }, { pdfField: 'Note', source: 'advisor', required: false, key: 'note' }] },
+      mapping: {
+        ...TEMPLATES[0].mapping,
+        fields: [
+          { pdfField: 'Owner_TaxID', source: 'advisor', required: false, key: 'ownerTaxId', format: 'ein' as const },
+          { pdfField: 'Acct_TIN', source: 'account.ev_tin', required: false, format: 'ssnOrTin' as const },
+          { pdfField: 'Note', source: 'advisor', required: false, key: 'note' },
+        ],
+      },
     };
-    const p = packet({ items: [{ templateId: 'tpl-tax' }], values: { ownerTaxId: '12-3456789', note: 'hello' } });
-    expect(sensitiveKeys(p, [t])).toEqual(new Set(['ownerTaxId']));
-    writeJournal({ userId: 'u', contactId: 'c', packet: { ...p, dirty: true }, sensitive: sensitiveKeys(p, [t]) });
-    expect(readJournal('u')!.packet.values).toEqual({ note: 'hello' });
+    const sensitive = sensitiveKeys([t]);
+    expect(sensitive('ownerTaxId')).toBe(true);
+    expect(sensitive('account[a-j1].ev_tin')).toBe(true);
+    expect(sensitive('note')).toBe(false);
+    // The form is no longer in the packet, but the value it left behind is still left out.
+    const p = packet({ items: [{ templateId: 'tpl-ev1120-0326' }], values: { ownerTaxId: '12-3456789', 'account[a-j1].ev_tin': '12-3456789', note: 'hello' }, snapshot: { ownerTaxId: '98-7654321', 'contact.fullname': 'Jordan' } });
+    writeJournal({ userId: 'u', contactId: 'c', packet: { ...p, dirty: true }, sensitive });
+    const saved = readJournal('u')!.packet;
+    expect(saved.values).toEqual({ note: 'hello' });
+    expect(saved.snapshot).toEqual({ 'contact.fullname': 'Jordan' });
   });
 
   it('keeps the restore offer when the client can’t be opened', async () => {
@@ -45,6 +58,20 @@ describe('packet journal', () => {
     const offer = { v: 1 as const, userId: 'u', contactId: 'c-missing', packet: packet({ dirty: true }), savedAt: new Date().toISOString() };
     useApp.setState({ services, contactId: 'c-jordan', pendingRestore: offer, packet: packet({ items: [] }) });
     await expect(useApp.getState().restoreJournal()).rejects.toBeTruthy();
+    expect(useApp.getState().pendingRestore).toBe(offer);
+  });
+
+  it('asks before a restore replaces unsaved work, and Cancel keeps both', async () => {
+    const services = createDemoServices();
+    const offer = { v: 1 as const, userId: 'u', contactId: 'c-priya', packet: packet({ dirty: true }), savedAt: new Date().toISOString() };
+    const current = packet({ values: { x: '1' }, dirty: true });
+    useApp.setState({ services, contactId: 'c-jordan', pendingRestore: offer, packet: current });
+    const restoring = useApp.getState().restoreJournal();
+    await vi.waitFor(() => expect(useApp.getState().leavePrompt).toBeTruthy());
+    useApp.getState().leavePrompt!.resolve('cancel');
+    await restoring;
+    expect(useApp.getState().packet).toBe(current);
+    expect(useApp.getState().contactId).toBe('c-jordan');
     expect(useApp.getState().pendingRestore).toBe(offer);
   });
 
