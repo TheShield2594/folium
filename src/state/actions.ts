@@ -101,6 +101,8 @@ export async function saveDraft(opts: {
   existing?: SignatureRequest;
   writePdfs?: boolean;
   sendSetup?: SendSetup;
+  /** Extra detail for the audit entry, e.g. why the draft was saved automatically. */
+  auditNote?: string;
   /** Called once the row is saved, before the draft PDFs are written, so a failed write can be retried against the same row. */
   onSaved?: (req: SignatureRequest) => void;
 }): Promise<SignatureRequest> {
@@ -140,7 +142,10 @@ export async function saveDraft(opts: {
     attachments,
     sharedWith: packet.sharedWith,
     draftFolderUrl: folder,
-    audit: [...base.audit, audit(me, existing ? 'Draft updated' : 'Draft saved', me.systemuserid !== owner.systemuserid ? `on behalf of ${owner.fullname}` : undefined)],
+    audit: [
+      ...base.audit,
+      audit(me, existing ? 'Draft updated' : 'Draft saved', [me.systemuserid !== owner.systemuserid ? `on behalf of ${owner.fullname}` : '', opts.auditNote ?? ''].filter(Boolean).join(' · ') || undefined),
+    ],
   };
   const saved = await services.requests.save(req);
   opts.onSaved?.(saved);

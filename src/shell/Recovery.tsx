@@ -1,9 +1,10 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useBlocker } from 'react-router-dom';
 import { defaultDraftTitle } from '../domain/drafts';
 import { usePacketView } from '../screens/common/usePacket';
 import { useServices } from '../services';
 import { connectionProblem, subscribeConnection } from '../services/errors';
+import { countdown, DEFAULT_IDLE_MINUTES, idleState, WARNING_MS } from '../state/idle';
 import { ago } from '../state/journal';
 import { saveDraft } from '../state/actions';
 import { useActingFor, useApp, type LeaveChoice } from '../state/store';
@@ -104,10 +105,10 @@ export function UnsavedGuards() {
   return null;
 }
 
-function LeavePacketSheet({ reason, onChoice }: { reason: 'switch' | 'open-draft' | 'navigate'; onChoice: (c: LeaveChoice) => void }) {
+/** Save the open packet as a draft (the same as Save draft in Review), from anywhere in the app. */
+function useSaveOpenPacket() {
   const packet = useApp((s) => s.packet);
   const contactId = useApp((s) => s.contactId);
-  const client = useApp((s) => s.client);
   const me = useApp((s) => s.me);
   const requests = useApp((s) => s.requests);
   const setPacket = useApp((s) => s.setPacket);
@@ -115,17 +116,123 @@ function LeavePacketSheet({ reason, onChoice }: { reason: 'switch' | 'open-draft
   const owner = useActingFor();
   const view = usePacketView();
   const services = useServices();
+  const ready = !!(view && contactId && me && owner);
+
+  async function save(auditNote?: string) {
+    if (!view || !contactId || !me || !owner) throw new Error('Nothing to save');
+    const existing = packet.requestId ? requests.find((r) => r.id === packet.requestId) : undefined;
+    const title = packet.title || existing?.title || defaultDraftTitle(view.fills);
+    const saved = await saveDraft({
+      services,
+      packet: { ...packet, title },
+      fills: view.fills,
+      contactId,
+      me,
+      owner,
+      existing,
+      writePdfs: true,
+      auditNote,
+      // Keep the row's identity even if the PDFs fail, so the next save updates it.
+      onSaved: (row) => setPacket({ requestId: row.id, title: row.title, attachments: row.attachments, snapshot: row.prefillSnapshot, dirty: false }),
+    });
+    setPacket({ requestId: saved.id, title: saved.title, attachments: saved.attachments, snapshot: saved.prefillSnapshot, dirty: false });
+    await refreshRequests().catch(() => undefined);
+    return saved;
+  }
+  return { save, ready };
+}
+
+/**
+ * Optional (firm setting): when unsaved work sits idle, count down for 2 minutes in a
+ * banner and the tab title, then save it as a draft. Any activity cancels the countdown.
+ * Unlike Laser App's idle logout, nothing is lost and the advisor stays signed in.
+ */
+export function IdleAutoSave() {
+  const firm = useApp((s) => s.firm);
+  const dirty = useApp((s) => !!s.packet.dirty && s.packet.items.length > 0 && !s.packet.send);
+  const enabled = !!firm?.idleAutoSave && dirty;
+  const idleMs = (firm?.idleAutoSaveMinutes ?? DEFAULT_IDLE_MINUTES) * 60_000;
+  const { save, ready } = useSaveOpenPacket();
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  const lastActivity = useRef(Date.now());
+  const saving = useRef(false);
+  const [remaining, setRemaining] = useState<number>();
+
+  // Activity resets the clock (and hides the countdown).
+  useEffect(() => {
+    if (!enabled) return;
+    lastActivity.current = Date.now();
+    const onActivity = () => {
+      lastActivity.current = Date.now();
+      setRemaining((r) => (r === undefined ? r : undefined));
+    };
+    const events = ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart', 'scroll'] as const;
+    events.forEach((e) => window.addEventListener(e, onActivity, { passive: true, capture: true }));
+    return () => events.forEach((e) => window.removeEventListener(e, onActivity, { capture: true }));
+  }, [enabled]);
+
+  useEffect(() => {
+    if (!enabled || !ready) {
+      setRemaining(undefined);
+      return;
+    }
+    const tick = () => {
+      const st = idleState(lastActivity.current, Date.now(), idleMs, WARNING_MS);
+      if (st.phase === 'active') return setRemaining(undefined);
+      if (st.phase === 'warning') return setRemaining(st.remainingMs);
+      if (saving.current) return;
+      saving.current = true;
+      setRemaining(undefined);
+      saveRef
+        .current(`saved automatically after ${Math.round(idleMs / 60_000)} minutes idle`)
+        .then((r) => toast.ok(`Saved “${r.title}” to Drafts while you were away`))
+        .catch((e) => toast.error(e instanceof Error ? `Couldn’t save your draft automatically: ${e.message}` : 'Couldn’t save your draft automatically'))
+        .finally(() => {
+          saving.current = false;
+          // Don't try again until the advisor is back and leaves it idle again.
+          lastActivity.current = Date.now();
+        });
+    };
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, [enabled, ready, idleMs]);
+
+  // Countdown in the tab title, so it shows while the advisor is in another tab.
+  useEffect(() => {
+    if (remaining === undefined) return;
+    const original = document.title;
+    document.title = `(${countdown(remaining)}) Saving draft – ${original}`;
+    return () => {
+      document.title = original;
+    };
+  }, [remaining]);
+
+  if (remaining === undefined) return null;
+  return (
+    <div className="banner app-banner" role="status" aria-live="polite">
+      <Icon name="clock" size={18} />
+      <span className="grow t-callout">
+        You’ve been away a while. Folium will save this packet as a draft in <strong className="tabular">{countdown(remaining)}</strong>.
+      </span>
+      <Button variant="filled" size="sm" onClick={() => (lastActivity.current = Date.now(), setRemaining(undefined))}>
+        I’m still here
+      </Button>
+    </div>
+  );
+}
+
+function LeavePacketSheet({ reason, onChoice }: { reason: 'switch' | 'open-draft' | 'navigate'; onChoice: (c: LeaveChoice) => void }) {
+  const client = useApp((s) => s.client);
+  const { save: saveOpen, ready } = useSaveOpenPacket();
   const [busy, setBusy] = useState(false);
 
   async function save() {
-    if (!view || !contactId || !me || !owner) return;
+    if (!ready) return;
     setBusy(true);
     try {
-      const existing = packet.requestId ? requests.find((r) => r.id === packet.requestId) : undefined;
-      const title = packet.title || existing?.title || defaultDraftTitle(view.fills);
-      const saved = await saveDraft({ services, packet: { ...packet, title }, fills: view.fills, contactId, me, owner, existing, writePdfs: true });
-      setPacket({ requestId: saved.id, title: saved.title, attachments: saved.attachments, snapshot: saved.prefillSnapshot, dirty: false });
-      await refreshRequests().catch(() => undefined);
+      const saved = await saveOpen();
       toast.ok(`Saved “${saved.title}” to Drafts`);
       onChoice('save');
     } catch (e) {

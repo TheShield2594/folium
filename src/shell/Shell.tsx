@@ -7,7 +7,7 @@ import { Avatar, IconButton, Select } from '../ui/controls';
 import { Icon, type IconName } from '../ui/Icon';
 import { CommandPalette } from './CommandPalette';
 import { ContactPicker } from './ContactPicker';
-import { ConnectionBanner, RestoreBanner } from './Recovery';
+import { ConnectionBanner, IdleAutoSave, RestoreBanner } from './Recovery';
 
 function NavItem({ to, icon, children, count, alert, end }: { to: string; icon: IconName; children: ReactNode; count?: number; alert?: boolean; end?: boolean }) {
   const setSidebar = useApp((s) => s.setSidebar);
@@ -196,6 +196,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <div className="main">
         <ConnectionBanner />
         <RestoreBanner />
+        <IdleAutoSave />
         {children}
       </div>
       {paletteOpen && <CommandPalette onClose={() => setPalette(false)} />}

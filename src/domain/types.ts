@@ -380,4 +380,8 @@ export interface FirmProfile {
   disclosure: string;
   /** Refuse the editable PDF too while checks are open (Laser App's stricter behaviour). */
   blockFillableWhenIncomplete?: boolean;
+  /** Save the open packet as a draft when an advisor leaves unsaved work idle. Off unless turned on. */
+  idleAutoSave?: boolean;
+  /** Minutes idle before the 2-minute countdown to the auto-save starts. Default 25. */
+  idleAutoSaveMinutes?: number;
 }
