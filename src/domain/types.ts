@@ -376,4 +376,6 @@ export interface FirmProfile {
   crd: string;
   /** Default email message footer for envelopes. */
   disclosure: string;
+  /** Refuse the editable PDF too while checks are open (Laser App's stricter behaviour). */
+  blockFillableWhenIncomplete?: boolean;
 }

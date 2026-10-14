@@ -164,3 +164,33 @@ export function summarize(results: CheckResult[]) {
     passed: results.filter((r) => r.level === 'pass').length,
   };
 }
+
+export type OutputMode = 'send' | 'flatten' | 'print' | 'fillable' | 'draft';
+
+export interface OutputGate {
+  allowed: boolean;
+  /** The blocking checks, in the order review lists them. */
+  blockers: CheckResult[];
+  /** Stamp "DRAFT — NOT FOR SIGNATURE" on the output. */
+  draftMark: boolean;
+}
+
+/**
+ * Whether a packet may leave Folium in a given form. Anything a client could sign
+ * (send, flattened PDF, print) needs every blocking check cleared. The editable PDF
+ * stays available so an advisor can finish a form by hand, but carries the draft mark
+ * while checks are open, unless the firm opts into blocking it too. Drafts are always
+ * allowed and always marked. Warnings never block.
+ */
+export function outputGate(results: CheckResult[], mode: OutputMode, opts: { blockFillable?: boolean } = {}): OutputGate {
+  const blockers = results.filter((r) => r.level === 'block');
+  const open = blockers.length > 0;
+  switch (mode) {
+    case 'draft':
+      return { allowed: true, blockers, draftMark: true };
+    case 'fillable':
+      return { allowed: !(open && opts.blockFillable), blockers, draftMark: open };
+    default:
+      return { allowed: !open, blockers, draftMark: false };
+  }
+}

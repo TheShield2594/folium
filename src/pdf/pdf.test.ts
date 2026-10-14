@@ -1,4 +1,4 @@
-import { PDFDocument, StandardFonts } from 'pdf-lib';
+import { decodePDFRawStream, PDFArray, PDFDocument, PDFRawStream, StandardFonts } from 'pdf-lib';
 import { describe, expect, it } from 'vitest';
 import { prefillForm } from '../domain/prefill';
 import { createDemoServices } from '../services/demo';
@@ -6,7 +6,8 @@ import { CLIENTS, FIRM, TEMPLATES, USERS } from '../services/demo/seed';
 import { fillPdf, mergePdfs } from './fill';
 import { inspectPdf } from './inspect';
 import { fitsBox, helveticaWidth } from './layout';
-import { runChecks } from '../domain/checks';
+import { outputGate, runChecks } from '../domain/checks';
+import { packetAsOnePdf } from '../state/actions';
 import type { FormTemplate } from '../domain/types';
 
 const services = createDemoServices();
@@ -111,6 +112,25 @@ describe('pdf', () => {
     expect(warn.level).toBe('warn');
     expect(warn.title).toMatch(/may not fit/);
     expect(checks.some((c) => c.id.includes(':fit:') && c.fieldKey !== 'long')).toBe(false);
+  });
+
+  it('marks the fillable PDF draft only while checks block', async () => {
+    const t = TEMPLATES.find((x) => x.id === 'tpl-ev1120-0326')!;
+    const ctx = (values: Record<string, string>) => ({ scope, values, latestFor: () => t });
+    // Read the first page's content streams and look for the stamp's text (pdf-lib writes it as hex).
+    const hasMark = async (bytes: Uint8Array) => {
+      const page = (await PDFDocument.load(bytes)).getPage(0);
+      const contents = page.node.Contents();
+      const streams = contents instanceof PDFArray ? contents.asArray().map((r) => page.doc.context.lookup(r)) : [contents];
+      const text = streams.map((st) => (st instanceof PDFRawStream ? Buffer.from(decodePDFRawStream(st).decode()).toString('latin1') : '')).join('\n');
+      return text.toUpperCase().includes(Buffer.from('DRAFT').toString('hex').toUpperCase());
+    };
+
+    const incomplete = [prefillForm(t, scope, {})];
+    const gate = outputGate(runChecks(incomplete, ctx({})), 'fillable');
+    expect(gate.draftMark).toBe(true);
+    expect(await hasMark(await packetAsOnePdf(services, incomplete, 'fillable', gate.draftMark))).toBe(true);
+    expect(await hasMark(await packetAsOnePdf(services, incomplete, 'fillable', false))).toBe(false);
   });
 });
 

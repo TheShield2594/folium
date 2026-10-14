@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { summarize } from '../../domain/checks';
+import { outputGate, summarize } from '../../domain/checks';
 import { assignSigners, roleLabel, rolesForPacket, validateSigners } from '../../domain/signers';
 import type { SignatureRequest, SignerAssignment, VerificationMethod } from '../../domain/types';
 import { useServices } from '../../services';
@@ -90,6 +90,8 @@ export function SendScreen() {
   const unreachable = unreachableAttachments(services, packet.attachments);
   const problems = validateSigners(ordered);
   const sum = summarize(view.checks);
+  // Wet signing needs the same clean bill as DocuSign: no PDF and no request while checks are open.
+  const inPersonGate = outputGate(view.checks, 'flatten');
   const tabCount = view.templates.reduce((n, t) => n + t.mapping.placements.filter((p) => ordered.some((s) => s.role === p.role)).length, 0);
   const blockers = [
     ...(sum.blocking ? [`${sum.blocking} pre-send ${sum.blocking === 1 ? 'check needs' : 'checks need'} attention`] : []),
@@ -186,7 +188,7 @@ export function SendScreen() {
   }
 
   async function inPerson() {
-    if (!contactId || !me || !owner || !view) return;
+    if (!contactId || !me || !owner || !view || !inPersonGate.allowed) return;
     setBusy('print');
     try {
       const bytes = await packetAsOnePdf(services, view.fills, 'flatten');
@@ -354,7 +356,7 @@ export function SendScreen() {
                     Fix in review
                   </Button>
                 )}
-                <Button variant="bordered" block icon="printer" busy={busy === 'print'} onClick={inPerson}>
+                <Button variant="bordered" block icon="printer" busy={busy === 'print'} disabled={!inPersonGate.allowed} onClick={inPerson}>
                   Download to sign in person
                 </Button>
               </section>

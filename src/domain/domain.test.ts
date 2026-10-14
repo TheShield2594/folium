@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CLIENTS, FIRM, TEMPLATES, USERS } from '../services/demo/seed';
-import { runChecks, summarize } from './checks';
+import { outputGate, runChecks, summarize, type CheckResult } from './checks';
 import { formatValue, resolveDateLimit, validateFormat } from './format';
 import { evaluateCondition, resolvePath } from './paths';
 import { fieldKey, inputsNeeded, mappingWarnings, migrateAccountValues, prefillForm, prefillPacket } from './prefill';
@@ -357,3 +357,42 @@ describe('docusign', () => {
     expect(() => buildEnvelopeDefinition({ ...req, signers: [{ ...req.signers[0], auth: 'email' as const }] }, {})).not.toThrow();
   });
 });
+
+describe('output gate', () => {
+  const pass: CheckResult = { id: 'required', level: 'pass', title: 'All required fields are filled' };
+  const warn: CheckResult = { id: 't:kind', level: 'warn', title: 'Scanned PDF' };
+  const block: CheckResult = { id: 't:required', level: 'block', title: '2 required fields', templateId: 't', fieldKey: 'k' };
+  const clean = [pass, warn];
+  const open = [pass, warn, block];
+
+  it('blocks send, flatten and print while a check blocks, and only then', () => {
+    for (const mode of ['send', 'flatten', 'print'] as const) {
+      expect(outputGate(clean, mode)).toEqual({ allowed: true, blockers: [], draftMark: false });
+      expect(outputGate(open, mode)).toEqual({ allowed: false, blockers: [block], draftMark: false });
+    }
+  });
+
+  it('keeps the editable PDF but marks it draft while checks are open', () => {
+    expect(outputGate(clean, 'fillable')).toEqual({ allowed: true, blockers: [], draftMark: false });
+    expect(outputGate(open, 'fillable')).toEqual({ allowed: true, blockers: [block], draftMark: true });
+    // A firm can ask for Laser App's stricter behaviour.
+    expect(outputGate(open, 'fillable', { blockFillable: true }).allowed).toBe(false);
+    expect(outputGate(clean, 'fillable', { blockFillable: true }).allowed).toBe(true);
+  });
+
+  it('always allows and always marks drafts', () => {
+    expect(outputGate(clean, 'draft')).toMatchObject({ allowed: true, draftMark: true });
+    expect(outputGate(open, 'draft')).toMatchObject({ allowed: true, draftMark: true });
+  });
+
+  it('never blocks on warnings', () => {
+    for (const mode of ['send', 'flatten', 'print', 'fillable', 'draft'] as const) expect(outputGate([warn, warn], mode).allowed).toBe(true);
+  });
+
+  it('blocks print for a retired revision', () => {
+    const retired = { ...bene, status: 'Retired' as const };
+    const checks = runChecks([prefillForm(retired, scope, {})], { scope, values: {}, latestFor: () => bene });
+    expect(outputGate(checks, 'print').blockers.some((b) => b.id === 'current-revisions')).toBe(true);
+  });
+});
+
