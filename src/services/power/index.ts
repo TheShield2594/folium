@@ -294,8 +294,13 @@ export function createPowerServices(): Services {
     async removeFile(url) {
       const path = decodeURIComponent(new URL(url).pathname.replace(new URL(SHAREPOINT.crmSite).pathname, ''));
       const meta = await client.executeAsync<Record<string, unknown>, { Id: string }>({ connectorOperation: { tableName: CONNECTORS.sharePoint, operationName: 'GetFileMetadataByPath', parameters: { dataset: SHAREPOINT.crmSite, path } } });
-      // Already gone (deleted by hand or by the retention flow): nothing to do.
-      if (!meta.success) return;
+      if (!meta.success) {
+        // Already gone (deleted by hand or by the retention flow): nothing to do. Anything
+        // else (throttling, auth) throws, so the caller keeps the file on record.
+        const err = meta.error as { status?: unknown; message?: string } | undefined;
+        if (err?.status === 404 || err?.status === '404' || /\b404\b|not found/i.test(err?.message ?? '')) return;
+        unwrap(meta, 'Find draft PDF');
+      }
       await connector(CONNECTORS.sharePoint, 'DeleteFile', { dataset: SHAREPOINT.crmSite, id: meta.data.Id }, 'Delete draft PDF');
     },
     async getFile(itemId) {

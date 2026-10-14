@@ -80,17 +80,26 @@ export function SendScreen() {
   /** The draft row saved for this envelope, so a retry updates it instead of adding another. */
   const savedDraft = useRef<SignatureRequest>(undefined);
 
+  // Users and Assistants can't edit a locked note; Admins can. The disclosure is still added.
+  const messageLocked = !!policy.lockMessage && me?.role !== 'Admin';
+
   // Seed signers and message once the packet is known, restoring what a draft saved.
   useEffect(() => {
     if (!scope || !view || signers.length) return;
     const assigned = assignSigners(needs, scope, owner?.defaultAuth ?? 'sms');
+    const ctx = { client: scope.client.contact, advisor: owner ?? {}, firm, forms: view.templates.map((t) => t.name) };
+    const sending = firm?.sending;
+    const firmMessage = sending?.messageTemplate
+      ? fillTokens(sending.messageTemplate, ctx)
+      : `Hi ${scope.client.contact.firstname},\n\nHere ${view.templates.length === 1 ? 'is the form' : `are the ${view.templates.length} forms`} we talked about. They’re already filled in from what we have on file — please look them over and sign. Call me with any questions.\n\n${owner?.emailSignature ?? `${owner?.fullname ?? ''}\n${owner?.phone ?? ''}`}`;
     if (existing && (existing.signers.length || existing.subject)) {
       // Saved signers (in their saved order) for roles the packet still needs, then any new role.
       const kept = [...existing.signers].sort((a, b) => a.order - b.order).filter((x) => assigned.some((a) => a.role === x.role));
       const added = assigned.filter((a) => !kept.some((x) => x.role === a.role));
       setSigners([...kept, ...added].map((x, k) => ({ ...x, order: k + 1 })));
       setSubject(existing.subject);
-      setMessage(existing.message);
+      // A locked note is the firm's, even if the draft saved another before the lock.
+      setMessage(messageLocked ? firmMessage : existing.message);
       setAnyOrder(existing.anyOrder);
       setCcMe(existing.ccs.length > 0);
       if (existing.reminderDays !== undefined) setReminder(String(existing.reminderDays));
@@ -99,15 +108,9 @@ export function SendScreen() {
     }
     setSigners(assigned);
     setAnyOrder(defaultAnyOrder);
-    const ctx = { client: scope.client.contact, advisor: owner ?? {}, firm, forms: view.templates.map((t) => t.name) };
-    const sending = firm?.sending;
     setSubject(sending?.subjectTemplate ? fillSubject(sending.subjectTemplate, ctx) : `Forms to sign: ${listForms(view.templates.map((t) => t.name.toLowerCase()))}`.slice(0, SUBJECT_MAX));
-    setMessage(
-      sending?.messageTemplate
-        ? fillTokens(sending.messageTemplate, ctx)
-        : `Hi ${scope.client.contact.firstname},\n\nHere ${view.templates.length === 1 ? 'is the form' : `are the ${view.templates.length} forms`} we talked about. They’re already filled in from what we have on file — please look them over and sign. Call me with any questions.\n\n${owner?.emailSignature ?? `${owner?.fullname ?? ''}\n${owner?.phone ?? ''}`}`,
-    );
-  }, [scope, view, needs, owner, existing, signers.length, firm, defaultAnyOrder]);
+    setMessage(firmMessage);
+  }, [scope, view, needs, owner, existing, signers.length, firm, defaultAnyOrder, messageLocked]);
 
   if (!client) return <NoClient />;
   if (!view || !packet.items.length) {
@@ -133,8 +136,6 @@ export function SendScreen() {
   const attachmentChecks = checkAttachments(packet.attachments, limits);
   const attachedMB = attachmentsMB(packet.attachments);
   const envelopeMB = formBytes === undefined ? undefined : formBytes / MB + attachedMB;
-  // Users and Assistants can't edit a locked note; Admins can. The disclosure is still added.
-  const messageLocked = !!policy.lockMessage && me?.role !== 'Admin';
   const canShare = sharingAllowed(policy);
   const blockers = [
     ...(sum.blocking ? [`${sum.blocking} pre-send ${sum.blocking === 1 ? 'check needs' : 'checks need'} attention`] : []),
@@ -479,7 +480,7 @@ export function SendScreen() {
                   </div>
                   <div className="row" title="Forms and supporting documents together. DocuSign receives about a third more once they’re encoded.">
                     <span className="grow">Envelope size</span>
-                    <strong className="tabular">{envelopeMB === undefined ? '—' : `${envelopeMB < 0.1 ? '< 0.1' : envelopeMB.toFixed(1)} MB`}</strong>
+                    <strong className={envelopeMB !== undefined && envelopeMB > limits.maxMB ? 'c-warn tabular' : 'tabular'}>{envelopeMB === undefined ? '—' : `${envelopeMB < 0.1 ? '< 0.1' : envelopeMB.toFixed(1)} MB`}</strong>
                   </div>
                   <div className="row"><span className="grow">Checks</span><strong className={sum.blocking ? 'c-warn' : 'c-accent'}>{sum.blocking ? `${sum.blocking} to fix` : 'All passed'}</strong></div>
                 </div>

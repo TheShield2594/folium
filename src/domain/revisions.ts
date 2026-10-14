@@ -112,7 +112,11 @@ export function carryForward(previous: TemplateMapping | undefined, rows: FieldD
   };
 }
 
-const today = () => new Date().toISOString().slice(0, 10);
+/** Today as an ISO date in local time: effective dates are the advisor's calendar days, not UTC's. */
+const today = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 
 /**
  * The revision advisors should use for a form number: the Live revision with the

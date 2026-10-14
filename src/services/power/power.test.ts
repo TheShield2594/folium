@@ -17,6 +17,9 @@ const connectionRows: Record<string, Record<string, unknown>[]> = {};
 const ok = <T,>(data: T) => ({ success: true, data });
 /** `ev_foliumsetting` rows, by ID. */
 const settingRows: Record<string, Record<string, unknown>> = {};
+/** What the SharePoint connector answers to a file lookup, and the files it was asked to delete. */
+let fileLookup: { success: boolean; data?: { Id: string }; error?: Record<string, unknown> } = { success: true, data: { Id: 'item-1' } };
+const deletedFiles: string[] = [];
 
 vi.mock('@microsoft/power-apps/app', () => ({ getContext: vi.fn() }));
 vi.mock('@microsoft/power-apps/data', () => ({
@@ -29,6 +32,12 @@ vi.mock('@microsoft/power-apps/data', () => ({
         return ok(Object.values(settingRows).filter((r) => !name || r.ev_name === name));
       }
       return ok(table === 'connections' ? (connectionRows[opts?.filter?.split(' ')[0] ?? ''] ?? []) : []);
+    },
+    executeAsync: async (req: { connectorOperation: { operationName: string; parameters: { id?: string } } }) => {
+      const { operationName, parameters } = req.connectorOperation;
+      if (operationName === 'GetFileMetadataByPath') return fileLookup;
+      if (operationName === 'DeleteFile') return deletedFiles.push(parameters.id ?? ''), ok({});
+      throw new Error(`Unexpected connector call ${operationName}`);
     },
     createRecordAsync: async (table: string, data: Record<string, unknown>) => {
       if (table !== 'ev_foliumsettings') throw new Error(`Unexpected create on ${table}`);
@@ -172,5 +181,25 @@ describe('firm policy row', () => {
     await directory.savePolicy({ ...policy, sharing: 'anyone' });
     expect(Object.keys(settingRows)).toHaveLength(2);
     expect((await directory.getPolicy()).sharing).toBe('anyone');
+  });
+});
+
+describe('deleting draft PDFs', () => {
+  const url = 'https://everence.sharepoint.com/sites/CRM/contact/Jordan/DRAFT%20EV-1120.pdf';
+
+  it('deletes the file it finds, and treats a missing file as already deleted', async () => {
+    const { drafts } = createPowerServices();
+    deletedFiles.length = 0;
+    fileLookup = { success: true, data: { Id: 'item-1' } };
+    await drafts.removeFile(url);
+    expect(deletedFiles).toEqual(['item-1']);
+    fileLookup = { success: false, error: { status: 404, message: 'File not found' } };
+    await expect(drafts.removeFile(url)).resolves.toBeUndefined();
+  });
+
+  it('reports any other lookup failure, so the file stays on record', async () => {
+    const { drafts } = createPowerServices();
+    fileLookup = { success: false, error: { status: 429, message: 'Too many requests' } };
+    await expect(drafts.removeFile(url)).rejects.toThrow();
   });
 });

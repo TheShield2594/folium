@@ -24,6 +24,12 @@ const DOWNLOAD: Record<PdfDownloadPolicy, { label: string; effect: string }> = {
   none: { label: 'Off', effect: 'No PDF downloads or printing at all: DocuSign is the only way out, and signed envelopes are filed from DocuSign.' },
 };
 
+/** A typed limit as a whole number from 1 to `max`; empty or below 1 goes back to the default. */
+const clampLimit = (raw: string, max: number) => {
+  const n = Math.round(Number(raw));
+  return Number.isFinite(n) && n >= 1 ? Math.min(n, max) : undefined;
+};
+
 /** Firm-wide rules, saved in their own settings row ("Policy"), shared by every firm profile. */
 export function AdminSettings() {
   const policy = useApp((s) => s.policy);
@@ -116,10 +122,10 @@ export function AdminSettings() {
             <h2 id="env-h" className="t-title3">Envelopes</h2>
             <div className="grid-2">
               <Field label="Most supporting documents" htmlFor="p-maxn">
-                <TextInput id="p-maxn" type="number" min={1} max={50} value={p.maxAttachments ?? ''} placeholder={String(DEFAULT_ATTACHMENT_LIMITS.maxFiles)} onChange={(e) => set({ maxAttachments: Number(e.target.value) || undefined })} />
+                <TextInput id="p-maxn" type="number" min={1} max={50} value={p.maxAttachments ?? ''} placeholder={String(DEFAULT_ATTACHMENT_LIMITS.maxFiles)} onChange={(e) => set({ maxAttachments: clampLimit(e.target.value, 50) })} />
               </Field>
               <Field label="Most MB of supporting documents" htmlFor="p-maxmb" help="Check DocuSign’s and the connector’s request limits before raising it.">
-                <TextInput id="p-maxmb" type="number" min={1} max={100} value={p.maxAttachmentsMB ?? ''} placeholder={String(DEFAULT_ATTACHMENT_LIMITS.maxMB)} onChange={(e) => set({ maxAttachmentsMB: Number(e.target.value) || undefined })} />
+                <TextInput id="p-maxmb" type="number" min={1} max={100} value={p.maxAttachmentsMB ?? ''} placeholder={String(DEFAULT_ATTACHMENT_LIMITS.maxMB)} onChange={(e) => set({ maxAttachmentsMB: clampLimit(e.target.value, 100) })} />
               </Field>
             </div>
           </section>
