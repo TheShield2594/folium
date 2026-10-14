@@ -242,6 +242,16 @@ export function createPowerServices(): Services {
       await connector(CONNECTORS.sharePoint, 'CreateFile', { dataset: SHAREPOINT.crmSite, folderPath, name: fileName, body: pdf }, 'Save draft');
       return { url: `${folder}/${encodeURIComponent(fileName)}` };
     },
+    async saveAttachment(contactId, fileName, bytes) {
+      const folder = `${await drafts.folderUrl(contactId)}/${SHAREPOINT.attachmentsFolder}`;
+      const folderPath = new URL(folder).pathname.replace(new URL(SHAREPOINT.crmSite).pathname, '');
+      const created = await connector<{ Id: string }>(CONNECTORS.sharePoint, 'CreateFile', { dataset: SHAREPOINT.crmSite, folderPath, name: fileName, body: bytes }, `Save ${fileName}`);
+      return { itemId: created.Id, url: `${folder}/${encodeURIComponent(fileName)}` };
+    },
+    async getFile(itemId) {
+      const content = await connector<string | Uint8Array>(CONNECTORS.sharePoint, 'GetFileContent', { dataset: SHAREPOINT.crmSite, id: itemId }, 'Download attachment');
+      return typeof content === 'string' ? Uint8Array.from(atob(content), (ch) => ch.charCodeAt(0)) : content;
+    },
   };
 
   // ---------------------------------------------------------------- Requests & packets

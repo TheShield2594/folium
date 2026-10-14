@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { FieldState } from '../../domain/prefill';
-import { inputsNeeded } from '../../domain/prefill';
+import { inputsNeeded, snapshotDiff } from '../../domain/prefill';
 import { summarize } from '../../domain/checks';
 import { sourceKind } from '../../domain/paths';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
 import { packetAsOnePdf, saveDraft } from '../../state/actions';
 import { useActingFor, useApp } from '../../state/store';
-import { Button, Empty, IconButton, Menu, Segmented, downloadBytes, openPdf, toast } from '../../ui/controls';
+import { Button, Empty, IconButton, Menu, Segmented, Select, downloadBytes, openPdf, toast } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
 import { NoClient } from '../common/NoClient';
 import { PdfView } from '../common/PdfView';
@@ -28,6 +28,7 @@ export function ReviewScreen() {
   const refreshRequests = useApp((s) => s.refreshRequests);
   const markUsed = useApp((s) => s.markUsed);
   const requests = useApp((s) => s.requests);
+  const setPacketAccount = useApp((s) => s.setPacketAccount);
   const owner = useActingFor();
   const services = useServices();
   const view = usePacketView();
@@ -75,6 +76,15 @@ export function ReviewScreen() {
   const optionalNeeds = needs.filter((n) => !n.required);
   const [showOptional, setShowOptional] = useState(false);
   const sum = view ? summarize(view.checks) : undefined;
+  const changedSince = useMemo(() => (view ? snapshotDiff(packet.snapshot, view.fills) : []), [view, packet.snapshot]);
+  const replaced = packet.items.filter((i) => i.accountReplaced);
+
+  /** Settle one "changed in Dynamics" row: keep the saved value as an override, or take the new one. */
+  function settleChange(key: string, keep: string | undefined) {
+    setValue(key, keep);
+    const { [key]: _done, ...rest } = useApp.getState().packet.snapshot ?? {};
+    setPacket({ snapshot: rest });
+  }
   const selectedField: FieldState | undefined = useMemo(() => fill?.fields.find((f) => f.key === selected) ?? view?.fills.flatMap((f) => f.fields).find((f) => f.key === selected), [fill, view, selected]);
 
   // Jump to the form + field for a key (from checks or the inputs list).
@@ -114,7 +124,7 @@ export function ReviewScreen() {
     try {
       const existing = packet.requestId ? requests.find((r) => r.id === packet.requestId) : undefined;
       const saved = await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing, writePdfs: true });
-      setPacket({ requestId: saved.id, title: saved.title });
+      setPacket({ requestId: saved.id, title: saved.title, attachments: saved.attachments, snapshot: saved.prefillSnapshot });
       await refreshRequests();
       toast.ok(`Draft saved to ${client!.contact.firstname}’s SharePoint folder`);
     } catch (e) {
@@ -243,6 +253,56 @@ export function ReviewScreen() {
               onClose={() => setSelected(undefined)}
               usedOn={view.fills.filter((f) => f.fields.some((x) => x.key === selectedField.key)).map((f) => f.template.name)}
             />
+          )}
+
+          {replaced.map((item) => {
+            const t = view.templates.find((x) => x.id === item.templateId);
+            if (!t) return null;
+            return (
+              <section key={item.templateId} className="banner" role="alert" style={{ alignItems: 'flex-start', flexDirection: 'column', gap: 8 }}>
+                <span className="t-callout">
+                  <Icon name="warning" size={16} /> <strong>{t.name}:</strong> the account this draft used is no longer active. Pick one.
+                </span>
+                <Select aria-label={`Account for ${t.name}`} value={item.accountId ?? ''} onChange={(e) => setPacketAccount(item.templateId, e.target.value)}>
+                  <option value="" disabled>
+                    Choose account…
+                  </option>
+                  {client.accounts.map((a) => (
+                    <option key={a.accountid} value={a.accountid}>
+                      {a.name} · {a.ev_accountno}
+                    </option>
+                  ))}
+                </Select>
+                {item.accountId && (
+                  <Button variant="plain" size="sm" onClick={() => setPacketAccount(item.templateId, item.accountId!)}>
+                    Keep {client.accounts.find((a) => a.accountid === item.accountId)?.name}
+                  </Button>
+                )}
+              </section>
+            );
+          })}
+
+          {changedSince.length > 0 && (
+            <section className="card card-pad stack-3" aria-labelledby="changed-h">
+              <h2 id="changed-h" className="t-headline">Changed in Dynamics since you saved</h2>
+              <p className="t-footnote c3">The forms show today’s values. Keep the value from when you saved if that’s what the client gave you.</p>
+              {changedSince.map((c) => (
+                <div key={c.key} className="stack" style={{ gap: 4 }}>
+                  <span className="t-callout" style={{ fontWeight: 600 }}>{c.label}</span>
+                  <span className="t-footnote c2">
+                    Saved: {c.saved || '(empty)'} · Now: {c.now || '(empty)'}
+                  </span>
+                  <div className="row" style={{ gap: 6 }}>
+                    <Button variant="gray" size="sm" onClick={() => settleChange(c.key, c.saved)}>
+                      Keep saved
+                    </Button>
+                    <Button variant="plain" size="sm" onClick={() => settleChange(c.key, undefined)}>
+                      Use new
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </section>
           )}
 
           <section className="stack-3" aria-labelledby="needs-h">

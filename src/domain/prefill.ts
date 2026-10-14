@@ -182,3 +182,42 @@ export function inputsNeeded(fills: FormFill[]): { key: string; fields: FieldSta
     .map(([key, fields]) => ({ key, fields, required: fields.some((f) => f.required || (f.formatError && f.value)) }))
     .sort((a, b) => Number(b.required) - Number(a.required));
 }
+
+// ---------------------------------------------------------------- Draft snapshots
+
+const isSsn = (f: FieldState) => f.mapping.format === 'ssn' || f.mapping.format === 'ssnLast4' || /ev_ssn|ssnLast4/.test(f.mapping.source);
+const fromCrm = (f: FieldState) => {
+  const kind = sourceKind(f.mapping.source);
+  return (kind === 'crm' || kind === 'computed') && !f.mapping.source.includes('today') && !isSsn(f);
+};
+/** What CRM gave a field, whether or not the advisor overrode it. */
+const crmOf = (f: FieldState) => (f.origin === 'edited' ? (f.crmValue ?? '') : f.origin === 'crm' || f.origin === 'computed' ? f.value : '');
+
+/** CRM-derived value per field key, for `SignatureRequest.prefillSnapshot`. SSNs are never included. */
+export function prefillSnapshot(fills: FormFill[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const f of fills.flatMap((x) => x.fields)) if (fromCrm(f) && !(f.key in out)) out[f.key] = crmOf(f);
+  return out;
+}
+
+export interface SnapshotChange {
+  key: string;
+  label: string;
+  saved: string;
+  now: string;
+}
+
+/** CRM values that changed since the draft was saved. */
+export function snapshotDiff(snapshot: Record<string, string> | undefined, fills: FormFill[]): SnapshotChange[] {
+  if (!snapshot) return [];
+  const out: SnapshotChange[] = [];
+  const seen = new Set<string>();
+  for (const f of fills.flatMap((x) => x.fields)) {
+    if (seen.has(f.key) || !fromCrm(f) || !(f.key in snapshot)) continue;
+    seen.add(f.key);
+    const saved = snapshot[f.key];
+    const now = crmOf(f);
+    if (saved !== now) out.push({ key: f.key, label: f.label, saved, now });
+  }
+  return out;
+}

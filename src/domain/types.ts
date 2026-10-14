@@ -189,6 +189,8 @@ export interface PacketItem {
   templateId: string;
   /** Which account this form is about, if the form is account-specific. */
   accountId?: string;
+  /** Set when a resumed draft's account is no longer active and Folium picked another. */
+  accountReplaced?: boolean;
 }
 
 /** A saved, reusable list of forms ("Save as packet"). */
@@ -234,6 +236,8 @@ export interface RequestDocument {
   name: string;
   formNumber: string;
   revision: string;
+  /** The account the form is about, so a resumed draft reopens on the same one. */
+  accountId?: string;
 }
 
 export interface Attachment {
@@ -241,6 +245,8 @@ export interface Attachment {
   name: string;
   size: number;
   addedOn: string;
+  /** Where the bytes were saved with the draft (the contact's SharePoint folder). */
+  storedAt?: { itemId: string; url: string };
 }
 
 export interface SignatureRequest {
@@ -277,6 +283,11 @@ export interface SignatureRequest {
   uploadedOn?: string;
   /** Field values the advisor entered, keyed by canonical key, so a draft can be resumed. */
   values: Record<string, string>;
+  /**
+   * CRM-derived value per field key when the draft was saved, so a resumed draft can
+   * say what changed in Dynamics since. SSN fields are left out (they stay live only).
+   */
+  prefillSnapshot?: Record<string, string>;
   attachments: Attachment[];
   audit: AuditEvent[];
   inPerson?: boolean;

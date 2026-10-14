@@ -5,7 +5,7 @@ import { assignSigners, roleLabel, rolesForPacket, validateSigners } from '../..
 import type { SignatureRequest, SignerAssignment, VerificationMethod } from '../../domain/types';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
-import { audit, fillPacket, packetAsOnePdf, saveDraft } from '../../state/actions';
+import { attachmentBytes, audit, fillPacket, packetAsOnePdf, saveDraft, unreachableAttachments, type SendSetup } from '../../state/actions';
 import { useActingFor, useApp, useScope } from '../../state/store';
 import { Avatar, Button, Empty, Field, IconButton, Menu, Select, SwitchRow, TextArea, TextInput, downloadBytes, toast } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
@@ -49,17 +49,24 @@ export function SendScreen() {
   /** The draft row saved for this envelope, so a retry updates it instead of adding another. */
   const savedDraft = useRef<SignatureRequest>(undefined);
 
-  // Seed signers and message once the packet is known (or restore them from a draft).
+  // Seed signers and message once the packet is known, restoring what a draft saved.
   useEffect(() => {
     if (!scope || !view || signers.length) return;
-    if (existing?.signers.length) {
-      setSigners(existing.signers);
+    const assigned = assignSigners(needs, scope, owner?.defaultAuth ?? 'sms');
+    if (existing && (existing.signers.length || existing.subject)) {
+      // Saved signers (in their saved order) for roles the packet still needs, then any new role.
+      const kept = [...existing.signers].sort((a, b) => a.order - b.order).filter((x) => assigned.some((a) => a.role === x.role));
+      const added = assigned.filter((a) => !kept.some((x) => x.role === a.role));
+      setSigners([...kept, ...added].map((x, k) => ({ ...x, order: k + 1 })));
       setSubject(existing.subject);
       setMessage(existing.message);
       setAnyOrder(existing.anyOrder);
+      setCcMe(existing.ccs.length > 0);
+      if (existing.reminderDays !== undefined) setReminder(String(existing.reminderDays));
+      if (existing.expiresInDays) setExpires(String(existing.expiresInDays));
       return;
     }
-    setSigners(assignSigners(needs, scope, owner?.defaultAuth ?? 'sms'));
+    setSigners(assigned);
     const names = view.templates.map((t) => t.name.toLowerCase());
     setSubject(`Forms to sign: ${names.length <= 2 ? names.join(' and ') : `${names.slice(0, 2).join(', ')} and more`}`.slice(0, 100));
     setMessage(
@@ -80,6 +87,7 @@ export function SendScreen() {
   }
 
   const ordered = signers.map((s) => ({ ...s, order: anyOrder ? 1 : s.order }));
+  const unreachable = unreachableAttachments(services, packet.attachments);
   const problems = validateSigners(ordered);
   const sum = summarize(view.checks);
   const tabCount = view.templates.reduce((n, t) => n + t.mapping.placements.filter((p) => ordered.some((s) => s.role === p.role)).length, 0);
@@ -87,6 +95,7 @@ export function SendScreen() {
     ...(sum.blocking ? [`${sum.blocking} pre-send ${sum.blocking === 1 ? 'check needs' : 'checks need'} attention`] : []),
     ...problems.map((p) => p.message),
     ...(!subject.trim() ? ['Add an email subject'] : []),
+    ...unreachable.map((a) => `Re-attach ${a.name}`),
   ];
 
   function update(i: number, patch: Partial<SignerAssignment>) {
@@ -108,7 +117,8 @@ export function SendScreen() {
     let envelopeId: string;
     try {
       const docs = await fillPacket(services, view.fills, 'flatten');
-      const attachments = packet.attachments.map((a) => services.attachments.get(a.id)).filter((x): x is NonNullable<typeof x> => !!x);
+      const attachments: { name: string; pdf: Uint8Array }[] = [];
+      for (const a of packet.attachments) attachments.push({ name: a.name, pdf: await attachmentBytes(services, a) });
       ({ envelopeId } = await services.signing.send({
         documents: docs.map((d) => ({ name: d.fileName, pdf: d.pdf, placements: d.placements })),
         signers: ordered,
@@ -117,7 +127,7 @@ export function SendScreen() {
         message: firm?.disclosure ? `${message}\n\n${firm.disclosure}` : message,
         reminderDays: reminder === '0' ? undefined : Number(reminder),
         expiresInDays: Number(expires),
-        attachments: attachments.map((a) => ({ name: a.meta.name, pdf: a.bytes })),
+        attachments,
       }));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'DocuSign didn’t accept the envelope');
@@ -126,6 +136,12 @@ export function SendScreen() {
     }
     setSentEnvelopeId(envelopeId);
     await recordSent(envelopeId);
+  }
+
+  /** What a draft keeps of this screen, so it reopens set up the same way. */
+  function sendSetup(): SendSetup {
+    // 0 = never remind; the sent record stores that as no reminder.
+    return { signers: ordered, ccs: ccList(), subject, message, anyOrder, reminderDays: Number(reminder), expiresInDays: Number(expires) };
   }
 
   function ccList() {
@@ -175,8 +191,8 @@ export function SendScreen() {
     try {
       const bytes = await packetAsOnePdf(services, view.fills, 'flatten');
       downloadBytes(bytes, `${client!.contact.lastname} - sign in person.pdf`);
-      const draft = await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing });
-      await services.requests.save({ ...draft, inPerson: true, signers: ordered, audit: [...draft.audit, audit(me, 'Downloaded to sign in person')] });
+      const draft = await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing, sendSetup: sendSetup() });
+      await services.requests.save({ ...draft, inPerson: true, audit: [...draft.audit, audit(me, 'Downloaded to sign in person')] });
       setPacket({ requestId: draft.id });
       markUsed(view.templates.map((t) => t.id));
       await refreshRequests();
@@ -306,7 +322,7 @@ export function SendScreen() {
                   <div className="row"><span className="grow">Forms</span><strong className="tabular">{view.templates.length}</strong></div>
                   <div className="row"><span className="grow">Signers</span><strong className="tabular">{ordered.length}</strong></div>
                   <div className="row"><span className="grow">Signature tabs</span><strong className="tabular">{tabCount}</strong></div>
-                  <div className="row"><span className="grow">Attachments</span><strong className="tabular">{packet.attachments.length}</strong></div>
+                  <div className="row"><span className="grow">Attachments</span><strong className={unreachable.length ? 'c-warn tabular' : 'tabular'}>{packet.attachments.length - unreachable.length}</strong></div>
                   <div className="row"><span className="grow">Checks</span><strong className={sum.blocking ? 'c-warn' : 'c-accent'}>{sum.blocking ? `${sum.blocking} to fix` : 'All passed'}</strong></div>
                 </div>
                 {blockers.length > 0 && (
@@ -352,7 +368,7 @@ export function SendScreen() {
           </div>
         </div>
       </div>
-      {sharing && <ShareSheet onClose={() => setSharing(false)} />}
+      {sharing && <ShareSheet onClose={() => setSharing(false)} sendSetup={sendSetup()} />}
     </>
   );
 }
