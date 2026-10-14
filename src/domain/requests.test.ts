@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { expiresOnFrom, expiryInfo, isFinished, mapDocuSignStatus } from './requests';
+import { draftExpiry, draftExpiryInfo, draftsAllowed, expiresOnFrom, expiryInfo, isFinished, isRetainable, mapDocuSignStatus, retentionDays } from './requests';
 
 describe('mapDocuSignStatus', () => {
   it('maps every known DocuSign status', () => {
@@ -72,5 +72,38 @@ describe('demo DocuSign', () => {
     expect(st.voidedReason).toMatch(/expired/i);
     expect(st.recipients.find((r) => r.role === 'Owner')?.status).toBe('completed');
     expect(st.recipients.find((r) => r.role === 'SpouseConsent')?.status).toBe('sent');
+  });
+});
+
+describe('draft retention', () => {
+  const saved = '2026-10-01T12:00:00.000Z';
+
+  it('counts each retention option from the last save', () => {
+    for (const days of [90, 60, 30, 10, 7]) {
+      expect(draftExpiry(saved, days)).toBe(new Date(Date.parse(saved) + days * 86_400_000).toISOString());
+    }
+    expect(draftExpiry(saved, 0)).toBeUndefined();
+    expect(retentionDays(undefined)).toBe(90);
+    expect(retentionDays({ draftRetentionDays: 0 })).toBe(0);
+    expect(retentionDays({ draftRetentionDays: 45 })).toBe(90);
+    expect(draftsAllowed({ draftRetentionDays: 0 })).toBe(false);
+  });
+
+  it('says a draft is expiring soon at 7 days or fewer', () => {
+    const now = new Date(saved);
+    const at = (days: number) => ({ status: 'Drafted' as const, expiresOn: new Date(now.getTime() + days * 86_400_000).toISOString() });
+    expect(draftExpiryInfo(at(8), now)).toMatchObject({ daysLeft: 8, soon: false });
+    expect(draftExpiryInfo(at(7), now)).toMatchObject({ daysLeft: 7, soon: true });
+    expect(draftExpiryInfo(at(1), now)?.soon).toBe(true);
+    expect(draftExpiryInfo({ status: 'Drafted' }, now)).toBeUndefined();
+  });
+
+  it('never expires printed packets, sends in progress or sent requests', () => {
+    expect(isRetainable({ status: 'Drafted' })).toBe(true);
+    expect(isRetainable({ status: 'Drafted', inPerson: true })).toBe(false);
+    expect(isRetainable({ status: 'Drafted', envelopeId: 'e-1' })).toBe(false);
+    expect(isRetainable({ status: 'Sent' })).toBe(false);
+    expect(isRetainable({ status: 'Signed' })).toBe(false);
+    expect(draftExpiryInfo({ status: 'Sent', expiresOn: saved })).toBeUndefined();
   });
 });

@@ -228,3 +228,58 @@ export function toNumber(v: string | undefined): number {
   const n = Number(String(v).replace(/[$,%\s]/g, ''));
   return Number.isFinite(n) ? n : 0;
 }
+
+// ---------------------------------------------------------------- Envelope email templates
+
+/** What envelope subject and message tokens can read. */
+export interface MessageContext {
+  /** The D365 contact: `{client.<column>}`. */
+  client: object;
+  /** The acting advisor's profile: `{advisor.<field>}`. */
+  advisor: { fullname?: string; phone?: string; emailSignature?: string };
+  /** The firm profile: `{firm.<field>}`. */
+  firm?: object;
+  /** Form names in the packet, in order. */
+  forms: string[];
+}
+
+/** "a", "a and b", "a, b and more". */
+export function listForms(names: string[]): string {
+  return names.length <= 2 ? names.join(' and ') : `${names.slice(0, 2).join(', ')} and more`;
+}
+
+/**
+ * Fill `{client.firstname}`, `{advisor.fullname}`, `{firm.name}`, `{forms}`,
+ * `{formCount}` and `{advisor.signature}` (the advisor's email signature, else their
+ * name and phone). Unknown or empty tokens become empty strings, so a missing CRM value
+ * never prints "{client.middlename}".
+ */
+export function fillTokens(text: string, ctx: MessageContext): string {
+  return text.replace(/\{\s*([a-zA-Z]+)(?:\.([a-zA-Z0-9_]+))?\s*\}/g, (_m, root: string, attr?: string) => {
+    const read = (o: object | undefined) => {
+      const v = attr && o ? (o as Record<string, unknown>)[attr] : undefined;
+      return v === undefined || v === null || typeof v === 'object' ? '' : String(v);
+    };
+    switch (root) {
+      case 'forms':
+        return attr ? '' : listForms(ctx.forms.map((f) => f.toLowerCase()));
+      case 'formCount':
+        return attr ? '' : String(ctx.forms.length);
+      case 'client':
+        return read(ctx.client);
+      case 'advisor':
+        if (attr === 'signature') return ctx.advisor.emailSignature || [ctx.advisor.fullname, ctx.advisor.phone].filter(Boolean).join('\n');
+        return read(ctx.advisor);
+      case 'firm':
+        return read(ctx.firm);
+      default:
+        return '';
+    }
+  });
+}
+
+/** DocuSign's limit on an envelope's email subject. */
+export const SUBJECT_MAX = 100;
+
+/** The email subject from a template: tokens filled, whitespace tidied, cut to DocuSign's 100 characters. */
+export const fillSubject = (template: string, ctx: MessageContext) => fillTokens(template, ctx).replace(/\s+/g, ' ').trim().slice(0, SUBJECT_MAX);

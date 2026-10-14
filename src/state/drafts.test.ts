@@ -3,8 +3,9 @@ import { findNameClash, nextFreeName } from '../domain/drafts';
 import { prefillPacket, snapshotDiff, prefillSnapshot } from '../domain/prefill';
 import type { ClientRecord, PacketItem, SignatureRequest } from '../domain/types';
 import { createDemoServices, resetDemo } from '../services/demo';
+import { removedFiles } from '../services/demo/index';
 import { CLIENTS, FIRM, TEMPLATES, USERS } from '../services/demo/seed';
-import { attachmentBytes, fillPacket, saveDraft, unreachableAttachments } from './actions';
+import { attachmentBytes, deleteDraft, fillPacket, saveDraft, unreachableAttachments } from './actions';
 import { PACKET_LIMIT, useApp, type Packet } from './store';
 
 const client = structuredClone(CLIENTS['c-jordan']) as ClientRecord;
@@ -283,5 +284,54 @@ describe('person blocks on a draft', () => {
     const saved = await saveDraft({ services, packet: packet({ items: its, personBlocks }), fills: fillsFor(client, its), contactId: 'c-jordan', me, owner: me });
     useApp.getState().loadRequest((await services.requests.get(saved.id))!);
     expect(useApp.getState().packet.personBlocks).toEqual(personBlocks);
+  });
+});
+
+describe('draft retention', () => {
+  it('sets the expiry from the firm’s retention at every save', async () => {
+    const services = createDemoServices();
+    const before = Date.now();
+    const saved = await saveDraft({ services, packet: packet(), fills: fillsFor(client, items), contactId: 'c-jordan', me, owner: me, retentionDays: 30 });
+    const days = (new Date(saved.expiresOn!).getTime() - before) / 86_400_000;
+    expect(days).toBeGreaterThan(29.99);
+    expect(days).toBeLessThan(30.01);
+    const again = await saveDraft({ services, packet: packet(), fills: fillsFor(client, items), contactId: 'c-jordan', me, owner: me, existing: saved, retentionDays: 7 });
+    expect(new Date(again.expiresOn!).getTime()).toBeLessThan(new Date(saved.expiresOn!).getTime());
+  });
+
+  it('leaves rows the clean-up never deletes without a draft expiry', async () => {
+    const services = createDemoServices();
+    const printed = await saveDraft({ services, packet: packet(), fills: fillsFor(client, items), contactId: 'c-jordan', me, owner: me, existing: { ...(await saveDraft({ services, packet: packet(), fills: fillsFor(client, items), contactId: 'c-jordan', me, owner: me })), inPerson: true, expiresOn: undefined } });
+    expect(printed.expiresOn).toBeUndefined();
+    const off = await saveDraft({ services, packet: packet(), fills: fillsFor(client, items), contactId: 'c-jordan', me, owner: me, retentionDays: 0 });
+    expect(off.expiresOn).toBeUndefined();
+  });
+
+  it('records a forms update in the audit trail at the next save', async () => {
+    const services = createDemoServices();
+    const saved = await saveDraft({ services, packet: packet({ formsUpdated: 'EV-1120 Rev 03/25 → 03/2026' }), fills: fillsFor(client, items), contactId: 'c-jordan', me, owner: me });
+    expect(saved.audit.map((a) => a.action)).toEqual(['Forms updated', 'Draft saved']);
+    expect(saved.audit[0].detail).toBe('EV-1120 Rev 03/25 → 03/2026');
+  });
+
+  it('deletes a draft’s SharePoint PDFs with the row', async () => {
+    const services = createDemoServices();
+    const saved = await saveDraft({ services, packet: packet({ title: 'To delete' }), fills: fillsFor(client, items), contactId: 'c-jordan', me, owner: me, writePdfs: true });
+    removedFiles.length = 0;
+    expect(await deleteDraft(services, saved)).toEqual([]);
+    expect(removedFiles).toEqual(saved.draftFiles!.map((f) => f.url));
+    expect((await services.requests.listForContact('c-jordan')).some((r) => r.id === saved.id)).toBe(false);
+    await services.requests.restore(saved.id);
+    expect((await services.requests.get(saved.id))?.draftFiles).toBeUndefined();
+  });
+
+  it('names a form whose template is gone instead of dropping it', async () => {
+    const services = createDemoServices();
+    const saved = await saveDraft({ services, packet: packet(), fills: fillsFor(client, items), contactId: 'c-jordan', me, owner: me });
+    useApp.setState({ templates: TEMPLATES.filter((t) => t.id !== 'tpl-px310-0826' && t.formNumber !== 'PX-310') });
+    useApp.getState().loadRequest(saved);
+    const first = useApp.getState().packet.items[0];
+    expect(first.templateId).toBe('tpl-px310-0826');
+    expect(first.missing).toMatchObject({ formNumber: 'PX-310' });
   });
 });

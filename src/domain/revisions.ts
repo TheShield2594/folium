@@ -1,4 +1,4 @@
-import type { FieldMapping, TemplateMapping } from './types';
+import type { FieldMapping, FormTemplate, TemplateMapping } from './types';
 
 export type FieldChange = 'unchanged' | 'new' | 'renamed' | 'removed';
 
@@ -110,4 +110,23 @@ export function carryForward(previous: TemplateMapping | undefined, rows: FieldD
       .map((c) => ('fields' in c ? { ...c, fields: c.fields.map(rename) } : { ...c, field: rename(c.field) }))
       .filter((c) => ('fields' in c ? c.fields.every((f) => liveNames.has(f)) : liveNames.has(c.field))),
   };
+}
+
+const today = () => new Date().toISOString().slice(0, 10);
+
+/**
+ * The revision advisors should use for a form number: the Live revision with the
+ * latest effective date that has arrived. A revision published with a future
+ * effective date takes over automatically on that day.
+ */
+export function latestLive(templates: FormTemplate[], formNumber: string, on = today()) {
+  return templates
+    .filter((t) => t.formNumber === formNumber && t.status === 'Live' && t.effectiveDate <= on)
+    .sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate))[0];
+}
+
+/** One current revision per form number. */
+export function currentTemplates(templates: FormTemplate[], on = today()): FormTemplate[] {
+  const nums = [...new Set(templates.map((t) => t.formNumber))];
+  return nums.map((n) => latestLive(templates, n, on)).filter((t): t is FormTemplate => !!t);
 }

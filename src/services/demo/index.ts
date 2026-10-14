@@ -309,6 +309,9 @@ function storeFile(id: string, bytes: Uint8Array) {
   }
 }
 
+/** Draft PDFs deleted this session (the demo writes none), for tests. */
+export const removedFiles: string[] = [];
+
 const drafts: DraftStore = {
   async saveDraft(contactId, fileName) {
     await wait(150);
@@ -319,6 +322,10 @@ const drafts: DraftStore = {
     const itemId = `file-${crypto.randomUUID()}`;
     storeFile(itemId, bytes);
     return { itemId, url: `${await drafts.folderUrl(contactId)}/Folium%20attachments/${encodeURIComponent(fileName)}` };
+  },
+  async removeFile(url) {
+    await wait(60);
+    removedFiles.push(url);
   },
   async getFile(itemId) {
     const bytes = storedFile(itemId);

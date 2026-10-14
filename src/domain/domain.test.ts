@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { CLIENTS, FIRM, TEMPLATES, USERS } from '../services/demo/seed';
-import type { FieldMapping } from './types';
-import { outputGate, runChecks, summarize, type CheckResult } from './checks';
-import { formatValue, resolveDateLimit, validateFormat } from './format';
+import type { FieldMapping, FormTemplate, PacketItem, RequestDocument } from './types';
+import { describeFormUpgrade, draftFreshness, upgradeAuditDetail, upgradeDraft, upgradePacketItems } from './drafts';
+import { attachmentLimits, checkAttachments, DEFAULT_ATTACHMENT_LIMITS, MB, outputGate, runChecks, summarize, type CheckResult } from './checks';
+import { fillSubject, fillTokens, formatValue, resolveDateLimit, validateFormat } from './format';
 import { buildCondition, conditionTerms, evaluateCondition, explainCondition, parseCondition, resolvePath } from './paths';
 import { carryVariantValues, choiceDisplay, choiceOptions, fieldKey, fillBlockFromPerson, personBlocks, relatedPeople, inputsNeeded, mappingWarnings, migrateAccountValues, prefillForm, prefillPacket, seedCopyValues, termLabels, validateMapping } from './prefill';
-import { carryForward, diffRevision } from './revisions';
+import { carryForward, diffRevision, latestLive } from './revisions';
 import { assignSigners, rolesForPacket, validateSigners } from './signers';
 import { buildEnvelopeDefinition, placementsToTabs } from '../services/docusign/tabs';
 
@@ -627,3 +628,135 @@ describe('output gate', () => {
   });
 });
 
+
+describe('out-of-date drafts', () => {
+  const field = (pdfField: string, more: Partial<FieldMapping> = {}): FieldMapping => ({ pdfField, source: 'advisor', required: false, ...more });
+  const mk = (id: string, revision: string, effectiveDate: string, status: FormTemplate['status'], fields: FieldMapping[], signers = [{ role: 'Owner' }], formNumber = 'XF-1'): FormTemplate => ({
+    ...bene,
+    id,
+    formNumber,
+    name: `Test form ${formNumber}`,
+    revision,
+    effectiveDate,
+    status,
+    mapping: { formNumber, revision, fields, signers, placements: [], checks: [] },
+  });
+  const old = mk('x-old', '03/25', '2025-03-01', 'Retired', [field('Owner_Name_Full'), field('Reason_Text'), field('Contact_Name', { source: 'contact.fullname' }), field('Shared_Note', { key: 'note' })]);
+  const cur = mk('x-new', '10/26', '2026-10-01', 'Live', [field('Owner_FullName'), field('Contact_Name', { source: 'contact.fullname' }), field('Shared_Note', { key: 'note' }), field('Witness_Name', { required: true })], [{ role: 'Owner' }, { role: 'Witness' }]);
+  const other = mk('y-1', '01/26', '2026-01-01', 'Live', [field('Thing')], undefined, 'YF-2');
+  const lib = [old, cur, other];
+  const doc = (t: FormTemplate, more: Partial<RequestDocument> = {}): RequestDocument => ({ templateId: t.id, name: t.name, formNumber: t.formNumber, revision: t.revision, ...more });
+  const on = '2026-10-14';
+
+  it('tells current, newer, retired, missing and future-dated revisions apart', () => {
+    expect(draftFreshness({ documents: [doc(cur), doc(other)] }, lib, on)).toMatchObject({ state: 'current', changed: 0 });
+    const partial = draftFreshness({ documents: [doc(old), doc(other)] }, lib, on);
+    expect(partial.state).toBe('partial');
+    expect(partial.documents[0]).toMatchObject({ state: 'newer', latest: { id: 'x-new' } });
+    // Retired with no Live successor.
+    const lone = mk('z-1', '01/20', '2020-01-01', 'Retired', [], undefined, 'ZF-9');
+    expect(draftFreshness({ documents: [doc(lone)] }, [...lib, lone], on)).toMatchObject({ state: 'outdated', documents: [{ state: 'retired' }] });
+    // Template deleted, no revision of the form left.
+    expect(draftFreshness({ documents: [{ templateId: 'gone', name: 'Old form', formNumber: 'QQ-1', revision: '1' }] }, lib, on).documents[0].state).toBe('missing');
+    // Template deleted, but the form has a Live revision: that's an upgrade.
+    expect(draftFreshness({ documents: [{ templateId: 'gone', name: 'X', formNumber: 'XF-1', revision: '01/24' }] }, lib, on).documents[0]).toMatchObject({ state: 'newer', latest: { id: 'x-new' } });
+    // A revision that takes effect later isn't newer until its date.
+    const future = mk('x-next', '01/27', '2027-01-01', 'Live', cur.mapping.fields);
+    expect(draftFreshness({ documents: [doc(cur)] }, [...lib, future], on).state).toBe('current');
+    expect(draftFreshness({ documents: [doc(cur)] }, [...lib, future], '2027-01-02').state).toBe('outdated');
+  });
+
+  it('carries a value under a renamed field and keeps account and order', () => {
+    const req = { documents: [doc(other, { accountId: 'a-2', itemId: 'pi-b' }), doc(old, { accountId: 'a-1', itemId: 'pi-a' })], values: { 'XF-1:Owner_Name_Full': 'Jordan Miller', 'contact.fullname': 'J. Miller', note: 'hi', 'YF-2:Thing': 'kept' } };
+    const { documents, values, report } = upgradeDraft(req, lib, on);
+    expect(documents.map((d) => [d.templateId, d.accountId, d.itemId])).toEqual([
+      ['y-1', 'a-2', 'pi-b'],
+      ['x-new', 'a-1', 'pi-a'],
+    ]);
+    expect(documents[1]).toMatchObject({ revision: '10/26', name: cur.name });
+    expect(values['XF-1:Owner_FullName']).toBe('Jordan Miller');
+    expect(values['XF-1:Owner_Name_Full']).toBeUndefined();
+    // Keys from a CRM source or an explicit key stay as they are.
+    expect(values['contact.fullname']).toBe('J. Miller');
+    expect(values.note).toBe('hi');
+    expect(values['YF-2:Thing']).toBe('kept');
+    expect(report.forms).toHaveLength(1);
+    expect(report.forms[0]).toMatchObject({ itemId: 'pi-a', from: '03/25', to: '10/26', state: 'newer' });
+    expect(report.forms[0].carried).toContain('Owner Full Name');
+  });
+
+  it('reports removed fields, new required fields and changed signers', () => {
+    const { values, report } = upgradeDraft({ documents: [doc(old)], values: { 'XF-1:Reason_Text': 'Moving' } }, lib, on);
+    const f = report.forms[0];
+    expect(f.dropped).toEqual([{ label: 'Reason Text', value: 'Moving' }]);
+    expect(values['XF-1:Reason_Text']).toBeUndefined();
+    expect(f.newRequired).toEqual(['Witness Name']);
+    expect(f.signersChanged).toBe(true);
+    expect(describeFormUpgrade(f)).toBe('Rev 03/25 → 10/26 · 1 new required field · 1 value no longer used · signers changed');
+    expect(upgradeAuditDetail(report)).toBe('XF-1 Rev 03/25 → 10/26');
+  });
+
+  it('keeps copies’ own values and never drops a form it can’t upgrade', () => {
+    const lone = mk('z-1', '01/20', '2020-01-01', 'Retired', [], undefined, 'ZF-9');
+    const items: PacketItem[] = [
+      { id: 'pi-1', templateId: 'x-old' },
+      { id: 'pi-2', templateId: 'x-old', copy: 2 },
+      { id: 'pi-3', templateId: 'z-1' },
+      { id: 'pi-4', templateId: 'gone', missing: { name: 'Old form', formNumber: 'QQ-1', revision: '1' } },
+    ];
+    const r = upgradePacketItems(items, { 'XF-1:Owner_Name_Full': 'One', 'pi-2/XF-1:Owner_Name_Full': 'Two' }, [...lib, lone], on);
+    expect(r.items.map((i) => i.templateId)).toEqual(['x-new', 'x-new', 'z-1', 'gone']);
+    expect(r.values).toMatchObject({ 'XF-1:Owner_FullName': 'One', 'pi-2/XF-1:Owner_FullName': 'Two' });
+    expect(r.report.forms.map((f) => f.state)).toEqual(['newer', 'newer', 'retired', 'missing']);
+    expect(r.report.forms[3].name).toBe('Old form');
+    expect(describeFormUpgrade(r.report.forms[2])).toBe('No longer available – remove it to continue');
+  });
+
+  it('blocks send on a retired form with no successor, and on a missing form', () => {
+    const lone = mk('z-1', '01/20', '2020-01-01', 'Retired', [], undefined, 'ZF-9');
+    const fills = prefillPacket([{ template: lone, itemId: 'pi-3' }], scope, {});
+    const res = runChecks(fills, { scope, values: {}, latestFor: (n) => latestLive([lone], n, on), missingForms: ['Old form (QQ-1 Rev 1)'] });
+    expect(res.find((r) => r.id === 'current-revisions')).toMatchObject({ level: 'block', detail: expect.stringContaining('no longer available – remove it') });
+    expect(res.find((r) => r.id === 'missing-forms')).toMatchObject({ level: 'block', detail: expect.stringContaining('Old form') });
+  });
+});
+
+describe('attachment limits', () => {
+  const files = (n: number, mb = 1) => Array.from({ length: n }, () => ({ size: mb * MB }));
+
+  it('allows 10 files and blocks 11', () => {
+    expect(checkAttachments(files(10))).toEqual([]);
+    expect(checkAttachments(files(11))).toMatchObject([{ id: 'attachments:count', level: 'block' }]);
+  });
+
+  it('allows 30 MB in total and blocks anything over', () => {
+    expect(checkAttachments(files(3, 10))).toEqual([]);
+    expect(checkAttachments([...files(3, 10), { size: 1 }])).toMatchObject([{ id: 'attachments:size', level: 'block' }]);
+  });
+
+  it('uses the firm’s limits over the defaults', () => {
+    const limits = attachmentLimits({ maxAttachments: 3, maxAttachmentsMB: 5 });
+    expect(limits).toEqual({ maxFiles: 3, maxMB: 5 });
+    expect(checkAttachments(files(4), limits).map((r) => r.id)).toEqual(['attachments:count']);
+    expect(checkAttachments(files(2, 3), limits).map((r) => r.id)).toEqual(['attachments:size']);
+    expect(attachmentLimits(undefined)).toEqual(DEFAULT_ATTACHMENT_LIMITS);
+  });
+});
+
+describe('envelope email templates', () => {
+  const ctx = { client: client.contact, advisor: { ...advisor, emailSignature: undefined }, firm: FIRM, forms: ['Beneficiary designation', 'IRA distribution', 'Transfer'] };
+
+  it('fills tokens, and missing tokens become empty strings', () => {
+    expect(fillTokens('Hi {client.firstname}, here are {forms} ({formCount}).', ctx)).toBe('Hi Jordan, here are beneficiary designation, ira distribution and more (3).');
+    expect(fillTokens('{client.nosuchcolumn}|{nobody.x}|{advisor}|{firm.name}', { ...ctx, client: { ...client.contact, nosuchcolumn: undefined } })).toBe('||' + '|' + FIRM.name);
+    expect(fillTokens('{advisor.signature}', ctx)).toBe(`${advisor.fullname}\n${advisor.phone}`);
+    expect(fillTokens('{advisor.signature}', { ...ctx, advisor: { ...advisor, emailSignature: 'Jo\nEverence' } })).toBe('Jo\nEverence');
+  });
+
+  it('still cuts the subject to 100 characters', () => {
+    const s = fillSubject(`Forms for {client.fullname}: ${'x'.repeat(120)}`, ctx);
+    expect(s).toHaveLength(100);
+    expect(s.startsWith('Forms for Jordan A. Miller: ')).toBe(true);
+    expect(fillSubject('  {client.middlename}  Forms  ', { ...ctx, client: { ...client.contact, middlename: undefined } })).toBe('Forms');
+  });
+});

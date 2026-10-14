@@ -63,6 +63,8 @@ export interface DraftStore {
   saveAttachment(contactId: string, fileName: string, bytes: Uint8Array): Promise<{ itemId: string; url: string }>;
   /** Read back a file saved with `saveAttachment`. */
   getFile(itemId: string): Promise<Uint8Array>;
+  /** Delete a draft PDF written by `saveDraft`, by the URL it returned. A file that's already gone is fine. */
+  removeFile(url: string): Promise<void>;
 }
 
 /** `ev_signaturerequest` rows. */

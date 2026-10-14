@@ -1,7 +1,9 @@
 import { useMemo } from 'react';
 import { create } from 'zustand';
+import { upgradeAuditDetail, upgradePacketItems, type UpgradeReport } from '../domain/drafts';
 import type { ResolveScope } from '../domain/paths';
 import { carryVariantValues, copyScope, migrateAccountValues, seedCopyValues, type PersonPick } from '../domain/prefill';
+import { currentTemplates, latestLive } from '../domain/revisions';
 import { normalizeState, pickVariant } from '../domain/states';
 import type {
   Attachment,
@@ -57,6 +59,8 @@ export interface Packet {
   dirty?: boolean;
   /** A DocuSign send in flight, kept here (and in the journal) so it survives a reload. */
   send?: SendState;
+  /** Revision changes from "Update to current forms", recorded in the audit trail at the next save. */
+  formsUpdated?: string;
 }
 
 /**
@@ -143,6 +147,8 @@ interface AppState {
   clearPacket(): void;
   loadPacket(saved: SavedPacket): void;
   loadRequest(req: SignatureRequest): void;
+  /** Move out-of-date forms in the open packet to the current revisions ("Update" in Review). */
+  upgradePacket(): UpgradeReport;
 
   toggleFavorite(templateId: string): void;
   markUsed(templateIds: string[]): void;
@@ -448,7 +454,8 @@ export const useApp = create<AppState>((set, get) => ({
     const items = normalizeItems(
       req.documents.map((d) => {
         const t = templates.find((x) => x.id === d.templateId);
-        const base = { id: d.itemId, templateId: d.templateId, copy: d.copy };
+        // A template that no longer exists keeps its name, so Review can say which form it was.
+        const base = { id: d.itemId, templateId: d.templateId, copy: d.copy, ...(t ? {} : { missing: { name: d.name, formNumber: d.formNumber, revision: d.revision } }) };
         if (isActive(d.accountId)) return { ...base, accountId: d.accountId };
         // The saved account was closed or moved: suggest one and have Review ask.
         const accountId = t ? suggestAccount(t, client, taken.get(d.templateId)) : undefined;
@@ -477,6 +484,14 @@ export const useApp = create<AppState>((set, get) => ({
         dirty: false,
       },
     });
+  },
+
+  upgradePacket() {
+    const { packet, templates } = get();
+    const { items, values, report } = upgradePacketItems(packet.items, packet.values, templates);
+    const detail = upgradeAuditDetail(report);
+    if (detail) set({ packet: { ...packet, items, values, dirty: true, formsUpdated: [packet.formsUpdated, detail].filter(Boolean).join('; ') } });
+    return report;
   },
 
   toggleFavorite(id) {
@@ -562,21 +577,5 @@ export function visibleTemplates(me: UserProfile | undefined, groups: UserGroup[
   return templates.filter((t) => (!sources.length || sources.includes(t.source)) && (!cats.length || cats.includes(t.category)));
 }
 
-const today = () => new Date().toISOString().slice(0, 10);
-
-/**
- * The revision advisors should use for a form number: the Live revision with the
- * latest effective date that has arrived. A revision published with a future
- * effective date takes over automatically on that day.
- */
-export function latestLive(templates: FormTemplate[], formNumber: string, on = today()) {
-  return templates
-    .filter((t) => t.formNumber === formNumber && t.status === 'Live' && t.effectiveDate <= on)
-    .sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate))[0];
-}
-
-/** One current revision per form number. */
-export function currentTemplates(templates: FormTemplate[], on = today()): FormTemplate[] {
-  const nums = [...new Set(templates.map((t) => t.formNumber))];
-  return nums.map((n) => latestLive(templates, n, on)).filter((t): t is FormTemplate => !!t);
-}
+// Moved to the domain so domain code doesn't import the store; re-exported for existing callers.
+export { currentTemplates, latestLive } from '../domain/revisions';

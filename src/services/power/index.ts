@@ -269,6 +269,13 @@ export function createPowerServices(): Services {
       const created = await connector<{ Id: string }>(CONNECTORS.sharePoint, 'CreateFile', { dataset: SHAREPOINT.crmSite, folderPath, name: fileName, body: bytes }, `Save ${fileName}`);
       return { itemId: created.Id, url: `${folder}/${encodeURIComponent(fileName)}` };
     },
+    async removeFile(url) {
+      const path = decodeURIComponent(new URL(url).pathname.replace(new URL(SHAREPOINT.crmSite).pathname, ''));
+      const meta = await client.executeAsync<Record<string, unknown>, { Id: string }>({ connectorOperation: { tableName: CONNECTORS.sharePoint, operationName: 'GetFileMetadataByPath', parameters: { dataset: SHAREPOINT.crmSite, path } } });
+      // Already gone (deleted by hand or by the retention flow): nothing to do.
+      if (!meta.success) return;
+      await connector(CONNECTORS.sharePoint, 'DeleteFile', { dataset: SHAREPOINT.crmSite, id: meta.data.Id }, 'Delete draft PDF');
+    },
     async getFile(itemId) {
       const content = await connector<string | Uint8Array>(CONNECTORS.sharePoint, 'GetFileContent', { dataset: SHAREPOINT.crmSite, id: itemId }, 'Download attachment');
       return typeof content === 'string' ? Uint8Array.from(atob(content), (ch) => ch.charCodeAt(0)) : content;
@@ -277,7 +284,8 @@ export function createPowerServices(): Services {
 
   // ---------------------------------------------------------------- Requests & packets
   // Deletes are soft: the row is deactivated (statecode 1) and lists read active rows
-  // only, so Undo reactivates the same row. Hard deletion comes with retention (#19).
+  // only, so Undo reactivates the same row. The retention flow (DEPLOY.md) deletes expired
+  // drafts for good.
   const ACTIVE = 'statecode eq 0';
   const deactivate = (table: string, id: string, what: string) => client.updateRecordAsync(table, id, { statecode: 1, statuscode: 2 }).then((r) => unwrap(r, what));
   const reactivate = (table: string, id: string, what: string) => client.updateRecordAsync(table, id, { statecode: 0, statuscode: 1 }).then((r) => unwrap(r, what));

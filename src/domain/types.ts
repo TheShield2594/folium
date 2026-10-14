@@ -266,6 +266,11 @@ export interface PacketItem {
   accountId?: string;
   /** Set when a resumed draft's account is no longer active and Folium picked another. */
   accountReplaced?: boolean;
+  /**
+   * Set when a resumed draft names a template that no longer exists, so Review can name
+   * the form instead of dropping it.
+   */
+  missing?: { name: string; formNumber: string; revision: string };
 }
 
 /** A saved, reusable list of forms ("Save as packet"). */
@@ -364,7 +369,11 @@ export interface SignatureRequest {
   message: string;
   reminderDays?: number;
   expiresInDays?: number;
-  /** When the envelope lapses (ISO): worked out on send, then DocuSign's `expireDateTime` once status is read. */
+  /**
+   * When the envelope lapses (ISO): worked out on send, then DocuSign's `expireDateTime`
+   * once status is read. On a draft, when the firm's retention deletes it (see
+   * `draftExpiry`); both live in `ev_expireson`.
+   */
   expiresOn?: string;
   anyOrder: boolean;
   draftFolderUrl?: string;
@@ -412,6 +421,8 @@ export interface UserProfile extends Advisor {
   /** Signature block / preferred defaults. */
   defaultAuth?: VerificationMethod;
   defaultReminderDays?: number;
+  /** Start new envelopes with "any order" on or off. Unset follows the firm's default. */
+  defaultAnyOrder?: boolean;
   emailSignature?: string;
   /**
    * USPS codes of the states this advisor is licensed to sell insurance in. Empty or
@@ -452,4 +463,27 @@ export interface FirmProfile {
   idleAutoSave?: boolean;
   /** Minutes idle before the 2-minute countdown to the auto-save starts. Default 25. */
   idleAutoSaveMinutes?: number;
+  /**
+   * Days an unsent draft is kept after its last save: 90 (default), 60, 30, 10, 7 or 0.
+   * 0 turns off saving and sharing drafts.
+   */
+  draftRetentionDays?: number;
+  /** Defaults and limits for the Send screen. */
+  sending?: SendingDefaults;
+}
+
+/** Firm-wide Send screen settings (Administration › Firm profile). */
+export interface SendingDefaults {
+  /** New envelopes start with "Signers can sign in any order" on. A user's own default wins. */
+  defaultAnyOrder?: boolean;
+  /** Email subject with tokens such as `{client.firstname}` and `{forms}`; see `fillTokens`. */
+  subjectTemplate?: string;
+  /** Email note with tokens such as `{client.firstname}`, `{forms}` and `{advisor.signature}`. */
+  messageTemplate?: string;
+  /** Users and Assistants can't edit the note; Admins can. The disclosure is still added. */
+  lockMessage?: boolean;
+  /** Most supporting documents on one envelope. Default 10. */
+  maxAttachments?: number;
+  /** Most megabytes of supporting documents on one envelope. Default 30. */
+  maxAttachmentsMB?: number;
 }
