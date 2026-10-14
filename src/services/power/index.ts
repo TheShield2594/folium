@@ -3,7 +3,8 @@ import { getClient, type DataClient } from '@microsoft/power-apps/data';
 import type { Account, Connection, Contact, FirmProfile, FormTemplate, SavedPacket, SignatureRequest, SignatureStatus, TemplateMapping, UserGroup, UserProfile } from '../../domain/types';
 import { buildEnvelopeDefinition, ROLE_SEPARATOR } from '../docusign/tabs';
 import type { CrmService, DirectoryService, DraftStore, IncomingFile, PacketStore, RequestStore, Services, SigningProvider, TemplateLibrary } from '../types';
-import { CONNECTORS, DATAVERSE, DOCUSIGN, SHAREPOINT } from './config';
+import { decodeChoices, encodeChoices } from './choices';
+import { CHOICES, CONNECTORS, DATAVERSE, DOCUSIGN, SHAREPOINT } from './config';
 import { dataSourcesInfo } from './dataSourcesInfo';
 
 // Power Platform implementations. Dataverse tables go through the SDK's data client;
@@ -106,9 +107,12 @@ export function createPowerServices(): Services {
   };
 
   // ---------------------------------------------------------------- CRM
+  const contactChoices = CHOICES.contact ?? {};
+  const toContact = (row: Contact) => decodeChoices(row, contactChoices, 'contact');
+
   const crm: CrmService = {
     async getClient(contactId) {
-      const contact = unwrap(await client.retrieveRecordAsync<Contact>(DATAVERSE.contact, contactId), 'Load contact');
+      const contact = toContact(unwrap(await client.retrieveRecordAsync<Contact>(DATAVERSE.contact, contactId), 'Load contact'));
       const accounts = unwrap(
         await client.retrieveMultipleRecordsAsync<Account>(DATAVERSE.account, { filter: `${DATAVERSE.accountContactLookup} eq ${contactId} and statecode eq 0` }),
         'Load accounts',
@@ -126,7 +130,7 @@ export function createPowerServices(): Services {
         if (!other.success) continue;
         connections.push({
           role: c['_record2roleid_value@OData.Community.Display.V1.FormattedValue'] ?? 'Connection',
-          contact: other.data,
+          contact: toContact(other.data),
           ev_sharepct: c.ev_sharepct ? Number(c.ev_sharepct) : undefined,
         });
       }
@@ -134,8 +138,8 @@ export function createPowerServices(): Services {
     },
     async updateContact(contactId, changes) {
       const { contactid: _id, fullname: _fn, ...writable } = changes;
-      unwrap(await client.updateRecordAsync(DATAVERSE.contact, contactId, writable), 'Update contact');
-      return unwrap(await client.retrieveRecordAsync<Contact>(DATAVERSE.contact, contactId), 'Reload contact');
+      unwrap(await client.updateRecordAsync(DATAVERSE.contact, contactId, encodeChoices(writable, contactChoices, 'contact')), 'Update contact');
+      return toContact(unwrap(await client.retrieveRecordAsync<Contact>(DATAVERSE.contact, contactId), 'Reload contact'));
     },
     async updateAccount(accountId, changes) {
       const { accountid: _id, ...writable } = changes;
@@ -151,10 +155,10 @@ export function createPowerServices(): Services {
           orderBy: ['fullname asc'],
         }),
         'Search contacts',
-      );
+      ).map(toContact);
     },
     async recentContacts() {
-      return unwrap(await client.retrieveMultipleRecordsAsync<Contact>(DATAVERSE.contact, { top: 10, orderBy: ['modifiedon desc'] }), 'Recent contacts');
+      return unwrap(await client.retrieveMultipleRecordsAsync<Contact>(DATAVERSE.contact, { top: 10, orderBy: ['modifiedon desc'] }), 'Recent contacts').map(toContact);
     },
   };
 

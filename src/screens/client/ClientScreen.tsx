@@ -142,6 +142,17 @@ export function ClientScreen() {
                 Client ID <span className="mono">{c.ev_clientid}</span>
                 {c.ev_region ? ` · ${c.ev_region}` : ''} · {client.accounts.length} accounts
               </p>
+              {c.unrecognisedChoices && (
+                <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                  {Object.entries(c.unrecognisedChoices).map(([col, u]) => (
+                    <span key={col} title={`Dynamics 365 has “${u.value}”, which Folium doesn’t have a mapping for. Forms and signer rules that use ${u.label.toLowerCase()} won’t see it until an admin adds it.`}>
+                      <Badge tone="warn" icon="warning">
+                        {u.label} not recognised
+                      </Badge>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
