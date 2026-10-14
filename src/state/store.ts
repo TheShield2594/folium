@@ -150,6 +150,9 @@ export function suggestAccount(t: FormTemplate, client?: ClientRecord) {
   return undefined;
 }
 
+/** Counts contact picks, so a slow load for an earlier pick never lands over a later one. */
+let openSeq = 0;
+
 export const useApp = create<AppState>((set, get) => ({
   ready: false,
   users: [],
@@ -211,21 +214,21 @@ export const useApp = create<AppState>((set, get) => ({
 
   async openContact(contactId) {
     const s = get().services!;
-    if (get().contactId !== contactId) {
-      if (!(await get().confirmReplacePacket('switch'))) return false;
-      set({ packet: emptyPacket() });
-    }
-    set({ contactId, clientLoading: true });
-    writeLocal('folium.lastContact', contactId);
+    const switching = get().contactId !== contactId;
+    if (switching && !(await get().confirmReplacePacket('switch'))) return false;
+    // Nothing on screen changes until the new client has loaded, so a failed load keeps
+    // the current client and packet.
+    const pick = ++openSeq;
+    set({ clientLoading: true });
     try {
       const [client, requests] = await Promise.all([s.crm.getClient(contactId), s.requests.listForContact(contactId)]);
       // A newer pick wins: ignore a slow response for a contact the user has moved away from.
-      if (get().contactId !== contactId) return true;
-      set({ client, requests, clientLoading: false });
+      if (pick !== openSeq) return true;
+      writeLocal('folium.lastContact', contactId);
+      set({ contactId, client, requests, clientLoading: false, ...(switching ? { packet: emptyPacket() } : {}) });
       return true;
     } catch (e) {
-      if (get().contactId !== contactId) return true;
-      set({ clientLoading: false, client: undefined, contactId: undefined });
+      if (pick === openSeq) set({ clientLoading: false });
       throw e;
     }
   },
@@ -235,7 +238,9 @@ export const useApp = create<AppState>((set, get) => ({
     const choice = await new Promise<LeaveChoice>((resolve) => set({ leavePrompt: { reason, resolve } }));
     set({ leavePrompt: undefined });
     if (choice === 'cancel') return false;
-    if (choice === 'discard') set({ packet: emptyPacket() });
+    // Discard: the caller replaces the packet once its own work succeeds (a client opens,
+    // a draft loads). Until then it stays on screen, no longer counted as unsaved.
+    if (choice === 'discard') set({ packet: { ...get().packet, dirty: false } });
     return true;
   },
 

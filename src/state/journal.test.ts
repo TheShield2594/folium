@@ -61,6 +61,19 @@ describe('packet journal', () => {
     expect(useApp.getState().pendingRestore).toBe(offer);
   });
 
+  it('keeps the current client and packet when the restore’s client fails to load', async () => {
+    const services = createDemoServices();
+    const offer = { v: 1 as const, userId: 'u', contactId: 'c-missing', packet: packet({ dirty: true }), savedAt: new Date().toISOString() };
+    const current = packet({ values: { x: '1' }, dirty: false });
+    useApp.setState({ services, contactId: 'c-jordan', client: CLIENTS['c-jordan'], pendingRestore: offer, packet: current });
+    await expect(useApp.getState().restoreJournal()).rejects.toBeTruthy();
+    expect(useApp.getState().packet).toBe(current);
+    expect(useApp.getState().contactId).toBe('c-jordan');
+    expect(useApp.getState().client).toBe(CLIENTS['c-jordan']);
+    expect(useApp.getState().clientLoading).toBe(false);
+    expect(useApp.getState().pendingRestore).toBe(offer);
+  });
+
   it('asks before a restore replaces unsaved work, and Cancel keeps both', async () => {
     const services = createDemoServices();
     const offer = { v: 1 as const, userId: 'u', contactId: 'c-priya', packet: packet({ dirty: true }), savedAt: new Date().toISOString() };
