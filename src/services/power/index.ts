@@ -375,6 +375,20 @@ export function createPowerServices(): Services {
     async resend(envelopeId) {
       await connector(CONNECTORS.docuSign, 'UpdateEnvelope', { envelopeId, resend_envelope: true, body: {} }, 'Resend envelope');
     },
+    async signingUrl(envelopeId, role, returnUrl) {
+      const e = await connector<{ recipients: { signers: { recipientId: string; roleName: string; name: string; email: string; clientUserId?: string }[] } }>(CONNECTORS.docuSign, 'GetEnvelope', { envelopeId, include: 'recipients' }, 'Envelope recipients');
+      const r = e.recipients.signers.find((s) => s.roleName.split(ROLE_SEPARATOR).includes(role));
+      if (!r) throw new Error(`No ${role} on this envelope`);
+      if (!r.clientUserId) throw new Error('This signer was sent by email, not to sign in session.');
+      const view = await connector<{ url: string }>(
+        CONNECTORS.docuSign,
+        'CreateRecipientView',
+        { envelopeId, body: { userName: r.name, email: r.email, recipientId: r.recipientId, clientUserId: r.clientUserId, returnUrl, authenticationMethod: 'None' } },
+        'Open signing',
+      );
+      return view.url;
+    },
+    // Only the fields being corrected are sent, so DocuSign keeps the access code and clientUserId.
     async correctRecipient(envelopeId, role, change) {
       const e = await connector<{ recipients: { signers: { recipientId: string; roleName: string }[] } }>(CONNECTORS.docuSign, 'GetEnvelope', { envelopeId, include: 'recipients' }, 'Envelope recipients');
       const r = e.recipients.signers.find((s) => s.roleName.split(ROLE_SEPARATOR).includes(role));

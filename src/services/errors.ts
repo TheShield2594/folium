@@ -54,6 +54,12 @@ export function classifyError(e: unknown, online: boolean = isOnline()): ErrorKi
   return 'unknown';
 }
 
+/** DocuSign answered `consent_required`: the user hasn't granted Folium's DocuSign app consent yet. */
+export function isConsentRequired(e: unknown): boolean {
+  const { message, code } = parts(e);
+  return /consent_required/i.test(`${code} ${message}`);
+}
+
 const MESSAGE = {
   offline: 'No connection. Check your network and try again.',
   timeout: 'That took too long. Check your connection and try again.',

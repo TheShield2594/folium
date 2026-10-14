@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { expiryInfo } from '../../domain/requests';
+import { applyEnvelopeStatus, expiryInfo } from '../../domain/requests';
 import { roleLabel } from '../../domain/signers';
 import type { SignatureRequest } from '../../domain/types';
 import { useServices } from '../../services';
@@ -9,6 +9,7 @@ import { useApp } from '../../state/store';
 import { Badge, Button, Field, IconButton, Menu, Select, Sheet, TextArea, TextInput, downloadBytes, toast } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
 import { useDraftActions } from '../common/useDraftActions';
+import { SignNowButtons } from './InSessionSigning';
 
 export const fmtWhen = (iso?: string) =>
   iso ? new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
@@ -106,41 +107,10 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
 
   const refresh = (quiet?: boolean) =>
     withBusy('status', async () => {
-      const st = await services.signing.getStatus(r.envelopeId!);
-      // An unknown DocuSign status keeps the one Folium has.
-      const status = st.status ?? r.status;
-      const expiresOn = st.expiresOn ?? r.expiresOn;
-      // One signer can finish while the envelope is still "Sent", so compare signers too.
-      const signers = r.signers.map((s) => {
-        const rec = st.recipients.find((x) => x.role === s.role);
-        if (!rec) return s;
-        const status = rec.status === 'completed' ? 'signed' : rec.status === 'delivered' ? 'viewed' : rec.status === 'declined' ? 'declined' : 'sent';
-        return { ...s, status, signedOn: rec.at ?? s.signedOn } as typeof s;
-      });
-      const signersChanged = signers.some((s, i) => s.status !== r.signers[i].status);
-      if (status === r.status && !signersChanged) {
-        if (expiresOn !== r.expiresOn) await save({ ...r, expiresOn });
-        if (!quiet) toast.ok('No change yet');
-        return;
-      }
-      const events = [...r.audit];
-      for (const s of signers) if (s.status === 'signed' && r.signers.find((x) => x.role === s.role)?.status !== 'signed') events.push({ at: s.signedOn ?? new Date().toISOString(), actor: s.name, action: 'Signed' });
-      if (st.viewedOn && !r.viewedOn) events.push({ at: st.viewedOn, actor: r.signers[0]?.name ?? 'Signer', action: 'Viewed' });
-      if (status === 'Signed' && r.status !== 'Signed') events.push({ at: st.signedOn ?? new Date().toISOString(), actor: 'DocuSign', action: 'Completed', detail: 'All signers signed' });
-      if (status === 'Expired' && r.status !== 'Expired') events.push({ at: expiresOn ?? new Date().toISOString(), actor: 'DocuSign', action: 'Expired', detail: `${signers.filter((s) => s.status === 'signed').length} of ${signers.length} signed before it lapsed` });
-      await save(
-        {
-          ...r,
-          status,
-          expiresOn,
-          voidedReason: status === 'Voided' || status === 'Expired' ? (st.voidedReason ?? r.voidedReason) : r.voidedReason,
-          viewedOn: st.viewedOn ?? r.viewedOn,
-          signedOn: st.signedOn ?? r.signedOn,
-          signers,
-          audit: events,
-        },
-        status === r.status ? `${signers.filter((s) => s.status === 'signed').length} of ${signers.length} signed` : status === 'Expired' ? 'The envelope expired before everyone signed' : `Now: ${status.toLowerCase()}`,
-      );
+      const { next, changed, message } = applyEnvelopeStatus(r, await services.signing.getStatus(r.envelopeId!));
+      if (changed) return save(next, message);
+      if (next.expiresOn !== r.expiresOn) await save(next);
+      if (!quiet) toast.ok(message);
     });
 
   // An open request past its expiry date is probably expired in DocuSign: ask once.
@@ -267,6 +237,8 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
         </div>
       )}
 
+      <SignNowButtons req={r} />
+
       {(r.status === 'Sent' || r.status === 'Viewed') && (
         <div className="row wrap">
           <Button variant="bordered" icon="refresh" busy={busy === 'status'} onClick={() => refresh()}>
@@ -343,7 +315,7 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
                     <li key={s.role} className="row">
                       <Icon name={s.status === 'signed' ? 'checkCircle' : 'circle'} size={16} className={s.status === 'signed' ? 'c-accent' : 'c3'} />
                       <span className="grow">
-                        {s.name} <span className="t-footnote c3">· {roleLabel(s.role)} · {s.auth === 'sms' ? 'SMS code' : s.auth === 'kba' ? 'ID questions' : 'email'}</span>
+                        {s.name} <span className="t-footnote c3">· {roleLabel(s.role)} · {s.auth === 'sms' ? 'SMS code' : s.auth === 'phone' ? 'phone call' : s.auth === 'kba' ? 'ID questions' : 'email'}{s.accessCodeSet ? ' + access code' : ''}{s.inSession ? ' · in session' : ''}</span>
                       </span>
                       <span className="t-footnote c3">{s.signedOn ? fmtWhen(s.signedOn) : s.status}</span>
                     </li>

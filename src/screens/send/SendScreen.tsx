@@ -2,21 +2,22 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { outputGate, summarize } from '../../domain/checks';
 import { expiresOnFrom } from '../../domain/requests';
-import { assignSigners, roleLabel, rolesForPacket, validateSigners } from '../../domain/signers';
+import { accessCodeWarnings, assignSigners, envelopeSigners, generateAccessCode, recordedSigners, roleLabel, rolesForPacket, validateSigners } from '../../domain/signers';
 import type { SignatureRequest, SignerAssignment, VerificationMethod } from '../../domain/types';
 import { useServices } from '../../services';
-import { classifyError } from '../../services/errors';
+import { classifyError, isConsentRequired } from '../../services/errors';
+import { DOCUSIGN } from '../../services/power/config';
 import { Toolbar } from '../../shell/Shell';
 import { attachmentBytes, audit, fillPacket, packetAsOnePdf, releaseEnvelope, saveDraft, unreachableAttachments, type SendSetup } from '../../state/actions';
 import { useActingFor, useApp, useScope, type SendState } from '../../state/store';
-import { Avatar, Button, Empty, Field, IconButton, Menu, Select, SwitchRow, TextArea, TextInput, downloadBytes, toast } from '../../ui/controls';
+import { Avatar, Button, Empty, Field, IconButton, Menu, Select, Sheet, SwitchRow, TextArea, TextInput, downloadBytes, toast } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
 import { NoClient } from '../common/NoClient';
 import { ShareSheet } from '../common/ShareSheet';
 import { Steps } from '../common/Steps';
 import { usePacketView } from '../common/usePacket';
 
-const AUTH_LABEL: Record<VerificationMethod, string> = { email: 'Email only', sms: 'SMS code', kba: 'ID questions (KBA)' };
+const AUTH_LABEL: Record<VerificationMethod, string> = { email: 'Email only', sms: 'SMS code', phone: 'Phone call', kba: 'ID questions (KBA)' };
 
 export function SendScreen() {
   const client = useApp((s) => s.client);
@@ -46,6 +47,9 @@ export function SendScreen() {
   const [expires, setExpires] = useState('60');
   const [busy, setBusy] = useState<string>();
   const [sharing, setSharing] = useState(false);
+  /** Access codes by role. Only on this screen and in the envelope: never saved with the request. */
+  const [codes, setCodes] = useState<Record<string, string>>({});
+  const [codeFor, setCodeFor] = useState<string>();
   /**
    * Where a send got to. Kept on the packet (and so in the session journal), not in this
    * screen, so a reload or a trip to another screen can never lead to a second envelope.
@@ -95,6 +99,7 @@ export function SendScreen() {
   const ordered = signers.map((s) => ({ ...s, order: anyOrder ? 1 : s.order }));
   const unreachable = unreachableAttachments(services, packet.attachments);
   const problems = validateSigners(ordered);
+  const codeWarnings = accessCodeWarnings(ordered, codes);
   const sum = summarize(view.checks);
   // Wet signing needs the same clean bill as DocuSign: no PDF and no request while checks are open.
   const inPersonGate = outputGate(view.checks, 'flatten');
@@ -147,7 +152,7 @@ export function SendScreen() {
     try {
       ({ envelopeId } = await services.signing.create({
         documents: docs.map((d) => ({ name: d.fileName, pdf: d.pdf, placements: d.placements })),
-        signers: ordered,
+        signers: envelopeSigners(ordered, codes),
         ccs: ccList(),
         subject,
         message: firm?.disclosure ? `${message}\n\n${firm.disclosure}` : message,
@@ -159,6 +164,7 @@ export function SendScreen() {
       const kind = classifyError(e);
       // A lost reply may still have created a (draft) envelope. Don't invite a second one.
       if (kind === 'timeout' || kind === 'offline' || kind === 'server') setSend({ phase: 'unknown', at: new Date().toISOString() });
+      else if (isConsentRequired(e)) consentToast();
       else toast.error(e instanceof Error ? e.message : 'DocuSign didn’t accept the envelope');
       setBusy(undefined);
       return;
@@ -195,6 +201,11 @@ export function SendScreen() {
     return { signers: ordered, ccs: ccList(), subject, message, anyOrder, reminderDays: Number(reminder), expiresInDays: Number(expires) };
   }
 
+  function consentToast() {
+    if (DOCUSIGN.consentUrl) toast.ok('DocuSign needs your permission for Folium before it can send. Grant it, then send again.', { label: 'Open DocuSign', onClick: () => window.open(DOCUSIGN.consentUrl, '_blank', 'noopener') });
+    else toast.error('DocuSign needs permission for Folium before it can send. Ask an administrator to grant consent for the Folium DocuSign app.');
+  }
+
   function ccList() {
     if (!ccMe || !me || !owner) return [];
     return [{ name: owner.fullname, email: owner.email }, ...(me.systemuserid !== owner.systemuserid ? [{ name: me.fullname, email: me.email }] : [])];
@@ -217,7 +228,7 @@ export function SendScreen() {
         sentOn,
         expiresOn: expiresOnFrom(sentOn, Number(expires)),
         sentBy: me.fullname,
-        signers: ordered.map((s) => ({ ...s, status: s.order === Math.min(...ordered.map((x) => x.order)) ? 'sent' : 'pending' })),
+        signers: recordedSigners(ordered, codes),
         ccs: ccList(),
         subject,
         message,
@@ -230,7 +241,8 @@ export function SendScreen() {
       markUsed(view.templates.map((t) => t.id));
       clearPacket();
       await refreshRequests();
-      toast.ok(`Sent to ${ordered.map((s) => s.name.split(' ')[0]).join(' and ')}`);
+      const now = ordered.filter((s) => s.inSession);
+      toast.ok(now.length ? `Sent. Use “Sign now” on the request to open DocuSign for ${now.map((s) => s.name.split(' ')[0]).join(' and ')}.` : `Sent to ${ordered.map((s) => s.name.split(' ')[0]).join(' and ')}`);
       navigate('/requests');
     } catch (e) {
       toast.error(`DocuSign sent the envelope, but Folium couldn’t record it${e instanceof Error ? ` (${e.message})` : ''}. Don’t send again — use “Record it again”.`);
@@ -292,14 +304,28 @@ export function SendScreen() {
                         <span className="t-footnote c3">
                           {roleLabel(s.role)} · {forms.map((f) => f.formNumber).join(', ')}
                         </span>
+                        {(codes[s.role] || s.inSession) && (
+                          <span className="row wrap" style={{ gap: 4 }}>
+                            {codes[s.role] && (
+                              <button type="button" className="chip" onClick={() => setCodeFor(s.role)} aria-label={`${roleLabel(s.role)} access code is set. Change it`}>
+                                <Icon name="lock" size={12} /> Access code
+                              </button>
+                            )}
+                            {s.inSession && (
+                              <span className="badge badge-info">
+                                <Icon name="signature" size={12} /> Signs now, with you
+                              </span>
+                            )}
+                          </span>
+                        )}
                       </div>
                       <div className="stack" style={{ gap: 6 }}>
                         <TextInput aria-label={`${roleLabel(s.role)} email`} type="email" value={s.email} onChange={(e) => update(i, { email: e.target.value })} placeholder="Email" aria-invalid={bad.some((b) => b.message.includes('email')) || undefined} />
-                        <TextInput aria-label={`${roleLabel(s.role)} mobile`} type="tel" value={s.phone ?? ''} onChange={(e) => update(i, { phone: e.target.value })} placeholder="Mobile (for SMS)" />
+                        <TextInput aria-label={`${roleLabel(s.role)} mobile`} type="tel" value={s.phone ?? ''} onChange={(e) => update(i, { phone: e.target.value })} placeholder={s.auth === 'phone' ? 'Phone (for the call)' : 'Mobile (for SMS)'} />
                       </div>
                       <Field label="Verify with" htmlFor={`auth-${i}`}>
                         <Select id={`auth-${i}`} value={s.auth} onChange={(e) => update(i, { auth: e.target.value as VerificationMethod })}>
-                          {(['email', 'sms', 'kba'] as const).map((a) => (
+                          {(['email', 'sms', 'phone', 'kba'] as const).map((a) => (
                             <option key={a} value={a}>
                               {AUTH_LABEL[a]}
                             </option>
@@ -311,11 +337,21 @@ export function SendScreen() {
                         items={[
                           { label: 'Sign earlier', icon: 'chevronUp', onSelect: () => move(i, -1), disabled: i === 0 || anyOrder },
                           { label: 'Sign later', icon: 'chevronDown', onSelect: () => move(i, 1), disabled: i === ordered.length - 1 || anyOrder },
+                          { separator: true, label: '' },
+                          { label: codes[s.role] ? 'Change access code…' : 'Access code…', icon: 'lock', onSelect: () => setCodeFor(s.role) },
+                          s.inSession
+                            ? { label: 'Send by email instead', icon: 'envelope', onSelect: () => update(i, { inSession: undefined }) }
+                            : { label: 'Sign now, with me (in session)', icon: 'signature', onSelect: () => update(i, { inSession: true }) },
                         ]}
                       />
                       {bad.length > 0 && (
                         <p className="t-footnote c-danger" style={{ gridColumn: '2 / -1' }} role="alert">
                           {bad.map((b) => b.message).join(' ')}
+                        </p>
+                      )}
+                      {codeWarnings.some((w) => w.role === s.role) && (
+                        <p className="t-footnote c-warn" style={{ gridColumn: '2 / -1' }}>
+                          {codeWarnings.filter((w) => w.role === s.role).map((w) => w.message).join(' ')}
                         </p>
                       )}
                     </div>
@@ -450,6 +486,59 @@ export function SendScreen() {
         </div>
       </div>
       {sharing && <ShareSheet onClose={() => setSharing(false)} sendSetup={sendSetup()} />}
+      {codeFor && (
+        <AccessCodeSheet
+          name={ordered.find((s) => s.role === codeFor)?.name || roleLabel(codeFor)}
+          value={codes[codeFor] ?? ''}
+          onSave={(code) => (setCodes((c) => ({ ...c, [codeFor]: code })), setCodeFor(undefined))}
+          onClose={() => setCodeFor(undefined)}
+        />
+      )}
     </>
+  );
+}
+
+/** Set a signer's DocuSign access code. The code stays on this screen and in the envelope only. */
+function AccessCodeSheet({ name, value, onSave, onClose }: { name: string; value: string; onSave: (code: string) => void; onClose: () => void }) {
+  const [code, setCode] = useState(value);
+  const trimmed = code.trim();
+  const tooShort = trimmed.length > 0 && trimmed.length < 4;
+  return (
+    <Sheet
+      title={`Access code for ${name}`}
+      onClose={onClose}
+      footer={
+        <>
+          {value && (
+            <Button variant="gray" onClick={() => onSave('')}>
+              Remove code
+            </Button>
+          )}
+          <span className="spacer" />
+          <Button variant="gray" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="filled" disabled={!trimmed || tooShort} onClick={() => onSave(trimmed)}>
+            Use this code
+          </Button>
+        </>
+      }
+    >
+      <div className="stack-4">
+        <p className="t-callout c2">DocuSign asks {name.split(' ')[0]} for this code before showing the forms. It works with any verification method.</p>
+        <Field label="Access code" htmlFor="ac-code" error={tooShort ? 'Use at least 4 characters.' : undefined}>
+          <div className="row" style={{ gap: 6 }}>
+            <TextInput id="ac-code" className="mono" value={code} maxLength={50} autoComplete="off" spellCheck={false} onChange={(e) => setCode(e.target.value)} />
+            <Button variant="tinted" icon="refresh" onClick={() => setCode(generateAccessCode())}>
+              Generate
+            </Button>
+          </div>
+        </Field>
+        <div className="banner">
+          <Icon name="info" size={18} />
+          <span className="t-footnote">Give the code to the client by phone or in person, never by email. Folium doesn’t keep it: note it now. If you save a draft instead of sending, set it again before you send.</span>
+        </div>
+      </div>
+    </Sheet>
   );
 }

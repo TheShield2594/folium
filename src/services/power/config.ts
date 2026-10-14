@@ -40,7 +40,13 @@ export const SHAREPOINT = {
 
 export const DOCUSIGN = {
   /** Identity-verification workflow IDs from DocuSign Admin › Identity Verification. */
-  idv: { sms: '', kba: '' },
+  idv: { sms: '', phone: '', kba: '' },
+  /**
+   * Where an advisor grants Folium's DocuSign app consent when DocuSign answers
+   * `consent_required` (DocuSign's /oauth/auth URL with the app's client ID, scope
+   * `signature` and the connector's redirect URL). Blank: Folium says to ask an admin.
+   */
+  consentUrl: '',
 } as const;
 
 /**

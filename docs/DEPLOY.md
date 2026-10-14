@@ -53,8 +53,12 @@ Import `connectors/folium-docusign.swagger.json` as a custom connector (Power Ap
 
 1. Host: `www.docusign.net` for production or `demo.docusign.net` for the developer sandbox. Base path `/restapi/v2.1/accounts/{accountId}`; set the account ID as a policy or connection parameter.
 2. Security: OAuth 2.0, DocuSign authorization code grant (client ID/secret from DocuSign Admin › Apps and Keys; scope `signature`). Add the connector's redirect URL to the DocuSign app.
-3. Operations used by Folium: `CreateEnvelope` (as a draft, `status: created`), `GetEnvelope`, `UpdateEnvelope` (send the draft / void / resend), `UpdateRecipients`, `GetDocument` (`combined`, `certificate`).
-4. In DocuSign Admin › Identity Verification, note the workflow IDs for **SMS** and **ID Check (KBA)** and put them in `DOCUSIGN.idv` in `config.ts`.
+3. Operations used by Folium: `CreateEnvelope` (as a draft, `status: created`), `GetEnvelope`, `UpdateEnvelope` (send the draft / void / resend), `UpdateRecipients`, `CreateRecipientView` (in-session signing), `GetDocument` (`combined`, `certificate`).
+4. In DocuSign Admin › Identity Verification, note the workflow IDs for **SMS**, **Phone authentication** and **ID Check (KBA)** and put them in `DOCUSIGN.idv` in `config.ts`. A method whose ID is blank can't be sent (Folium says so instead of sending with weaker verification).
+5. In-session signing needs embedded signing on the DocuSign plan. DocuSign sends the signer back to Folium's `#/signing-return` route with `event=…`; that URL is built from where the app runs, so check it once the hosting decision (#3) is made.
+6. Optional: set `DOCUSIGN.consentUrl` to the DocuSign consent link for the Folium app, so a `consent_required` answer offers it to the advisor instead of a generic error.
+
+Access codes need no setup. Folium sends the code with the envelope and saves only that one was set (`accessCodeSet`), never the code.
 
 This answers spike 2: envelopes are created from Folium's own PDF bytes with tabs placed by page + x/y, so the standard DocuSign connector isn't needed.
 

@@ -10,6 +10,7 @@ import { LibraryScreen } from './screens/library/LibraryScreen';
 import { PacketsScreen } from './screens/library/PacketsScreen';
 import { RecentScreen } from './screens/library/RecentScreen';
 import { DraftsScreen } from './screens/requests/DraftsScreen';
+import { DemoSigning, SigningReturn } from './screens/requests/InSessionSigning';
 import { RequestsScreen } from './screens/requests/RequestsScreen';
 import { ReviewScreen } from './screens/review/ReviewScreen';
 import { SendScreen } from './screens/send/SendScreen';
@@ -87,6 +88,7 @@ const router = createHashRouter([
       { path: '/review', element: <ReviewScreen /> },
       { path: '/send', element: <SendScreen /> },
       { path: '/requests', element: <RequestsScreen /> },
+      { path: '/signing-return', element: <SigningReturn /> },
       { path: '/drafts', element: <DraftsScreen /> },
       { path: '/client', element: <ClientScreen /> },
       { path: '/settings', element: <SettingsScreen /> },
@@ -97,6 +99,8 @@ const router = createHashRouter([
       { path: '*', element: <Navigate to="/" replace /> },
     ],
   },
+  // Demo mode's stand-in for DocuSign's signing page, outside the app shell.
+  { path: '/demo-signing', element: <DemoSigning /> },
 ]);
 
 export function App() {

@@ -251,7 +251,8 @@ export interface SavedPacket {
 /** `Expired`: DocuSign voided the envelope because it lapsed before everyone signed. */
 export type SignatureStatus = 'Drafted' | 'Sent' | 'Viewed' | 'Signed' | 'Declined' | 'Voided' | 'Expired';
 
-export type VerificationMethod = 'email' | 'sms' | 'kba';
+/** `phone`: DocuSign Phone authentication (a call or text with a code), through an IDV workflow like SMS. */
+export type VerificationMethod = 'email' | 'sms' | 'phone' | 'kba';
 
 export interface SignerAssignment {
   role: string;
@@ -260,6 +261,14 @@ export interface SignerAssignment {
   phone?: string;
   order: number;
   auth: VerificationMethod;
+  /**
+   * An access code was set for this signer. The code itself is never stored: it goes
+   * to DocuSign with the envelope and the advisor gives it to the client by phone or
+   * in person.
+   */
+  accessCodeSet?: boolean;
+  /** Signs in DocuSign on the advisor's device, with the advisor present (embedded signing). */
+  inSession?: boolean;
   /** Contact this signer was resolved from, if any. */
   contactId?: string;
   status?: 'pending' | 'sent' | 'viewed' | 'signed' | 'declined';

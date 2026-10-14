@@ -2,7 +2,7 @@
   "swagger": "2.0",
   "info": {
     "title": "Folium DocuSign",
-    "description": "The DocuSign eSignature REST v2.1 operations Folium uses: create an envelope from Folium's own PDFs with page + x/y tabs, read status, void/resend, correct recipients, download the signed PDF and certificate.",
+    "description": "The DocuSign eSignature REST v2.1 operations Folium uses: create an envelope from Folium's own PDFs with page + x/y tabs, read status, void/resend, correct recipients, open in-session signing, download the signed PDF and certificate.",
     "version": "1.0"
   },
   "host": "demo.docusign.net",
@@ -87,6 +87,33 @@
           { "name": "body", "in": "body", "required": true, "schema": { "type": "object", "properties": { "signers": { "type": "array", "items": { "type": "object" } } } } }
         ],
         "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/envelopes/{envelopeId}/views/recipient": {
+      "post": {
+        "operationId": "CreateRecipientView",
+        "summary": "Get a short-lived link for an in-session (embedded) signer",
+        "parameters": [
+          { "$ref": "#/parameters/accountId" },
+          { "$ref": "#/parameters/envelopeId" },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "userName": { "type": "string" },
+                "email": { "type": "string" },
+                "recipientId": { "type": "string" },
+                "clientUserId": { "type": "string" },
+                "returnUrl": { "type": "string" },
+                "authenticationMethod": { "type": "string", "default": "None" }
+              }
+            }
+          }
+        ],
+        "responses": { "201": { "description": "Created", "schema": { "type": "object", "properties": { "url": { "type": "string" } } } } }
       }
     },
     "/envelopes/{envelopeId}/documents/{documentId}": {
