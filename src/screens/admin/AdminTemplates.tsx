@@ -8,6 +8,8 @@ import { useApp } from '../../state/store';
 import { Badge, Button, Empty, Field, SearchField, Segmented, Select, Sheet, TextInput, toast } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
 import { fmtDay } from '../requests/RequestCard';
+import { parseStatesFromTitle } from '../../domain/states';
+import { StatesPicker } from '../common/StatesPicker';
 import { searchTemplates } from '../library/search';
 
 export const STATUS_TONE: Record<TemplateStatus, 'accent' | 'warn' | 'info' | undefined> = { Live: 'accent', 'Needs mapping': 'warn', Draft: 'info', Retired: undefined };
@@ -190,7 +192,11 @@ function RegisterSheet({ file, existing, onClose, onDone }: { file: IncomingFile
   const [effective, setEffective] = useState(new Date().toISOString().slice(0, 10));
   const [source, setSource] = useState<FormSource>(prev?.source ?? 'Everence');
   const [category, setCategory] = useState<FormCategory>(prev?.category ?? 'Account maintenance');
+  // A new revision keeps the last one's states; a new form reads them from a "[AZ-CO-…]" title.
+  const [states, setStates] = useState<string[]>(prev?.states ?? parseStatesFromTitle(file.name));
+  const [variantGroup, setVariantGroup] = useState(prev?.variantGroup ?? '');
   const [busy, setBusy] = useState(false);
+  const groupsInUse = [...new Set(existing.map((t) => t.variantGroup).filter((g): g is string => !!g))].sort();
 
   return (
     <Sheet
@@ -208,7 +214,7 @@ function RegisterSheet({ file, existing, onClose, onDone }: { file: IncomingFile
             onClick={async () => {
               setBusy(true);
               try {
-                onDone(await services.templates.register(file, { formNumber, name, revision, effectiveDate: effective, source, category, issuer: prev?.issuer }));
+                onDone(await services.templates.register(file, { formNumber, name, revision, effectiveDate: effective, source, category, issuer: prev?.issuer, states: states.length ? states : undefined, variantGroup: variantGroup.trim() || undefined }));
               } catch (e) {
                 toast.error(e instanceof Error ? e.message : 'Could not set up the template');
                 setBusy(false);
@@ -254,6 +260,19 @@ function RegisterSheet({ file, existing, onClose, onDone }: { file: IncomingFile
           <Field label="Effective date" htmlFor="r-eff">
             <TextInput id="r-eff" type="date" value={effective} onChange={(e) => setEffective(e.target.value)} />
           </Field>
+          <Field label="State versions" htmlFor="r-var" optional help="Forms in one group are versions of each other for different states.">
+            <TextInput id="r-var" list="r-var-list" value={variantGroup} onChange={(e) => setVariantGroup(e.target.value)} placeholder="e.g. adv-select-app" />
+            <datalist id="r-var-list">
+              {groupsInUse.map((g) => (
+                <option key={g} value={g} />
+              ))}
+            </datalist>
+          </Field>
+          <div className="span-2 field">
+            <span>Approved in</span>
+            <StatesPicker label="Approved in" value={states} onChange={setStates} />
+            <span className="help">{prev?.states ? `Carried over from Rev ${prev.revision}.` : states.length ? 'Read from the file name. Check it against the carrier’s approval list.' : 'Leave on All states unless the carrier limits where the form may be used.'}</span>
+          </div>
         </div>
       </div>
     </Sheet>

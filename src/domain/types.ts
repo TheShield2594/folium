@@ -158,6 +158,10 @@ export interface FormTemplate {
   mapping: TemplateMapping;
   /** Account types this form applies to, for suggestions. */
   appliesTo?: string[];
+  /** USPS codes where this form may be used. Undefined or empty means every state. */
+  states?: string[];
+  /** Same form, different state version: templates sharing a variant group are alternatives. */
+  variantGroup?: string;
   keywords?: string[];
   description?: string;
   modifiedOn: string;
@@ -354,6 +358,8 @@ export interface SignatureRequest {
   uploadedToOnBase: boolean;
   uploadedBy?: string;
   uploadedOn?: string;
+  /** The state the packet's forms must be approved in, when the advisor changed it from the client's. */
+  state?: string;
   /** Field values the advisor entered, keyed by canonical key, so a draft can be resumed. */
   values: Record<string, string>;
   /**
@@ -387,6 +393,11 @@ export interface UserProfile extends Advisor {
   defaultAuth?: VerificationMethod;
   defaultReminderDays?: number;
   emailSignature?: string;
+  /**
+   * USPS codes of the states this advisor is licensed to sell insurance in. Empty or
+   * missing means unknown, and nothing is checked.
+   */
+  licensedStates?: string[];
 }
 
 export interface UserGroup {

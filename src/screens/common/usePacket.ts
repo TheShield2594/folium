@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { runChecks, type CheckResult } from '../../domain/checks';
 import { prefillPacket, type FormFill } from '../../domain/prefill';
 import type { FormTemplate } from '../../domain/types';
-import { latestLive, useApp, useScope } from '../../state/store';
+import { latestLive, packetState, useActingFor, useApp, useScope } from '../../state/store';
 
 export interface PacketView {
   templates: FormTemplate[];
@@ -16,6 +16,7 @@ export function usePacketView(): PacketView | undefined {
   const scope = useScope();
   const packet = useApp((s) => s.packet);
   const templates = useApp((s) => s.templates);
+  const advisor = useActingFor();
 
   return useMemo(() => {
     if (!scope) return undefined;
@@ -23,7 +24,7 @@ export function usePacketView(): PacketView | undefined {
       .map((i) => ({ template: templates.find((t) => t.id === i.templateId)!, account: scope.client.accounts.find((a) => a.accountid === i.accountId), itemId: i.id, copy: i.copy }))
       .filter((i) => i.template);
     const fills = prefillPacket(items, scope, packet.values);
-    const checks = runChecks(fills, { scope, values: packet.values, latestFor: (n) => latestLive(templates, n) });
+    const checks = runChecks(fills, { scope, values: packet.values, latestFor: (n) => latestLive(templates, n), state: packetState(packet, scope.client), licensedStates: advisor?.licensedStates });
     const relevant = fills.flatMap((f) => f.fields.filter((x) => x.origin !== 'signer'));
     return {
       templates: items.map((i) => i.template),
@@ -36,5 +37,5 @@ export function usePacketView(): PacketView | undefined {
         pages: items.reduce((n, i) => n + i.template.pageCount, 0),
       },
     };
-  }, [scope, packet, templates]);
+  }, [scope, packet, templates, advisor]);
 }

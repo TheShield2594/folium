@@ -241,3 +241,22 @@ describe('copies of a form', () => {
     expect(item.copy).toBeUndefined();
   });
 });
+
+describe('packet state', () => {
+  it('adds the version of a form for the packet’s state, and round-trips the state', async () => {
+    useApp.setState({ packet: packet({ items: [] }) });
+    useApp.getState().addToPacket('tpl-sa310-0726');
+    expect(useApp.getState().packet.items[0].templateId).toBe('tpl-sa310-0726');
+    useApp.setState({ packet: packet({ items: [], state: 'VA' }) });
+    useApp.getState().addToPacket('tpl-sa310-0726');
+    expect(useApp.getState().packet.items[0].templateId).toBe('tpl-sa310va-0726');
+    // Another version of a form already in the packet counts as present.
+    expect(useApp.getState().addToPacket('tpl-sa310-0726')).toBe('present');
+
+    const services = createDemoServices();
+    const p = useApp.getState().packet;
+    const saved = await saveDraft({ services, packet: p, fills: fillsFor(client, p.items), contactId: 'c-jordan', me, owner: me });
+    useApp.getState().loadRequest(saved);
+    expect(useApp.getState().packet.state).toBe('VA');
+  });
+});

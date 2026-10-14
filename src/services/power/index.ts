@@ -204,6 +204,13 @@ export function createPowerServices(): Services {
       unwrap(await client.updateRecordAsync(DATAVERSE.formTemplate, id, { ev_payload: JSON.stringify(next), ev_status: next.status }), 'Save mapping');
       return next;
     },
+    async saveDetails(id, details) {
+      const t = (await templates.list()).find((x) => x.id === id);
+      if (!t) throw new Error('Template not found');
+      const next: FormTemplate = { ...t, states: details.states?.length ? details.states : undefined, variantGroup: details.variantGroup?.trim() || undefined, modifiedOn: new Date().toISOString() };
+      unwrap(await client.updateRecordAsync(DATAVERSE.formTemplate, id, { ev_payload: JSON.stringify(next) }), 'Save details');
+      return next;
+    },
     async setStatus(id, status, effectiveDate) {
       const all = await templates.list();
       const t = all.find((x) => x.id === id);

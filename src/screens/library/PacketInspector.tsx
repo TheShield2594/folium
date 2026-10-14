@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { findNameClash, nextFreeName } from '../../domain/drafts';
 import type { SavedPacket } from '../../domain/types';
 import { useServices } from '../../services';
-import { PACKET_LIMIT, useApp } from '../../state/store';
+import { US_STATES, availableIn, normalizeState, pickVariant } from '../../domain/states';
+import { PACKET_LIMIT, currentTemplates, packetState, useApp } from '../../state/store';
 import { Button, Field, IconButton, Select, Sheet, SwitchRow, TextInput, toast } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
 import { addForm } from '../common/addForm';
@@ -17,12 +18,17 @@ export function PacketInspector() {
   const moveInPacket = useApp((s) => s.moveInPacket);
   const setPacketAccount = useApp((s) => s.setPacketAccount);
   const clearPacket = useApp((s) => s.clearPacket);
+  const setPacket = useApp((s) => s.setPacket);
+  const replaceInPacket = useApp((s) => s.replaceInPacket);
+  const templates = useApp((s) => s.templates);
   const view = usePacketView();
   const navigate = useNavigate();
   const [saving, setSaving] = useState(false);
 
   const blocking = view?.checks.filter((c) => c.level === 'block').length ?? 0;
   const full = packet.items.length >= PACKET_LIMIT;
+  const state = packetState(packet, client);
+  const homeState = normalizeState(client?.contact.address1_stateorprovince);
 
   return (
     <aside className="card sticky inspector" aria-label="This packet">
@@ -45,6 +51,22 @@ export function PacketInspector() {
             <p className="t-footnote c3">
               {packet.items.length} {packet.items.length === 1 ? 'form' : 'forms'} · {view?.totals.pages ?? 0} pages
             </p>
+            <label className="row t-callout" style={{ gap: 8 }}>
+              <span className="grow">Approved in</span>
+              <Select
+                aria-label="State the forms must be approved in"
+                value={packet.state ?? ''}
+                onChange={(e) => setPacket({ state: e.target.value || undefined })}
+                style={{ width: 'auto', minHeight: 32, fontSize: 13 }}
+              >
+                <option value="">{homeState ? `${homeState} (client’s address)` : 'Choose a state…'}</option>
+                {US_STATES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </Select>
+            </label>
             <ol className="packet-list">
               {packet.items.map((item, i) => {
                 const t = view?.templates.find((x) => x.id === item.templateId);
@@ -69,6 +91,20 @@ export function PacketInspector() {
                         <IconButton icon="x" label={`Remove ${name}`} size={15} onClick={() => removeFromPacket(item.id)} />
                       </div>
                     </div>
+                    {!availableIn(t, state) && (
+                      <div className="row t-footnote c-warn" style={{ marginTop: 6, gap: 6 }}>
+                        <Icon name="warning" size={13} />
+                        <span className="grow">Not approved in {state}</span>
+                        {(() => {
+                          const v = t.variantGroup ? pickVariant(currentTemplates(templates), t.variantGroup, state) : undefined;
+                          return v && v.id !== t.id ? (
+                            <button className="btn btn-plain btn-sm" onClick={() => replaceInPacket(item.id, v.id)}>
+                              Use the {state} version
+                            </button>
+                          ) : null;
+                        })()}
+                      </div>
+                    )}
                     {needsAccount && (
                       <Select aria-label={`Account for ${name}`} value={item.accountId ?? ''} onChange={(e) => setPacketAccount(item.id, e.target.value)} style={{ marginTop: 8, minHeight: 32, fontSize: 13 }}>
                         <option value="" disabled>

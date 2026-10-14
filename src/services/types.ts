@@ -34,11 +34,15 @@ export interface TemplateLibrary {
   listIncoming(): Promise<IncomingFile[]>;
   saveMapping(templateId: string, mapping: TemplateMapping): Promise<FormTemplate>;
   setStatus(templateId: string, status: FormTemplate['status'], effectiveDate?: string): Promise<FormTemplate>;
+  /** Where a form may be used: its approved states and the variant group of its state versions. */
+  saveDetails(templateId: string, details: TemplateDetails): Promise<FormTemplate>;
   /** Create a template row for an incoming file (optionally as a new revision of an existing form). */
   register(file: IncomingFile, init: Partial<FormTemplate>): Promise<FormTemplate>;
   /** Ask Marketing for a form that isn't in the library yet. */
   requestForm(req: { name: string; issuer?: string; note?: string; requestedBy: string }): Promise<void>;
 }
+
+export type TemplateDetails = Pick<FormTemplate, 'states' | 'variantGroup'>;
 
 export interface IncomingFile {
   itemId: string;

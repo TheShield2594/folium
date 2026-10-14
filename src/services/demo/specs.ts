@@ -17,6 +17,8 @@ export interface FormSpec {
   status: TemplateStatus;
   pdfKind: PdfKind;
   appliesTo?: string[];
+  states?: string[];
+  variantGroup?: string;
   keywords?: string[];
   description: string;
   intro?: string;
@@ -488,6 +490,8 @@ export const SPECS: FormSpec[] = [
   {
     id: 'tpl-sl200-0226',
     name: 'Policy change request',
+    // Approved only where Sample Life writes business.
+    states: ['IL', 'IN', 'KS', 'MI', 'OH', 'PA'],
     formNumber: 'SL-200',
     source: 'Carrier',
     issuer: 'Sample Life Insurance Co.',
@@ -518,7 +522,10 @@ export const SPECS: FormSpec[] = [
   },
   {
     id: 'tpl-sa310-0726',
-    name: 'Annuity partial withdrawal',
+    // Carriers often put the approved states in the title, as here.
+    name: 'Annuity partial withdrawal [IN-KS-OH-PA]',
+    states: ['IN', 'KS', 'OH', 'PA'],
+    variantGroup: 'sa-310-withdrawal',
     formNumber: 'SA-310',
     source: 'Carrier',
     issuer: 'Sample Annuity Co.',
@@ -574,3 +581,14 @@ export const SPECS: FormSpec[] = [
     checks: [],
   },
 ];
+
+// Sample Annuity's Virginia version of SA-310: a state variant of the same form.
+const sa310 = SPECS.find((s) => s.id === 'tpl-sa310-0726')!;
+SPECS.push({
+  ...sa310,
+  id: 'tpl-sa310va-0726',
+  name: 'Annuity partial withdrawal (VA)',
+  formNumber: 'SA-310-VA',
+  states: ['VA'],
+  description: 'Virginia version of SA-310, with the state’s free-look and replacement notices.',
+});

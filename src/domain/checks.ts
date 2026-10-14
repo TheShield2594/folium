@@ -2,6 +2,7 @@ import { fitsBox } from '../pdf/layout';
 import { toNumber } from './format';
 import { evaluateCondition, type ResolveScope } from './paths';
 import { copyScope, valuesForAccount, type FormFill } from './prefill';
+import { availableIn, describeStates, normalizeState } from './states';
 import type { Check, FormTemplate } from './types';
 
 export type CheckLevel = 'pass' | 'warn' | 'block';
@@ -23,6 +24,10 @@ export interface CheckContext {
   values: Record<string, string>;
   /** Latest Live revision for a form number, to catch stale drafts. */
   latestFor: (formNumber: string) => FormTemplate | undefined;
+  /** The state the packet's forms must be approved in (USPS code), when known. */
+  state?: string;
+  /** States the acting advisor is licensed in; empty or missing skips the licensing check. */
+  licensedStates?: string[];
 }
 
 function valueOf(fill: FormFill, pdfField: string): string | undefined {
@@ -170,7 +175,43 @@ export function runChecks(fills: FormFill[], ctx: CheckContext): CheckResult[] {
     }
   }
 
-  // 6. Two copies of one form about the same account is almost always a slip.
+  // 6. Each form is approved in the packet's state. Forms with no states are approved everywhere.
+  const limited = fills.filter((f) => f.template.states?.length);
+  const state = normalizeState(ctx.state);
+  if (limited.length && !state) {
+    results.push({
+      id: 'state:unknown',
+      level: 'warn',
+      title: 'No state for this packet',
+      detail: `${limited.map(formLabel).join(', ')} ${limited.length === 1 ? 'is' : 'are'} approved only in some states. Set the packet’s state to check ${limited.length === 1 ? 'it' : 'them'}.`,
+    });
+  }
+  if (state) {
+    for (const f of limited) {
+      if (availableIn(f.template, state)) continue;
+      results.push({
+        id: `${f.itemId}:state`,
+        level: 'block',
+        title: `${formLabel(f)} isn’t approved in ${state}`,
+        detail: `Not approved in ${state}. Approved in: ${describeStates(f.template.states, 12)}.`,
+        templateId: f.template.id,
+        itemId: f.itemId,
+      });
+    }
+    if (limited.length && !results.some((r) => r.id.endsWith(':state'))) results.push({ id: 'state', level: 'pass', title: `Every form is approved in ${state}` });
+    // The advisor's licence: only for insurance and annuity business, and only when the list is kept.
+    const insurance = fills.some((f) => f.template.category === 'Insurance service' || f.template.source === 'Carrier');
+    if (insurance && ctx.licensedStates?.length && !ctx.licensedStates.includes(state)) {
+      results.push({
+        id: 'state:licence',
+        level: 'warn',
+        title: `${ctx.scope.advisor.fullname} isn’t listed as licensed in ${state}`,
+        detail: `Licensed in: ${describeStates(ctx.licensedStates, 12)}. Check before sending, or have a licensed advisor sign.`,
+      });
+    }
+  }
+
+  // 7. Two copies of one form about the same account is almost always a slip.
   const byForm = new Map<string, FormFill[]>();
   for (const f of fills) if (f.accountId) byForm.set(`${f.template.id}|${f.accountId}`, [...(byForm.get(`${f.template.id}|${f.accountId}`) ?? []), f]);
   for (const [k, same] of byForm) {

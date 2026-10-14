@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { create } from 'zustand';
 import type { ResolveScope } from '../domain/paths';
 import { copyScope, migrateAccountValues, seedCopyValues } from '../domain/prefill';
+import { normalizeState, pickVariant } from '../domain/states';
 import type {
   Attachment,
   ClientRecord,
@@ -39,6 +40,11 @@ export interface Packet {
   items: PacketItem[];
   values: Record<string, string>;
   title: string;
+  /**
+   * The state forms must be approved in. Undefined follows the client's address; the
+   * advisor sets it when what matters is where the application is signed.
+   */
+  state?: string;
   /** Set when the packet was opened from (or saved as) a draft request. */
   requestId?: string;
   attachments: Attachment[];
@@ -122,6 +128,8 @@ interface AppState {
   addToPacket(templateId: string, accountId?: string, opts?: { duplicate?: boolean }): AddResult;
   /** Remove one form (a single copy) by its item id. */
   removeFromPacket(itemId: string): void;
+  /** Swap one form for another version of it (another state's), keeping its place, account and values. */
+  replaceInPacket(itemId: string, templateId: string): void;
   /** Remove every copy of a form, for the library's add/remove toggle. */
   removeTemplateFromPacket(templateId: string): void;
   moveInPacket(itemId: string, delta: number): void;
@@ -162,6 +170,11 @@ export function suggestAccount(t: FormTemplate, client?: ClientRecord, taken: st
     return undefined;
   };
   return (taken.length ? pickFrom(true) : undefined) ?? pickFrom(false);
+}
+
+/** The state a packet's forms must be approved in: the one the advisor set, else the client's. */
+export function packetState(packet: Pick<Packet, 'state'>, client: ClientRecord | undefined): string | undefined {
+  return normalizeState(packet.state ?? client?.contact.address1_stateorprovince);
 }
 
 /** The most forms one packet can hold (Laser App caps a launch at 20 too). */
@@ -322,12 +335,17 @@ export const useApp = create<AppState>((set, get) => ({
     set({ packets: await get().services!.packets.list() });
   },
 
-  addToPacket(templateId, accountId, opts) {
+  addToPacket(requestedId, accountId, opts) {
     const { packet, templates, client } = get();
+    let t = templates.find((x) => x.id === requestedId);
+    // A form with state versions: add the version for the packet's state.
+    const group = t?.variantGroup;
+    if (group) t = pickVariant(currentTemplates(templates), group, packetState(packet, client)) ?? t;
+    const templateId = t?.id ?? requestedId;
     const copies = packet.items.filter((i) => i.templateId === templateId);
-    if (copies.length && !opts?.duplicate) return 'present';
+    const sameForm = packet.items.some((i) => i.templateId === templateId || (!!group && templates.find((x) => x.id === i.templateId)?.variantGroup === group));
+    if (sameForm && !opts?.duplicate) return 'present';
     if (packet.items.length >= PACKET_LIMIT) return 'full';
-    const t = templates.find((x) => x.id === templateId);
     const id = newItemId();
     if (!copies.length) {
       set({ packet: { ...packet, dirty: true, items: [...packet.items, { id, templateId, accountId: accountId ?? (t ? suggestAccount(t, client) : undefined) }] } });
@@ -348,6 +366,10 @@ export const useApp = create<AppState>((set, get) => ({
     // A copy's own values go with it.
     const values = Object.fromEntries(Object.entries(packet.values).filter(([k]) => !k.startsWith(`${itemId}/`)));
     set({ packet: { ...packet, dirty: true, values, items: packet.items.filter((i) => i.id !== itemId) } });
+  },
+  replaceInPacket(itemId, templateId) {
+    const { packet } = get();
+    set({ packet: { ...packet, dirty: true, items: packet.items.map((i) => (i.id === itemId ? { ...i, templateId } : i)) } });
   },
   removeTemplateFromPacket(templateId) {
     for (const i of get().packet.items.filter((x) => x.templateId === templateId)) get().removeFromPacket(i.id);
@@ -418,6 +440,7 @@ export const useApp = create<AppState>((set, get) => ({
         requestId: req.id,
         attachments: req.attachments,
         sharedWith: req.sharedWith ?? [],
+        state: req.state,
         snapshot: req.prefillSnapshot,
         // A send that stopped after DocuSign created the envelope picks up where it left off.
         send: req.status === 'Drafted' && req.envelopeId && req.envelopePhase === 'created' ? { phase: 'created', envelopeId: req.envelopeId, at: req.audit.at(-1)?.at ?? req.createdOn } : undefined,

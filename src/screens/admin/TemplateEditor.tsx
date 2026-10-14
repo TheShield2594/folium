@@ -15,8 +15,10 @@ import { PdfView, useInspection } from '../common/PdfView';
 import { STATUS_TONE } from './AdminTemplates';
 import { ConditionSheet, describeConditions } from './ConditionSheet';
 import { KNOWN_SOURCES, SOURCE_GROUPS } from './sources';
+import { describeStates, parseStatesFromTitle } from '../../domain/states';
+import { StatesPicker } from '../common/StatesPicker';
 
-type Tab = 'fields' | 'signers' | 'checks' | 'test';
+type Tab = 'fields' | 'signers' | 'checks' | 'details' | 'test';
 const FORMATS: [FieldFormat | '', string][] = [
   ['', 'Text'],
   ['date', 'Date'],
@@ -206,6 +208,7 @@ export function TemplateEditor() {
                 { value: 'fields', label: `Fields (${mapping.fields.length})` },
                 { value: 'signers', label: `Signers & tabs (${mapping.placements.length})` },
                 { value: 'checks', label: `Checks (${mapping.checks.length})` },
+                { value: 'details', label: template.states?.length ? `States (${template.states.length})` : 'States' },
                 { value: 'test', label: 'Test with a contact' },
               ]}
             />
@@ -368,10 +371,11 @@ export function TemplateEditor() {
 
               {tab === 'signers' && <SignersTab mapping={mapping} setMapping={setMapping} sel={selPlacement} setSel={setSelPlacement} onPlace={setPlacing} />}
               {tab === 'checks' && <ChecksTab mapping={mapping} setMapping={setMapping} />}
+              {tab === 'details' && <DetailsTab template={template} templates={templates} onSaved={refreshTemplates} />}
               {tab === 'test' && <TestTab template={{ ...template, mapping }} />}
             </div>
 
-            {tab !== 'test' && (
+            {tab !== 'test' && tab !== 'details' && (
               <div className="card sticky" style={{ padding: 12, background: 'var(--surface-sunken)', maxHeight: 'calc(100vh - 140px)', overflow: 'auto' }}>
                 <PdfView
                   template={template}
@@ -843,5 +847,78 @@ function LimitsSheet({ field, pdfMaxLength, onChange, onClose }: { field: FieldM
         )}
       </div>
     </Sheet>
+  );
+}
+
+/** Where the form may be used, and which other templates are its versions for other states. */
+function DetailsTab({ template, templates, onSaved }: { template: FormTemplate; templates: FormTemplate[]; onSaved: () => Promise<void> }) {
+  const services = useServices();
+  const [states, setStates] = useState<string[]>(template.states ?? []);
+  const [group, setGroup] = useState(template.variantGroup ?? '');
+  const [busy, setBusy] = useState(false);
+  const dirty = JSON.stringify(states) !== JSON.stringify(template.states ?? []) || group.trim() !== (template.variantGroup ?? '');
+  const fromTitle = parseStatesFromTitle(template.name);
+  const groupsInUse = [...new Set(templates.map((t) => t.variantGroup).filter((g): g is string => !!g))].sort();
+  const others = group.trim() ? templates.filter((t) => t.variantGroup === group.trim() && t.formNumber !== template.formNumber && t.status !== 'Retired') : [];
+
+  async function save() {
+    setBusy(true);
+    try {
+      await services.templates.saveDetails(template.id, { states, variantGroup: group.trim() || undefined });
+      await onSaved();
+      toast.ok('Saved. Advisors see the change now.');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not save');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="card card-pad stack-4" aria-label="Where it may be used">
+      <div className="stack">
+        <h2 className="t-headline">Approved in</h2>
+        <p className="t-footnote c3">Advisors can still find a form that isn’t approved in their client’s state, but it’s marked, and a packet with it can’t be sent.</p>
+        <StatesPicker label="Approved in" value={states} onChange={setStates} />
+        {fromTitle.length > 0 && JSON.stringify(fromTitle) !== JSON.stringify(states) && (
+          <div className="row t-footnote c2" style={{ gap: 6 }}>
+            <Icon name="info" size={14} />
+            <span className="grow">The title lists {describeStates(fromTitle)}.</span>
+            <Button variant="plain" size="sm" onClick={() => setStates(fromTitle)}>
+              Use those
+            </Button>
+          </div>
+        )}
+      </div>
+      <div className="stack">
+        <h2 className="t-headline">State versions</h2>
+        <p className="t-footnote c3">Give every version of this form for different states the same group. Advisors then get the version for their client’s state automatically.</p>
+        <Field label="Variant group" htmlFor="d-var" optional>
+          <TextInput id="d-var" list="d-var-list" value={group} onChange={(e) => setGroup(e.target.value)} placeholder="e.g. adv-select-app" />
+          <datalist id="d-var-list">
+            {groupsInUse.map((g) => (
+              <option key={g} value={g} />
+            ))}
+          </datalist>
+        </Field>
+        {others.length > 0 && (
+          <ul className="list" aria-label="Other versions">
+            {others.map((t) => (
+              <li key={t.id} className="list-row">
+                <span className="mono t-footnote">{t.formNumber}</span>
+                <span className="grow ellipsis">{t.name}</span>
+                <span className="t-footnote c3">{describeStates(t.states)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {group.trim() && !others.length && <p className="t-footnote c3">No other form is in this group yet.</p>}
+      </div>
+      <div className="row" style={{ justifyContent: 'flex-end' }}>
+        <Button variant="filled" disabled={!dirty} busy={busy} onClick={save}>
+          Save
+        </Button>
+      </div>
+    </section>
   );
 }

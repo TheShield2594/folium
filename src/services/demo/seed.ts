@@ -13,7 +13,7 @@ export const ADVISOR: Advisor = {
 };
 
 export const USERS: UserProfile[] = [
-  { ...ADVISOR, role: 'User', groupIds: ['grp-goshen'], region: 'Goshen', defaultAuth: 'sms', defaultReminderDays: 3 },
+  { ...ADVISOR, role: 'User', groupIds: ['grp-goshen'], region: 'Goshen', defaultAuth: 'sms', defaultReminderDays: 3, licensedStates: ['IN', 'KS', 'MI', 'OH'] },
   { systemuserid: 'usr-advisor-2', fullname: 'Jesse Shenk', email: 'jesse.shenk@example.org', phone: '540-555-0161', repCode: 'EV3302', branch: 'Harrisonburg', title: 'Financial advisor', role: 'User', groupIds: ['grp-goshen', 'grp-va'], region: 'Harrisonburg', defaultAuth: 'email', defaultReminderDays: 5 },
   { systemuserid: 'usr-assistant-1', fullname: 'Morgan Beachy', email: 'morgan.beachy@example.org', phone: '574-555-0150', repCode: '', branch: 'Goshen', title: 'Client service associate', role: 'Assistant', groupIds: ['grp-goshen'], region: 'Goshen' },
   { systemuserid: 'usr-admin-1', fullname: 'Dana Yoder', email: 'dana.yoder@example.org', phone: '574-555-0100', repCode: '', branch: 'Home office', title: 'Forms & operations', role: 'Admin', groupIds: ['grp-ops'], region: 'Home office' },
@@ -126,6 +126,8 @@ export function specToTemplate(spec: FormSpec): FormTemplate {
     sharePointUrl: `https://everence.sharepoint.com/sites/Marketing/Forms/${spec.formNumber}_${spec.revision.replace('/', '-')}.pdf`,
     supersedesId: spec.supersedesId,
     appliesTo: spec.appliesTo,
+    states: spec.states,
+    variantGroup: spec.variantGroup,
     keywords: spec.keywords,
     description: spec.description,
     modifiedOn: `${spec.effectiveDate}T09:00:00Z`,

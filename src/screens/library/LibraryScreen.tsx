@@ -5,7 +5,8 @@ import { roleLabel } from '../../domain/signers';
 import type { FormSource, FormTemplate } from '../../domain/types';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
-import { currentTemplates, latestLive, useApp, useScope, visibleTemplates } from '../../state/store';
+import { availableIn, pickVariant } from '../../domain/states';
+import { currentTemplates, latestLive, packetState, useApp, useScope, visibleTemplates } from '../../state/store';
 import { Badge, Button, Empty, IconButton, Meter, SearchField, Select } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
 import { NoClient } from '../common/NoClient';
@@ -46,6 +47,7 @@ export function LibraryScreen() {
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<Filter>('suggested');
   const [category, setCategory] = useState('');
+  const [stateOnly, setStateOnly] = useState(true);
   const [peek, setPeek] = useState<FormTemplate>();
   const [asking, setAsking] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -62,9 +64,22 @@ export function LibraryScreen() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  const state = packetState(packet, client);
   const live = useMemo(() => currentTemplates(visibleTemplates(me, groups, templates)), [me, groups, templates]);
+  // Browsing shows one version of a form with state versions: the one for this state.
+  const browse = useMemo(() => {
+    const shown = new Set<string>();
+    return live.filter((t) => {
+      if (!t.variantGroup) return true;
+      if (shown.has(t.variantGroup)) return false;
+      const pick = pickVariant(live, t.variantGroup, state) ?? live.find((x) => x.variantGroup === t.variantGroup);
+      if (pick?.id !== t.id) return false;
+      shown.add(t.variantGroup);
+      return true;
+    });
+  }, [live, state]);
   const accountTypes = useMemo(() => new Set(client?.accounts.map((a) => a.ev_accounttype)), [client]);
-  const suggested = useMemo(() => live.filter((t) => t.appliesTo?.some((a) => accountTypes.has(a))), [live, accountTypes]);
+  const suggested = useMemo(() => browse.filter((t) => t.appliesTo?.some((a) => accountTypes.has(a)) && availableIn(t, state)), [browse, accountTypes, state]);
   const coverage = useMemo(() => {
     const m = new Map<string, number>();
     if (scope) for (const t of live) m.set(t.id, prefillCoverage(t, { ...scope, account: client?.accounts.find((a) => t.appliesTo?.includes(a.ev_accounttype)) }));
@@ -72,16 +87,18 @@ export function LibraryScreen() {
   }, [live, scope, client]);
 
   const list = useMemo(() => {
-    let base = live;
+    // A search finds every version, so an advisor looking for a form number learns why it doesn't fit.
+    let base = q ? live : browse;
     if (!q) {
       if (filter === 'suggested') base = suggested;
       if (filter === 'favorites') base = live.filter((t) => favorites.includes(t.id));
       if (filter === 'recent') base = recent.map((r) => live.find((t) => t.id === r.templateId)).filter((t): t is FormTemplate => !!t);
+      if (stateOnly) base = base.filter((t) => availableIn(t, state));
     }
     if (filter === 'Everence' || filter === 'Praxis' || filter === 'Carrier') base = base.filter((t) => t.source === filter);
     if (category) base = base.filter((t) => t.category === category);
     return searchTemplates(base, q);
-  }, [live, suggested, favorites, recent, filter, category, q]);
+  }, [live, browse, suggested, favorites, recent, filter, category, q, stateOnly, state]);
 
   const upcoming = (t: FormTemplate) => templates.find((x) => x.formNumber === t.formNumber && x.id !== t.id && x.status !== 'Retired' && x.effectiveDate > t.effectiveDate);
   const waiting = requests.filter((r) => r.status === 'Sent' || r.status === 'Viewed');
@@ -137,6 +154,12 @@ export function LibraryScreen() {
                       {f.label}
                     </button>
                   ))}
+                  {state && (
+                    <button type="button" className="chip" aria-pressed={stateOnly} onClick={() => setStateOnly(!stateOnly)} title="Only forms approved in the packet’s state. Search still finds the rest.">
+                      <Icon name="map" size={13} strokeWidth={2} />
+                      Available in {state}
+                    </button>
+                  )}
                 </div>
 
                 <div>
@@ -152,12 +175,13 @@ export function LibraryScreen() {
                   ) : (
                     <ul className="form-list" aria-label="Forms">
                       {list.map((t) => {
-                        const inPacket = packet.items.some((i) => i.templateId === t.id);
+                        const inPacket = packet.items.some((i) => i.templateId === t.id || (!!t.variantGroup && templates.find((x) => x.id === i.templateId)?.variantGroup === t.variantGroup));
+                        const off = !availableIn(t, state);
                         const next = upcoming(t);
                         const cov = coverage.get(t.id) ?? 0;
                         const fav = favorites.includes(t.id);
                         return (
-                          <li key={t.id} className={['form-row', inPacket && 'in'].filter(Boolean).join(' ')}>
+                          <li key={t.id} className={['form-row', inPacket && 'in', off && 'off'].filter(Boolean).join(' ')}>
                             <button
                               type="button"
                               className="add"
@@ -174,7 +198,11 @@ export function LibraryScreen() {
                               </span>
                             </button>
                             <span className="cell-ver">
-                              {next ? (
+                              {off ? (
+                                <Badge tone="warn" icon="map">
+                                  Not approved in {state}
+                                </Badge>
+                              ) : next ? (
                                 <Badge tone="warn" icon="sparkle">
                                   New rev {new Date(next.effectiveDate + 'T00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                                 </Badge>
