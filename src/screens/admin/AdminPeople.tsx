@@ -20,7 +20,7 @@ import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
 import { saveUserChanges, type ChangeReport } from '../../state/people';
 import { actableUsers, useApp } from '../../state/store';
-import { Avatar, Badge, Button, downloadBytes, Field, IconButton, SearchField, Segmented, Select, Sheet, TextArea, TextInput, toast } from '../../ui/controls';
+import { Avatar, Badge, Button, downloadBytes, Field, IconButton, SearchField, Segmented, Select, Sheet, SwitchRow, TextArea, TextInput, toast } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
 import { RepAudit, RepDetails } from '../common/RepDetails';
 
@@ -513,6 +513,16 @@ function UserSheet({
             </label>
           ))}
         </fieldset>
+        {u.role !== 'Admin' && (
+          <div className="list">
+            <SwitchRow
+              label="Can open usage reports"
+              detail="The reporting role: the sidebar’s Reports link to the firm’s Power BI report. Administrators always have it."
+              checked={!!u.canViewReports}
+              onChange={(v) => set({ canViewReports: v || undefined })}
+            />
+          </div>
+        )}
         {active && (
           <fieldset className="list" style={{ border: 0, padding: 0, margin: 0 }}>
             <legend className="field-label" style={{ padding: '0 0 6px 2px' }}>Groups</legend>

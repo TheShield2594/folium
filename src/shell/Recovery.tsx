@@ -132,6 +132,7 @@ function useSaveOpenPacket() {
       owner,
       existing,
       writePdfs: true,
+      trackUsage: true,
       auditNote,
       retentionDays: retentionDays(useApp.getState().policy),
       // Keep the row's identity even if the PDFs fail, so the next save updates it.

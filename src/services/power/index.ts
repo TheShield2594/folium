@@ -9,10 +9,12 @@ import { docuSignReady, withDocuSignDefaults, type DocuSignSetup } from '../../d
 import { mapDocuSignStatus } from '../../domain/requests';
 import { buildEnvelopeDefinition, ROLE_SEPARATOR } from '../docusign/tabs';
 import { classifyError, FoliumError } from '../errors';
-import type { CrmService, DirectoryService, DraftStore, IncomingFile, PacketStore, RequestStore, Services, SigningProvider, TemplateLibrary } from '../types';
+import type { CrmService, DirectoryService, DraftStore, FeedbackStore, IncomingFile, PacketStore, RequestStore, Services, SigningProvider, TemplateLibrary } from '../types';
+import { createUsageQueue } from '../usage';
 import { decodeChoices, encodeChoices } from './choices';
-import { CHOICES, CONNECTORS, DATAVERSE, ID_DOCUMENT_COLUMNS, SHAREPOINT, SIGNATURE_STATUS_OPTIONS } from './config';
+import { CHOICES, CONNECTORS, DATAVERSE, ID_DOCUMENT_COLUMNS, SHAREPOINT } from './config';
 import { dataSourcesInfo } from './dataSourcesInfo';
+import { feedbackRow, fromFeedbackRow, isDuplicateKeyError, requestRow, usageRow, type FeedbackRowIn } from './rows';
 
 // Power Platform implementations. Dataverse tables go through the SDK's data client;
 // SharePoint and DocuSign go through connector operations. Every Dataverse row Folium
@@ -322,10 +324,42 @@ export function createPowerServices(): Services {
       );
       return { ...t, id: created.ev_formtemplateid };
     },
-    async requestForm(req) {
-      unwrap(await client.createRecordAsync(DATAVERSE.formRequest, { ev_name: req.name, ev_issuer: req.issuer, ev_note: req.note, ev_requestedby: req.requestedBy }), 'Request form');
+  };
+
+  // ---------------------------------------------------------------- Form feedback
+  const FEEDBACK_COLUMNS = ['ev_formrequestid', 'ev_name', 'ev_issuer', 'ev_note', 'ev_requestedby', '_ev_requester_value', 'ev_kind', 'ev_status', 'ev_category', 'createdon', 'ev_payload'];
+  const feedback: FeedbackStore = {
+    async submit(f) {
+      const created = unwrap(await client.createRecordAsync<ReturnType<typeof feedbackRow>, { ev_formrequestid: string }>(DATAVERSE.formRequest, feedbackRow(f)), f.kind === 'problem' ? 'Report a problem' : 'Request form');
+      return { ...f, id: created.ev_formrequestid };
+    },
+    async list() {
+      const rows = unwrap(await client.retrieveMultipleRecordsAsync<FeedbackRowIn>(DATAVERSE.formRequest, { select: FEEDBACK_COLUMNS, orderBy: ['createdon desc'], top: 500 }), 'Load form feedback');
+      return rows.map(fromFeedbackRow);
+    },
+    async listMine(userId) {
+      if (!userId) return [];
+      const rows = unwrap(
+        await client.retrieveMultipleRecordsAsync<FeedbackRowIn>(DATAVERSE.formRequest, { filter: `_ev_requester_value eq ${userId}`, select: FEEDBACK_COLUMNS, orderBy: ['createdon desc'], top: 100 }),
+        'Load your form reports',
+      );
+      return rows.map(fromFeedbackRow);
+    },
+    async update(f) {
+      unwrap(await client.updateRecordAsync(DATAVERSE.formRequest, f.id, feedbackRow(f)), 'Update form feedback');
+      return f;
     },
   };
+
+  // ---------------------------------------------------------------- Usage events
+  // One row at a time, so a row that's already there (same `ev_dedupekey`, the table's
+  // alternate key) is skipped without losing the rest of the batch.
+  const usage = createUsageQueue(async (events) => {
+    for (const e of events) {
+      const r = await client.createRecordAsync(DATAVERSE.usageEvent, usageRow(e));
+      if (!r.success && !isDuplicateKeyError(r.error)) unwrap(r, 'Record usage');
+    }
+  });
 
   // ---------------------------------------------------------------- Drafts
   const drafts: DraftStore = {
@@ -374,18 +408,7 @@ export function createPowerServices(): Services {
   const deactivate = (table: string, id: string, what: string) => client.updateRecordAsync(table, id, { statecode: 1, statuscode: 2 }).then((r) => unwrap(r, what));
   const reactivate = (table: string, id: string, what: string) => client.updateRecordAsync(table, id, { statecode: 0, statuscode: 1 }).then((r) => unwrap(r, what));
   type Row = { ev_signaturerequestid: string; ev_payload: string };
-  const toRow = (r: SignatureRequest) => ({
-    ev_name: r.title,
-    'ev_contact@odata.bind': `/contacts(${r.contactId})`,
-    ev_status: SIGNATURE_STATUS_OPTIONS[r.status],
-    ev_expireson: r.expiresOn ?? null,
-    ev_envelopeid: r.envelopeId ?? null,
-    ev_provider: r.provider,
-    ev_senton: r.sentOn ?? null,
-    ev_signedon: r.signedOn ?? null,
-    ev_uploadedtoonbase: r.uploadedToOnBase,
-    ev_payload: JSON.stringify(r),
-  });
+  const toRow = requestRow;
 
   const requests: RequestStore = {
     async listForContact(contactId) {
@@ -512,5 +535,5 @@ export function createPowerServices(): Services {
     },
   };
 
-  return { mode: 'power', directory, crm, templates, drafts, requests, packets, signing, attachments: new Map() };
+  return { mode: 'power', directory, crm, templates, drafts, requests, packets, signing, feedback, usage, attachments: new Map() };
 }

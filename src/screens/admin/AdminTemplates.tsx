@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { openProblemCounts } from '../../domain/feedback';
 import type { FormCategory, FormSource, FormTemplate, TemplateStatus } from '../../domain/types';
 import { useServices } from '../../services';
 import type { IncomingFile } from '../../services/types';
@@ -25,11 +26,20 @@ export function AdminTemplates() {
   const [status, setStatus] = useState<'all' | TemplateStatus>('all');
   const [registering, setRegistering] = useState<IncomingFile>();
   const [syncing, setSyncing] = useState(false);
+  /** Open problem reports per template. */
+  const [problems, setProblems] = useState<Map<string, number>>(new Map());
 
   async function sync() {
     setSyncing(true);
     try {
-      const [inc] = await Promise.all([services.templates.listIncoming(), refreshTemplates()]);
+      const [inc] = await Promise.all([
+        services.templates.listIncoming(),
+        refreshTemplates(),
+        services.feedback
+          .list()
+          .then((f) => setProblems(openProblemCounts(f)))
+          .catch(() => undefined),
+      ]);
       setIncoming(inc);
     } finally {
       setSyncing(false);
@@ -150,7 +160,16 @@ export function AdminTemplates() {
                         </td>
                         <td className="tabular">{new Date(t.effectiveDate + 'T00:00').toLocaleDateString()}</td>
                         <td>{t.pdfKind === 'fillable' ? 'Fillable' : t.pdfKind === 'xfa' ? <Badge tone="warn">XFA</Badge> : <Badge tone="warn">Scanned</Badge>}</td>
-                        <td className="tabular">{t.mapping.fields.length}</td>
+                        <td className="tabular">
+                          {t.mapping.fields.length}
+                          {problems.get(t.id) ? (
+                            <span style={{ marginLeft: 6 }}>
+                              <Badge tone="danger" icon="flag">
+                                {problems.get(t.id)} open
+                              </Badge>
+                            </span>
+                          ) : null}
+                        </td>
                         <td className="t-footnote c3">
                           {fmtDay(t.modifiedOn)} · {t.modifiedBy}
                         </td>

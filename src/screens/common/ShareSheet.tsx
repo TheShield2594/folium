@@ -43,7 +43,7 @@ export function ShareSheet({ onClose, sendSetup }: { onClose: () => void; sendSe
     try {
       const next = { ...packet, sharedWith: picked };
       const existing = packet.requestId ? requests.find((r) => r.id === packet.requestId) : undefined;
-      const saved = await saveDraft({ services, packet: next, fills: view.fills, contactId, me, owner, existing, sendSetup, retentionDays: retentionDays(useApp.getState().policy) });
+      const saved = await saveDraft({ services, packet: next, fills: view.fills, contactId, me, owner, existing, sendSetup, trackUsage: true, retentionDays: retentionDays(useApp.getState().policy) });
       setPacket({ sharedWith: picked, requestId: saved.id, attachments: saved.attachments, snapshot: saved.prefillSnapshot, formsUpdated: undefined, dirty: false });
       await refreshRequests();
       const names = users.filter((u) => picked.includes(u.systemuserid)).map((u) => u.fullname.split(' ')[0]);

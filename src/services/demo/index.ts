@@ -5,12 +5,15 @@ import { withPolicyDefaults } from '../../domain/policy';
 import { docuSignReady, withDocuSignDefaults, type DocuSignSetup } from '../../domain/docusign';
 import { needsSeenStamp } from '../../domain/users';
 import { mapDocuSignStatus } from '../../domain/requests';
+import { formRequest, type FormFeedback } from '../../domain/feedback';
+import type { UsageEvent } from '../../domain/usage';
 import { generateTemplatePdf } from '../../pdf/generate';
 import type {
   CrmService,
   DirectoryService,
   DraftStore,
   EnvelopeStatus,
+  FeedbackStore,
   IncomingFile,
   PacketStore,
   RequestStore,
@@ -19,8 +22,10 @@ import type {
   SigningProvider,
   TemplateLibrary,
 } from '../types';
-import { CLIENTS, DIRECTORY, FIRM, GROUPS, seedPackets, seedRequests, TEMPLATES, USERS } from './seed';
+import { CLIENTS, DIRECTORY, FIRM, GROUPS, seedFeedback, seedPackets, seedRequests, TEMPLATES, USERS } from './seed';
 import { SPECS } from './specs';
+import { createUsageQueue } from '../usage';
+import { seedUsage } from './usageSeed';
 
 // In-browser implementations used in demo mode (and in local dev without a Power
 // Platform environment). State persists to localStorage so a demo survives reloads.
@@ -35,7 +40,12 @@ interface DemoState {
   deletedPackets?: SavedPacket[];
   templates: FormTemplate[];
   incomingDismissed: string[];
-  formRequests: { name: string; issuer?: string; note?: string; requestedBy: string; at: string }[];
+  /** Before form feedback: "Ask Marketing" requests by name. Read once into `feedback`. */
+  formRequests?: { name: string; issuer?: string; note?: string; requestedBy: string; at: string }[];
+  /** `ev_formrequest` rows: form requests and problem reports. */
+  feedback?: FormFeedback[];
+  /** `ev_usageevent` rows recorded in this demo (the seeded year isn't stored). */
+  usage?: UsageEvent[];
   users: UserProfile[];
   groups: UserGroup[];
   firm: FirmProfile;
@@ -63,7 +73,7 @@ function load(): DemoState {
     packets: seedPackets(),
     templates: structuredClone(TEMPLATES),
     incomingDismissed: [],
-    formRequests: [],
+    feedback: seedFeedback(),
     users: structuredClone(USERS),
     groups: structuredClone(GROUPS),
     firm: { ...FIRM },
@@ -332,12 +342,69 @@ const templates: TemplateLibrary = {
     persist();
     return clone(t);
   },
-  async requestForm(req) {
-    state.formRequests.push({ ...req, at: new Date().toISOString() });
+};
+
+/** Feedback rows, with requests saved before feedback existed read in as requests. */
+function feedbackRows(): FormFeedback[] {
+  if (!state.feedback) state.feedback = seedFeedback();
+  if (state.formRequests?.length) {
+    for (const [i, r] of state.formRequests.entries()) state.feedback.push({ ...formRequest(r, { systemuserid: '', fullname: r.requestedBy }, new Date(r.at)), id: `fb-legacy-${i}` });
+    state.formRequests = undefined;
     persist();
+  }
+  return state.feedback;
+}
+
+const feedback: FeedbackStore = {
+  async submit(f) {
     await wait(200);
+    const row = { ...clone(f), id: `fb-${crypto.randomUUID().slice(0, 8)}` };
+    feedbackRows().unshift(row);
+    persist();
+    return clone(row);
+  },
+  async list() {
+    await wait(60);
+    return clone(feedbackRows());
+  },
+  async listMine(userId) {
+    return clone(feedbackRows().filter((f) => f.requestedById === userId));
+  },
+  async update(f) {
+    const rows = feedbackRows();
+    const i = rows.findIndex((x) => x.id === f.id);
+    if (i < 0) throw new Error('That report is no longer there');
+    rows[i] = clone(f);
+    persist();
+    return clone(f);
   },
 };
+
+// ---------------------------------------------------------------- Usage events
+
+/** Most usage events the demo keeps in localStorage. */
+const USAGE_CAP = 2000;
+
+/** Writes usage to the demo state. Like Dataverse's alternate key, a dedupe key already there is skipped. */
+export async function demoUsageWriter(events: UsageEvent[]): Promise<void> {
+  const rows = (state.usage ??= []);
+  const have = new Set(rows.map((e) => e.dedupeKey));
+  for (const e of events) if (!have.has(e.dedupeKey)) (rows.push(clone(e)), have.add(e.dedupeKey));
+  if (rows.length > USAGE_CAP) state.usage = rows.slice(rows.length - USAGE_CAP);
+  persist();
+}
+
+let seeded: UsageEvent[] | undefined;
+/** The demo's usage: a seeded year of history plus what was recorded here. For reporting and tests. */
+export function demoUsage(): UsageEvent[] {
+  seeded ??= seedUsage(USERS, GROUPS, TEMPLATES);
+  return [...seeded, ...clone(state.usage ?? [])];
+}
+
+/** Only what was recorded in this demo, without the seeded history. */
+export const recordedUsage = (): UsageEvent[] => clone(state.usage ?? []);
+
+const usage = createUsageQueue(demoUsageWriter);
 
 // Attached files: in memory, and in localStorage when it has room, so a demo draft's
 // attachments survive a reload.
@@ -609,5 +676,5 @@ export function demoSignInSession(envelopeId: string, role: string) {
 }
 
 export function createDemoServices(): Services {
-  return { mode: 'demo', directory, crm, templates, drafts, requests, packets, signing, attachments: new Map() };
+  return { mode: 'demo', directory, crm, templates, drafts, requests, packets, signing, feedback, usage, attachments: new Map() };
 }

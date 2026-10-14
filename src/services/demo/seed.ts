@@ -1,4 +1,5 @@
 import type { DirectoryUser } from '../../domain/advisor';
+import type { FormFeedback } from '../../domain/feedback';
 import type { Advisor, ClientRecord, Contact, FirmProfile, FormTemplate, SavedPacket, SignatureRequest, UserGroup, UserProfile } from '../../domain/types';
 import { layoutSpec } from '../../pdf/layout';
 import { SPECS, type FormSpec } from './specs';
@@ -429,5 +430,59 @@ export function seedPackets(): SavedPacket[] {
     { id: 'pk-1', name: 'Address change, everything', description: 'Address change plus a fresh trusted contact.', templateIds: ['tpl-ev1004-0125', 'tpl-ev1410-0126'], shared: true, owner: 'Operations', createdOn: daysAgo(120), usedCount: 48 },
     { id: 'pk-2', name: 'New IRA with transfer', description: 'Open the IRA, bring assets over, name beneficiaries.', templateIds: ['tpl-ev1300-0226', 'tpl-ev2210-0626', 'tpl-ev1120-0326'], shared: true, owner: 'Operations', createdOn: daysAgo(200), usedCount: 112 },
     { id: 'pk-3', name: 'Retirement income set-up', templateIds: ['tpl-px310-0826', 'tpl-ev1610-0425'], shared: false, owner: ADVISOR.fullname, createdOn: daysAgo(30), usedCount: 6 },
+  ];
+}
+
+/** Form feedback: a request, an open problem, one fixed by a later revision and an old text-only request. */
+export function seedFeedback(): FormFeedback[] {
+  return [
+    {
+      id: 'fb-1',
+      kind: 'problem',
+      name: 'Beneficiary designation',
+      issuer: 'Everence Financial',
+      templateId: 'tpl-ev1120-0326',
+      formNumber: 'EV-1120',
+      revision: '03/2026',
+      category: 'layout',
+      fieldKeys: ['Bene1_Pct'],
+      note: 'A share of 33.33 runs into the box border on the printed form.',
+      requestedById: 'usr-advisor-2',
+      requestedBy: 'Jesse Shenk',
+      createdOn: daysAgo(3, 15, 20),
+      status: 'new',
+      detail: { otherForms: ['EV-1004'], accountType: 'Roth IRA', pdfKind: 'fillable' },
+    },
+    {
+      id: 'fb-2',
+      kind: 'request',
+      name: 'Fidelity IRA transfer of assets',
+      issuer: 'Fidelity',
+      note: 'Clients moving IRAs from Fidelity ask for this every month.',
+      requestedById: 'usr-advisor-1',
+      requestedBy: ADVISOR.fullname,
+      createdOn: daysAgo(9, 11, 5),
+      status: 'inProgress',
+    },
+    {
+      id: 'fb-3',
+      kind: 'problem',
+      name: 'Address and contact change',
+      issuer: 'Everence Financial',
+      templateId: 'tpl-ev1004-0619',
+      formNumber: 'EV-1004',
+      revision: '06/2019',
+      category: 'missingField',
+      fieldKeys: ['New_Email'],
+      note: 'No box for a new email address.',
+      requestedById: 'usr-advisor-1',
+      requestedBy: ADVISOR.fullname,
+      createdOn: daysAgo(40, 9, 40),
+      status: 'fixed',
+      resolution: 'The 01/2025 revision has an email box, and Folium fills it.',
+      resolvedOn: daysAgo(2, 16, 0),
+      fixedInTemplateId: 'tpl-ev1004-0125',
+    },
+    { id: 'fb-4', kind: 'request', name: 'Praxis HSA enrollment', requestedBy: 'Morgan Beachy', createdOn: daysAgo(70, 14, 0), status: 'new' },
   ];
 }

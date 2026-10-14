@@ -1,5 +1,7 @@
+import type { FeedbackKind, FeedbackStatus } from '../../domain/feedback';
 import type { IdAttr } from '../../domain/idDocuments';
 import type { SignatureStatus } from '../../domain/types';
+import type { UsageEventType } from '../../domain/usage';
 
 // Names Folium uses in Dataverse and SharePoint. Adjust here (once) if Everence's
 // publisher prefix or table names differ from the brief's `ev_` defaults.
@@ -14,7 +16,10 @@ export const DATAVERSE = {
   formTemplate: 'ev_formtemplates',
   signatureRequest: 'ev_signaturerequests',
   packet: 'ev_formpackets',
+  /** Form feedback: requests for new forms and problem reports (DATAVERSE.md). */
   formRequest: 'ev_formrequests',
+  /** Usage events for reporting (DATAVERSE.md, docs/REPORTS.md). */
+  usageEvent: 'ev_usageevents',
   /** Folium role/group/defaults per systemuser (one row per user). */
   profile: 'ev_foliumprofiles',
   group: 'ev_foliumgroups',
@@ -82,6 +87,30 @@ export const SIGNATURE_STATUS_OPTIONS: Record<SignatureStatus, number> = {
   Voided: 100000005,
   Expired: 100000006,
 };
+
+/**
+ * `ev_usageevent.ev_eventtype` option values: 100000000 upward in the order of
+ * DATAVERSE.md. The Connect flow writes the status ones, so keep them in step.
+ */
+export const USAGE_EVENT_OPTIONS: Record<UsageEventType, number> = {
+  'form.added': 100000000,
+  'pdf.fillable': 100000001,
+  'pdf.flattened': 100000002,
+  'pdf.print': 100000003,
+  'draft.saved': 100000004,
+  'send.blocked': 100000005,
+  'request.sent': 100000006,
+  'request.viewed': 100000007,
+  'request.signed': 100000008,
+  'request.declined': 100000009,
+  'request.voided': 100000010,
+  'request.expired': 100000011,
+  'request.inperson': 100000012,
+};
+
+/** `ev_formrequest.ev_kind` and `ev_status` option values (DATAVERSE.md). */
+export const FEEDBACK_KIND_OPTIONS: Record<FeedbackKind, number> = { request: 100000000, problem: 100000001 };
+export const FEEDBACK_STATUS_OPTIONS: Record<FeedbackStatus, number> = { new: 100000000, inProgress: 100000001, fixed: 100000002, wontFix: 100000003, duplicate: 100000004 };
 
 export interface ChoiceColumn {
   /** Shown to the advisor when a stored option has no mapping. */

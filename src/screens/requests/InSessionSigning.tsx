@@ -5,7 +5,7 @@ import { roleLabel } from '../../domain/signers';
 import type { SignatureRequest } from '../../domain/types';
 import { useServices } from '../../services';
 import { audit } from '../../state/actions';
-import { useApp } from '../../state/store';
+import { trackStatus, useApp } from '../../state/store';
 import { Button, Spinner, toast } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
 
@@ -86,6 +86,7 @@ export function SigningReturn() {
         const msg = signingEventMessage(event, signer?.name ?? roleLabel(role));
         const { next } = applyEnvelopeStatus(r, await services.signing.getStatus(envelopeId));
         await services.requests.save({ ...next, audit: [...next.audit, audit(me, msg.audit, `${signer?.name ?? roleLabel(role)}, with ${me.fullname} present`)] });
+        trackStatus(r, next);
         await refreshRequests();
         if (msg.done) toast.ok(msg.text);
         else toast.error(msg.text);

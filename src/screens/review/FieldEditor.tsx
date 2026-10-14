@@ -116,7 +116,24 @@ export function FieldInput({ field, value, onChange, hideLabel, choices }: { fie
 }
 
 /** The selected field: edit it, see where it came from, put the CRM value back. */
-export function FieldEditor({ field, value, onChange, onClose, usedOn, choices }: { field: FieldState; value: string | undefined; onChange: (v: string | undefined) => void; onClose: () => void; usedOn: string[]; choices?: { value: string; label: string }[] }) {
+export function FieldEditor({
+  field,
+  value,
+  onChange,
+  onClose,
+  usedOn,
+  choices,
+  onReport,
+}: {
+  field: FieldState;
+  value: string | undefined;
+  onChange: (v: string | undefined) => void;
+  onClose: () => void;
+  usedOn: string[];
+  choices?: { value: string; label: string }[];
+  /** "Something wrong with this field?": report a problem with the form, this field picked. */
+  onReport?: () => void;
+}) {
   const navigate = useNavigate();
   const kind = sourceKind(field.mapping.source);
   const fromCrm = kind === 'crm';
@@ -148,6 +165,11 @@ export function FieldEditor({ field, value, onChange, onClose, usedOn, choices }
       {fromCrm && (
         <Button variant="tinted" size="sm" icon="pencil" onClick={() => navigate('/client')}>
           Fix it in Dynamics 365 instead
+        </Button>
+      )}
+      {onReport && (
+        <Button variant="plain" size="sm" icon="flag" onClick={onReport} style={{ alignSelf: 'flex-start' }}>
+          Something wrong with this field?
         </Button>
       )}
     </section>

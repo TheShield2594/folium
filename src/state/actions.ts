@@ -5,7 +5,7 @@ import { prefillSnapshot, type FormFill } from '../domain/prefill';
 import type { Attachment, AuditEvent, SignatureRequest, UserProfile } from '../domain/types';
 import { fillPdf, mergePdfs } from '../pdf/fill';
 import type { Services, SigningProvider } from '../services/types';
-import type { Packet } from './store';
+import { track, type Packet } from './store';
 
 export interface FilledDoc {
   templateId: string;
@@ -112,6 +112,8 @@ export async function saveDraft(opts: {
   retentionDays?: number;
   /** Called once the row is saved, before the draft PDFs are written, so a failed write can be retried against the same row. */
   onSaved?: (req: SignatureRequest) => void;
+  /** Record a `draft.saved` usage event: the advisor saved a draft (not a save on the way to sending). */
+  trackUsage?: boolean;
 }): Promise<SignatureRequest> {
   const { services, packet, fills, contactId, me, owner, existing } = opts;
   const folder = await services.drafts.folderUrl(contactId);
@@ -164,6 +166,7 @@ export async function saveDraft(opts: {
   if (isRetainable(req)) req.expiresOn = draftExpiry(now, opts.retentionDays ?? DEFAULT_RETENTION_DAYS);
   const saved = await services.requests.save(req);
   opts.onSaved?.(saved);
+  if (opts.trackUsage) track('draft.saved', fills.map((f) => f.template), { requestId: saved.id });
   if (!opts.writePdfs) return saved;
   // File names carry the draft's title and a short ID, so two drafts never overwrite each other.
   const docs = await fillPacket(services, fills, 'fillable', true);
