@@ -94,7 +94,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   }
 
   return createPortal(
-    <div className="sheet-backdrop" style={{ placeItems: 'start center', paddingTop: '12vh' }} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="sheet-backdrop instant" style={{ placeItems: 'start center', paddingTop: '12vh' }} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="sheet" role="dialog" aria-modal="true" aria-label="Search Folium" style={{ width: 'min(620px, 100%)' }}>
         <div className="row" style={{ padding: '14px 16px', borderBottom: '0.5px solid var(--separator)' }}>
           <Icon name="search" size={20} className="c3" />

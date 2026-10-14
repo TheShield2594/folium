@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
@@ -137,8 +138,30 @@ export function SwitchRow({ checked, onChange, label, detail, disabled }: { chec
 }
 
 export function Segmented<T extends string>({ value, options, onChange, label }: { value: T; options: { value: T; label: ReactNode }[]; onChange: (v: T) => void; label: string }) {
+  const group = useRef<HTMLDivElement>(null);
+  const [thumb, setThumb] = useState<{ x: number; w: number; ready: boolean } | null>(null);
+  useLayoutEffect(() => {
+    const el = group.current;
+    if (!el) return;
+    const measure = () => {
+      const b = el.querySelector<HTMLElement>('button[aria-pressed="true"]');
+      if (!b) return setThumb(null);
+      setThumb((prev) => ({ x: b.offsetLeft, w: b.offsetWidth, ready: prev !== null }));
+    };
+    measure();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    ro?.observe(el);
+    return () => ro?.disconnect();
+  }, [value]);
   return (
-    <div className="segmented" role="group" aria-label={label}>
+    <div ref={group} className={['segmented', thumb && 'has-thumb'].filter(Boolean).join(' ')} role="group" aria-label={label}>
+      {thumb && (
+        <span
+          className="segmented-thumb"
+          aria-hidden="true"
+          style={{ width: thumb.w, transform: `translateX(${thumb.x}px)`, transition: thumb.ready ? undefined : 'none' }}
+        />
+      )}
       {options.map((o) => (
         <button key={o.value} type="button" aria-pressed={o.value === value} onClick={() => onChange(o.value)}>
           {o.label}
@@ -177,7 +200,7 @@ export function Badge({ tone, children, icon }: { tone?: 'accent' | 'warn' | 'in
 export function Meter({ value, label }: { value: number; label?: string }) {
   return (
     <div className="meter" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={value} aria-label={label}>
-      <i style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
+      <i style={{ clipPath: `inset(0 ${100 - Math.max(0, Math.min(100, value))}% 0 0 round 3px)` }} />
     </div>
   );
 }
@@ -206,6 +229,17 @@ export function Sheet({ title, onClose, children, footer, wide, icon }: { title:
   // focus effect on every render (which would pull focus out of the field being typed in).
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const requestClose = useCallback(() => {
+    if (closingRef.current) return;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return onCloseRef.current();
+    closingRef.current = true;
+    setClosing(true);
+    timer.current = setTimeout(() => onCloseRef.current(), 150);
+  }, []);
+  useEffect(() => () => clearTimeout(timer.current), []);
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
     const el = ref.current;
@@ -214,7 +248,7 @@ export function Sheet({ title, onClose, children, footer, wide, icon }: { title:
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        onCloseRef.current();
+        requestClose();
       }
       if (e.key === 'Tab' && el) {
         const items = [...el.querySelectorAll<HTMLElement>('a[href], button:not(:disabled), input:not(:disabled), select, textarea, [tabindex]:not([tabindex="-1"])')];
@@ -237,12 +271,12 @@ export function Sheet({ title, onClose, children, footer, wide, icon }: { title:
   }, []);
 
   return createPortal(
-    <div className="sheet-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className={['sheet-backdrop', closing && 'closing'].filter(Boolean).join(' ')} onMouseDown={(e) => e.target === e.currentTarget && requestClose()}>
       <div ref={ref} className={['sheet', wide && 'wide'].filter(Boolean).join(' ')} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
         <div className="sheet-head">
           {icon}
           <h2 id={titleId} className="grow">{title}</h2>
-          <IconButton icon="x" label="Close" onClick={onClose} data-close />
+          <IconButton icon="x" label="Close" onClick={requestClose} data-close />
         </div>
         <div className="sheet-body">{children}</div>
         {footer && <div className="sheet-foot">{footer}</div>}
@@ -346,7 +380,12 @@ export function Menu({ trigger, items, align = 'end' }: { trigger: (p: { onClick
       {trigger({ onClick: () => setOpen((o) => !o), 'aria-expanded': open, 'aria-haspopup': 'menu', ref: btn })}
       {open &&
         createPortal(
-          <div ref={pop} className="popover" role="menu" style={{ top: pos.top, left: pos.left }}>
+          <div
+            ref={pop}
+            className="popover"
+            role="menu"
+            style={{ top: pos.top, left: pos.left, transformOrigin: align === 'end' ? 'top right' : 'top left' }}
+          >
             {items.map((it, i) =>
               it.separator ? (
                 <div key={i} className="menu-sep" role="separator" />
@@ -381,6 +420,7 @@ interface Toast {
   text: string;
   tone: 'ok' | 'error';
   action?: { label: string; onClick: () => void };
+  leaving?: boolean;
 }
 
 let nextToastId = 1;
@@ -390,16 +430,19 @@ const useToasts = create<{ toasts: Toast[]; push: (t: Omit<Toast, 'id'>) => void
   toasts: [],
   push: (t) => {
     const id = nextToastId++;
-    const kept = [...get().toasts, { ...t, id }];
-    // Only three show at once; the oldest drop off (and their timers with them).
-    for (const old of kept.slice(0, -3)) get().dismiss(old.id);
-    set({ toasts: kept.slice(-3) });
+    const live = get().toasts.filter((x) => !x.leaving);
+    set({ toasts: [...get().toasts, { ...t, id }] });
+    // Only three show at once; the oldest leave (and their timers with them).
+    for (const old of live.slice(0, -2)) get().dismiss(old.id);
     toastTimers.set(id, setTimeout(() => get().dismiss(id), t.action ? 6500 : 3800));
   },
   dismiss: (id) => {
     clearTimeout(toastTimers.get(id));
     toastTimers.delete(id);
-    set({ toasts: get().toasts.filter((x) => x.id !== id) });
+    const current = get().toasts.find((x) => x.id === id);
+    if (!current || current.leaving) return;
+    set({ toasts: get().toasts.map((x) => (x.id === id ? { ...x, leaving: true } : x)) });
+    setTimeout(() => set({ toasts: get().toasts.filter((x) => x.id !== id) }), 200);
   },
 }));
 
@@ -413,10 +456,26 @@ export const toast = {
 export function Toasts() {
   const toasts = useToasts((s) => s.toasts);
   const dismiss = useToasts((s) => s.dismiss);
+  const box = useRef<HTMLDivElement>(null);
+  const tops = useRef(new Map<number, number>());
+  useLayoutEffect(() => {
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const next = new Map<number, number>();
+    for (const el of box.current?.querySelectorAll<HTMLElement>('[data-toast]') ?? []) {
+      const id = Number(el.dataset.toast);
+      const top = el.getBoundingClientRect().top;
+      const before = tops.current.get(id);
+      if (!reduce && before !== undefined && Math.abs(before - top) > 0.5) {
+        el.animate?.([{ translate: `0 ${before - top}px` }, { translate: '0 0' }], { duration: 220, easing: 'cubic-bezier(0.32, 0.72, 0, 1)' });
+      }
+      next.set(id, top);
+    }
+    tops.current = next;
+  }, [toasts]);
   return (
-    <div className="toasts" role="status" aria-live="polite">
+    <div ref={box} className="toasts" role="status" aria-live="polite">
       {toasts.map((t) => (
-        <div key={t.id} className={['toast', t.tone === 'error' && 'error'].filter(Boolean).join(' ')}>
+        <div key={t.id} data-toast={t.id} className={['toast', t.tone === 'error' && 'error', t.leaving && 'leaving'].filter(Boolean).join(' ')}>
           <Icon name={t.tone === 'error' ? 'warning' : 'checkCircle'} size={18} />
           <span>{t.text}</span>
           {t.action && (
