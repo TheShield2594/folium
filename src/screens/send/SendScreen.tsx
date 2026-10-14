@@ -312,7 +312,7 @@ export function SendScreen() {
                             value=""
                             onChange={(e) => {
                               const p = people[Number(e.target.value)];
-                              if (p) update(i, { name: p.name, email: p.contact?.emailaddress1 ?? '', phone: p.contact?.mobilephone ?? (s.auth === 'phone' ? p.contact?.telephone1 : undefined), contactId: p.contactId });
+                              if (p) update(i, { name: p.name, email: p.contact?.emailaddress1 ?? '', phone: p.contact?.mobilephone || (s.auth === 'phone' ? p.contact?.telephone1 : undefined) || undefined, contactId: p.contactId });
                             }}
                             style={{ minHeight: 30, fontSize: 13 }}
                           >

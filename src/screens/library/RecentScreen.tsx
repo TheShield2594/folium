@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import type { FormTemplate } from '../../domain/types';
 import { Toolbar } from '../../shell/Shell';
-import { latestLive, useApp } from '../../state/store';
+import { formInPacket, latestLive, useApp } from '../../state/store';
 import { Badge, Button, Empty, IconButton } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
 import { addForm } from '../common/addForm';
@@ -9,7 +9,7 @@ import { fmtDay } from '../requests/RequestCard';
 
 /** One form, with favorite and add-to-packet controls. Module scope so React keeps rows (and focus) across renders. */
 function Row({ t, detail }: { t: FormTemplate; detail?: string }) {
-  const inPacket = useApp((s) => s.packet.items.some((i) => i.templateId === t.id));
+  const inPacket = useApp((s) => formInPacket(s.packet.items, s.templates, t));
   const fav = useApp((s) => s.favorites.includes(t.id));
   const client = useApp((s) => s.client);
   const removeTemplateFromPacket = useApp((s) => s.removeTemplateFromPacket);

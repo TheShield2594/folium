@@ -4,7 +4,7 @@ import type { FieldMapping } from './types';
 import { outputGate, runChecks, summarize, type CheckResult } from './checks';
 import { formatValue, resolveDateLimit, validateFormat } from './format';
 import { buildCondition, conditionTerms, evaluateCondition, explainCondition, parseCondition, resolvePath } from './paths';
-import { choiceDisplay, choiceOptions, fieldKey, fillBlockFromPerson, personBlocks, relatedPeople, inputsNeeded, mappingWarnings, migrateAccountValues, prefillForm, prefillPacket, seedCopyValues, termLabels, validateMapping } from './prefill';
+import { carryVariantValues, choiceDisplay, choiceOptions, fieldKey, fillBlockFromPerson, personBlocks, relatedPeople, inputsNeeded, mappingWarnings, migrateAccountValues, prefillForm, prefillPacket, seedCopyValues, termLabels, validateMapping } from './prefill';
 import { carryForward, diffRevision } from './revisions';
 import { assignSigners, rolesForPacket, validateSigners } from './signers';
 import { buildEnvelopeDefinition, placementsToTabs } from '../services/docusign/tabs';
@@ -288,6 +288,13 @@ describe('prefill', () => {
       expect(val(two, acctField.pdfField).value).toBe('PX-7712-0045');
     });
 
+    it('carries values to another state’s version of a form', () => {
+      const other = { ...swp, id: 'tpl-x', formNumber: 'PX-310-VA', mapping: { ...swp.mapping, fields: [...swp.mapping.fields, { pdfField: 'Note', source: 'advisor', required: false }] } };
+      const from = { ...swp, mapping: { ...swp.mapping, fields: [...swp.mapping.fields, { pdfField: 'Note', source: 'advisor', required: false }] } };
+      expect(carryVariantValues(from, other, { 'PX-310:Note': 'hi', 'swp.amount': '5' })).toEqual({ 'PX-310-VA:Note': 'hi' });
+      expect(carryVariantValues(from, other, { 'pi-2/PX-310:Note': 'hi' }, 'pi-2')).toEqual({ 'pi-2/PX-310-VA:Note': 'hi' });
+    });
+
     it('starts a copy from the original’s values', () => {
       const seeded = seedCopyValues(swp, { 'swp.amount': '500', 'swp.monthly': 'Yes', 'contact.fullname': 'J' }, 'pi-2');
       expect(seeded).toEqual({ 'pi-2/swp.amount': '500', 'pi-2/swp.monthly': 'Yes' });
@@ -333,6 +340,12 @@ describe('prefill', () => {
       expect(choiceDisplay({}, 'x')).toBeUndefined();
     });
 
+    it('counts a required radio with no option for the value as missing', () => {
+      const radio = { ...form, mapping: { ...form.mapping, checks: [], fields: [{ pdfField: 'MS', source: 'contact.familystatuscode', required: true, options: { single: 'S' } }] } };
+      expect(prefillForm(radio, scope, {}).fields[0]).toMatchObject({ value: 'married', display: '', missing: true });
+      expect(prefillForm(radio, scope, { 'contact.familystatuscode': 'single' }).fields[0].missing).toBe(false);
+    });
+
     it('lists the choices a set offers', () => {
       const fill = prefillForm(form, scope, {});
       expect(choiceOptions(fill.fields)).toEqual([
@@ -348,6 +361,17 @@ describe('prefill', () => {
 
     it('lists the client and every related person', () => {
       expect(relatedPeople(withSon).map((p) => `${p.name} · ${p.role}`)).toEqual(['Jordan A. Miller · Client', 'Sam Miller · Spouse', 'Sam Miller · Joint owner', 'Ruth Miller-Kauffman · Trusted contact', 'Ben Miller · Son']);
+    });
+
+    it('keeps a person block per copy, even when it reads CRM', () => {
+      const [one, two] = prefillPacket([{ template: bene, itemId: 'pi-1' }, { template: bene, itemId: 'pi-2', copy: 2 }], sc, {});
+      const son = relatedPeople(withSon).find((p) => p.role === 'Son')!;
+      const values = fillBlockFromPerson([two], 'Primary beneficiary 1', son);
+      expect(Object.keys(values).every((k) => k.startsWith('pi-2/'))).toBe(true);
+      const [a, b] = prefillPacket([{ template: bene, itemId: 'pi-1' }, { template: bene, itemId: 'pi-2', copy: 2 }], sc, values);
+      const name = (f: typeof a) => f.fields.find((x) => x.mapping.pdfField === 'Bene1_Name')!.value;
+      expect([name(a), name(b)]).toEqual(['Sam Miller', 'Ben Miller']);
+      expect(one.fields.find((x) => x.mapping.pdfField === 'Bene1_Name')!.key).toBe('bene.Prim.1.name');
     });
 
     it('fills beneficiary 2 from any connection, and clears it for someone new', () => {

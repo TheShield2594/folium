@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { create } from 'zustand';
 import type { ResolveScope } from '../domain/paths';
-import { copyScope, migrateAccountValues, seedCopyValues, type PersonPick } from '../domain/prefill';
+import { carryVariantValues, copyScope, migrateAccountValues, seedCopyValues, type PersonPick } from '../domain/prefill';
 import { normalizeState, pickVariant } from '../domain/states';
 import type {
   Attachment,
@@ -174,6 +174,11 @@ export function suggestAccount(t: FormTemplate, client?: ClientRecord, taken: st
     return undefined;
   };
   return (taken.length ? pickFrom(true) : undefined) ?? pickFrom(false);
+}
+
+/** Whether a form, or another state's version of it, is already in the packet. */
+export function formInPacket(items: PacketItem[], templates: FormTemplate[], t: Pick<FormTemplate, 'id' | 'variantGroup'>): boolean {
+  return items.some((i) => i.templateId === t.id || (!!t.variantGroup && templates.find((x) => x.id === i.templateId)?.variantGroup === t.variantGroup));
 }
 
 /** The state a packet's forms must be approved in: the one the advisor set, else the client's. */
@@ -372,8 +377,15 @@ export const useApp = create<AppState>((set, get) => ({
     set({ packet: { ...packet, dirty: true, values, items: packet.items.filter((i) => i.id !== itemId) } });
   },
   replaceInPacket(itemId, templateId) {
-    const { packet } = get();
-    set({ packet: { ...packet, dirty: true, items: packet.items.map((i) => (i.id === itemId ? { ...i, templateId } : i)) } });
+    const { packet, templates } = get();
+    const item = packet.items.find((i) => i.id === itemId);
+    const from = templates.find((t) => t.id === item?.templateId);
+    const to = templates.find((t) => t.id === templateId);
+    if (!item || !to) return;
+    // Same item id and copy number: the copy's own values stay readable. Values under
+    // form-number keys move to the new version's keys.
+    const values = from ? { ...packet.values, ...carryVariantValues(from, to, packet.values, copyScope(item)) } : packet.values;
+    set({ packet: { ...packet, dirty: true, values, items: packet.items.map((i) => (i.id === itemId ? { ...i, templateId } : i)) } });
   },
   removeTemplateFromPacket(templateId) {
     for (const i of get().packet.items.filter((x) => x.templateId === templateId)) get().removeFromPacket(i.id);
@@ -429,14 +441,19 @@ export const useApp = create<AppState>((set, get) => ({
   loadRequest(req) {
     const { templates, client } = get();
     // Drafts saved before copies existed have no item ids: normalizeItems gives them some.
+    const isActive = (id?: string) => !!id && !!client?.accounts.some((a) => a.accountid === id);
+    // Accounts the copies of each form keep, so a replacement suggestion avoids them.
+    const taken = new Map<string, string[]>();
+    for (const d of req.documents) if (isActive(d.accountId)) taken.set(d.templateId, [...(taken.get(d.templateId) ?? []), d.accountId!]);
     const items = normalizeItems(
       req.documents.map((d) => {
         const t = templates.find((x) => x.id === d.templateId);
-        const active = client?.accounts.some((a) => a.accountid === d.accountId);
         const base = { id: d.itemId, templateId: d.templateId, copy: d.copy };
-        if (d.accountId && active) return { ...base, accountId: d.accountId };
+        if (isActive(d.accountId)) return { ...base, accountId: d.accountId };
         // The saved account was closed or moved: suggest one and have Review ask.
-        return { ...base, accountId: t ? suggestAccount(t, client) : undefined, accountReplaced: !!d.accountId || undefined };
+        const accountId = t ? suggestAccount(t, client, taken.get(d.templateId)) : undefined;
+        if (accountId) taken.set(d.templateId, [...(taken.get(d.templateId) ?? []), accountId]);
+        return { ...base, accountId, accountReplaced: !!d.accountId || undefined };
       }),
     );
     // The first form that reads account data gets any pre-scoping `account.*` overrides.

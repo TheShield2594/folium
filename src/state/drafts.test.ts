@@ -234,6 +234,20 @@ describe('copies of a form', () => {
     expect(new Set(docs.map((d) => d.fileName)).size).toBe(2);
   });
 
+  it('suggests different replacement accounts for copies whose accounts closed', async () => {
+    const services = createDemoServices();
+    const its: PacketItem[] = [
+      { id: 'pi-a', templateId: 'tpl-px310-0826', accountId: 'a-gone-1' },
+      { id: 'pi-b', templateId: 'tpl-px310-0826', accountId: 'a-gone-2', copy: 2 },
+    ];
+    const saved = await saveDraft({ services, packet: packet({ items: its }), fills: fillsFor(client, its), contactId: 'c-jordan', me, owner: me });
+    // Both accounts have since closed.
+    useApp.getState().loadRequest({ ...saved, documents: saved.documents.map((d, i) => ({ ...d, accountId: `a-gone-${i}` })) });
+    const [a, b] = useApp.getState().packet.items;
+    expect(a.accountReplaced && b.accountReplaced).toBe(true);
+    expect(a.accountId).not.toBe(b.accountId);
+  });
+
   it('gives older drafts item ids', () => {
     useApp.getState().loadRequest({ ...({} as SignatureRequest), id: 'r-old', title: 'Old', values: {}, attachments: [], audit: [], status: 'Drafted', createdOn: '', documents: [{ templateId: 'tpl-ev1120-0326', name: 'x', formNumber: 'EV-1120', revision: '03/2026' }] });
     const [item] = useApp.getState().packet.items;

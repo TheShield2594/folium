@@ -45,6 +45,9 @@ describe('packet journal', () => {
     expect(sensitive('ownerTaxId')).toBe(true);
     expect(sensitive('account[a-j1].ev_tin')).toBe(true);
     expect(sensitive('note')).toBe(false);
+    // A copy's own value is judged by the key underneath.
+    expect(sensitive('pi-2/ownerTaxId')).toBe(true);
+    expect(sensitive('pi-2/note')).toBe(false);
     // The form is no longer in the packet, but the value it left behind is still left out.
     const p = packet({ items: [{ id: 'pi-1', templateId: 'tpl-ev1120-0326' }], values: { ownerTaxId: '12-3456789', 'account[a-j1].ev_tin': '12-3456789', note: 'hello' }, snapshot: { ownerTaxId: '98-7654321', 'contact.fullname': 'Jordan' } });
     writeJournal({ userId: 'u', contactId: 'c', packet: { ...p, dirty: true }, sensitive });

@@ -6,7 +6,7 @@ import type { FormSource, FormTemplate } from '../../domain/types';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
 import { availableIn, pickVariant } from '../../domain/states';
-import { currentTemplates, latestLive, packetState, useApp, useScope, visibleTemplates } from '../../state/store';
+import { currentTemplates, formInPacket, latestLive, packetState, useApp, useScope, visibleTemplates } from '../../state/store';
 import { Badge, Button, Empty, IconButton, Meter, SearchField, Select } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
 import { NoClient } from '../common/NoClient';
@@ -175,7 +175,7 @@ export function LibraryScreen() {
                   ) : (
                     <ul className="form-list" aria-label="Forms">
                       {list.map((t) => {
-                        const inPacket = packet.items.some((i) => i.templateId === t.id || (!!t.variantGroup && templates.find((x) => x.id === i.templateId)?.variantGroup === t.variantGroup));
+                        const inPacket = formInPacket(packet.items, templates, t);
                         const off = !availableIn(t, state);
                         const next = upcoming(t);
                         const cov = coverage.get(t.id) ?? 0;
@@ -238,7 +238,7 @@ export function LibraryScreen() {
       {peek && (
         <QuickLook
           template={peek}
-          inPacket={packet.items.some((i) => i.templateId === peek.id)}
+          inPacket={formInPacket(packet.items, templates, peek)}
           onAdd={() => addForm(peek.id)}
           onClose={() => setPeek(undefined)}
           latest={latestLive(templates, peek.formNumber)}

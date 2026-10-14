@@ -54,11 +54,16 @@ export function PacketsScreen() {
   function addToCurrent(p: SavedPacket) {
     if (!client) return toast.error('Choose a client first.');
     let added = 0;
+    let present = 0;
+    let missing = 0;
     let full = false;
     const seen = new Set<string>();
     for (const id of p.templateIds) {
       const t = templates.find((x) => x.id === id);
-      if (!t) continue;
+      if (!t) {
+        missing++;
+        continue;
+      }
       const live = (latestLive(templates, t.formNumber) ?? t).id;
       // A form listed twice in the saved packet is added as a copy.
       const r = addToPacket(live, undefined, { duplicate: seen.has(live) });
@@ -68,10 +73,14 @@ export function PacketsScreen() {
         break;
       }
       if (r === 'added') added++;
+      else present++;
     }
     countUse(p);
     if (full) toast.error(`A packet holds up to ${PACKET_LIMIT} forms, so only ${added} of ${p.templateIds.length} from “${p.name}” were added.`);
-    else toast.ok(`Added ${added} ${added === 1 ? 'form' : 'forms'} from “${p.name}”${added < p.templateIds.length ? ' (the rest were already in the packet)' : ''}`);
+    else {
+      const notes = [present && `${present} already in the packet`, missing && `${missing} no longer in the library`].filter(Boolean).join(', ');
+      toast.ok(`Added ${added} ${added === 1 ? 'form' : 'forms'} from “${p.name}”${notes ? ` (${notes})` : ''}`);
+    }
     navigate('/');
   }
 

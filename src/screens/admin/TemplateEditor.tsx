@@ -968,7 +968,9 @@ function DetailsTab({ template, templates, onSaved }: { template: FormTemplate; 
 function OptionsSheet({ field, pdfOptions, onChange, onClose }: { field: FieldMapping; pdfOptions: string[]; onChange: (o: Record<string, string> | undefined) => void; onClose: () => void }) {
   const current = field.options ?? {};
   // The source's choice words, plus any value already mapped (a custom column's words).
-  const words = [...new Set([...choiceWords(field.source), ...Object.keys(current)])];
+  // Values the admin added here stay listed until they pick an option for them.
+  const [added, setAdded] = useState<string[]>([]);
+  const words = [...new Set([...choiceWords(field.source), ...Object.keys(current), ...added])];
   const [extra, setExtra] = useState('');
   const set = (word: string, opt: string) => {
     const next = { ...current };
@@ -1010,7 +1012,7 @@ function OptionsSheet({ field, pdfOptions, onChange, onClose }: { field: FieldMa
         ))}
         <div className="row" style={{ gap: 6 }}>
           <TextInput aria-label="Another value" placeholder="Another value…" value={extra} onChange={(e) => setExtra(e.target.value)} />
-          <Button variant="gray" disabled={!extra.trim() || !pdfOptions.length} onClick={() => (set(extra.trim(), pdfOptions[0]), setExtra(''))}>
+          <Button variant="gray" disabled={!extra.trim() || !pdfOptions.length} onClick={() => (setAdded((a) => [...a, extra.trim()]), setExtra(''))}>
             Add
           </Button>
         </div>

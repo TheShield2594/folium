@@ -57,8 +57,15 @@ export interface FormFill {
  */
 export function fieldKey(m: FieldMapping, t: Pick<FormTemplate, 'formNumber'>, accountId?: string, copyId?: string): string {
   const base = baseKey(m, t, accountId);
-  return copyId && sourceKind(m.source) === 'advisor' && !m.shareAcrossCopies ? copyKey(copyId, base) : base;
+  return copyId && perCopy(m) ? copyKey(copyId, base) : base;
 }
+
+/**
+ * Fields a copy keeps its own value for: what the advisor types, and person blocks
+ * (beneficiary 2 on one IRA's form needn't be the same person on the other's), even
+ * when the block reads a connection from CRM.
+ */
+const perCopy = (m: FieldMapping) => (sourceKind(m.source) === 'advisor' || !!m.person) && !m.shareAcrossCopies;
 
 function baseKey(m: FieldMapping, t: Pick<FormTemplate, 'formNumber'>, accountId?: string): string {
   if (m.key) return m.key;
@@ -102,7 +109,7 @@ export function valuesForAccount(values: Record<string, string>, accountId: stri
 export function seedCopyValues(t: FormTemplate, values: Record<string, string>, toItemId: string, fromCopyId?: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const m of t.mapping.fields) {
-    if (sourceKind(m.source) !== 'advisor' || m.shareAcrossCopies) continue;
+    if (!perCopy(m)) continue;
     const from = fieldKey(m, t, undefined, fromCopyId);
     if (from in values) out[fieldKey(m, t, undefined, toItemId)] = values[from];
   }
@@ -122,6 +129,23 @@ export function migrateAccountValues(values: Record<string, string>, firstAccoun
       const scoped = accountKey(firstAccountId, k.slice('account.'.length));
       if (!(scoped in values)) out[scoped] = v;
     } else out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Values to carry when one form is swapped for another version of it (another state's).
+ * A field whose key differs between the two (keys that default to the form number) gets
+ * the old value under its new key, matched by PDF field name. Nothing is overwritten.
+ */
+export function carryVariantValues(from: FormTemplate, to: FormTemplate, values: Record<string, string>, copyId?: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const m of from.mapping.fields) {
+    const n = to.mapping.fields.find((x) => x.pdfField === m.pdfField);
+    if (!n) continue;
+    const a = fieldKey(m, from, undefined, copyId);
+    const b = fieldKey(n, to, undefined, copyId);
+    if (a !== b && a in values && !(b in values)) out[b] = values[a];
   }
   return out;
 }
@@ -200,8 +224,10 @@ export function prefillForm(
     else if (value) origin = kind === 'advisor' ? 'advisor' : (kind as FieldOrigin);
     else origin = 'missing';
 
-    const missing = kind !== 'signer' && !locked && required && !value.trim();
     const choice = !!(m.checkedWhen || m.options);
+    // A radio prints nothing for a value with no option, so a required one is still missing.
+    // (A box in a `checkedWhen` set is blank whenever another box is ticked, so its value counts.)
+    const missing = kind !== 'signer' && !locked && required && (!value.trim() || (!!m.options && !choiceDisplay(m, value)));
     return {
       templateId: template.id,
       itemId: item?.id ?? template.id,
