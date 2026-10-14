@@ -25,6 +25,9 @@ const KEY = 'folium.demo.v1';
 interface DemoState {
   requests: SignatureRequest[];
   packets: SavedPacket[];
+  /** Soft-deleted rows, so Undo can bring back the same ID. */
+  deletedRequests?: SignatureRequest[];
+  deletedPackets?: SavedPacket[];
   templates: FormTemplate[];
   incomingDismissed: string[];
   formRequests: { name: string; issuer?: string; note?: string; requestedBy: string; at: string }[];
@@ -331,7 +334,15 @@ const requests: RequestStore = {
     return clone(req);
   },
   async remove(id) {
+    state.deletedRequests = [...(state.deletedRequests ?? []), ...state.requests.filter((r) => r.id === id)];
     state.requests = state.requests.filter((r) => r.id !== id);
+    persist();
+  },
+  async restore(id) {
+    const row = state.deletedRequests?.find((r) => r.id === id);
+    if (!row) throw new Error('That draft can’t be restored');
+    state.deletedRequests = state.deletedRequests!.filter((r) => r.id !== id);
+    state.requests.unshift(row);
     persist();
   },
 };
@@ -348,7 +359,15 @@ const packets: PacketStore = {
     return clone(p);
   },
   async remove(id) {
+    state.deletedPackets = [...(state.deletedPackets ?? []), ...state.packets.filter((p) => p.id === id)];
     state.packets = state.packets.filter((p) => p.id !== id);
+    persist();
+  },
+  async restore(id) {
+    const row = state.deletedPackets?.find((p) => p.id === id);
+    if (!row) throw new Error('That packet can’t be restored');
+    state.deletedPackets = state.deletedPackets!.filter((p) => p.id !== id);
+    state.packets.unshift(row);
     persist();
   },
 };

@@ -4,7 +4,8 @@ import type { SignatureRequest } from '../../domain/types';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
 import { useApp } from '../../state/store';
-import { Avatar, Badge, Button, Empty, Segmented, Spinner, toast } from '../../ui/controls';
+import { Avatar, Badge, Button, Empty, IconButton, Menu, Segmented, Spinner, toast } from '../../ui/controls';
+import { useDraftActions } from '../common/useDraftActions';
 import { fmtDay } from './RequestCard';
 
 type Tab = 'mine' | 'shared';
@@ -23,6 +24,8 @@ export function DraftsScreen() {
   const [tab, setTab] = useState<Tab>('mine');
   const [list, setList] = useState<SignatureRequest[]>();
   const [names, setNames] = useState<Record<string, string>>({});
+  const [reload, setReload] = useState(0);
+  const drafts = useDraftActions(() => setReload((n) => n + 1));
 
   useEffect(() => {
     let live = true;
@@ -42,7 +45,7 @@ export function DraftsScreen() {
     return () => {
       live = false;
     };
-  }, [services, requests]);
+  }, [services, requests, reload]);
 
   const meId = me?.systemuserid ?? '';
   const mine = (list ?? []).filter((r) => r.preparedById === meId || r.ownerId === actingForId || r.ownerId === meId);
@@ -110,6 +113,17 @@ export function DraftsScreen() {
                     <Button variant="tinted" onClick={() => open(r)}>
                       Open
                     </Button>
+                    <Menu
+                      trigger={(p) => <IconButton icon="ellipsis" label={`More for ${r.title}`} {...p} />}
+                      items={[
+                        { label: 'Rename…', icon: 'pencil', onSelect: () => drafts.askRename(r, list ?? []) },
+                        ...(drafts.canDelete(r)
+                          ? [{ separator: true, label: '' }, { label: 'Delete draft…', icon: 'trash' as const, danger: true, onSelect: () => drafts.askDelete(r, names[r.contactId]) }]
+                          : drafts.isSharedWithMe(r)
+                            ? [{ label: 'Remove from my list', icon: 'x' as const, onSelect: () => drafts.removeFromMyList(r) }]
+                            : []),
+                      ]}
+                    />
                   </div>
                 );
               })}
@@ -117,6 +131,7 @@ export function DraftsScreen() {
           )}
         </div>
       </div>
+      {drafts.sheet}
     </>
   );
 }

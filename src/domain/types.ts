@@ -275,6 +275,8 @@ export interface SignatureRequest {
   expiresInDays?: number;
   anyOrder: boolean;
   draftFolderUrl?: string;
+  /** Draft PDFs written to SharePoint, so a later cleanup can find them. */
+  draftFiles?: { name: string; url: string }[];
   viewedOn?: string;
   signedOn?: string;
   voidedReason?: string;

@@ -7,6 +7,7 @@ import { audit } from '../../state/actions';
 import { useApp } from '../../state/store';
 import { Badge, Button, Field, IconButton, Menu, Select, Sheet, TextArea, TextInput, downloadBytes, toast } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
+import { useDraftActions } from '../common/useDraftActions';
 
 export const fmtWhen = (iso?: string) =>
   iso ? new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
@@ -37,6 +38,9 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
   const loadRequest = useApp((s) => s.loadRequest);
   const openContact = useApp((s) => s.openContact);
   const contactId = useApp((s) => s.contactId);
+  const requests = useApp((s) => s.requests);
+  const client = useApp((s) => s.client);
+  const drafts = useDraftActions();
   const navigate = useNavigate();
   const [busy, setBusy] = useState<string>();
   const [sheet, setSheet] = useState<'void' | 'correct'>();
@@ -127,7 +131,7 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
     try {
       if (r.contactId !== contactId) await openContact(r.contactId);
       loadRequest(asNew ? { ...r, id: '', values: r.values } : r);
-      if (asNew) useApp.getState().setPacket({ requestId: undefined, sharedWith: [] });
+      if (asNew) useApp.getState().setPacket({ requestId: undefined, sharedWith: [], snapshot: undefined });
       navigate('/review');
     } catch {
       toast.error('That client isn’t available to you.');
@@ -176,12 +180,12 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
               ...(r.status === 'Drafted'
                 ? [
                     { separator: true, label: '' },
-                    {
-                      label: 'Delete draft',
-                      icon: 'trash' as const,
-                      danger: true,
-                      onSelect: () => withBusy('del', async () => (await services.requests.remove(r.id), await refreshRequests(), toast.ok('Draft deleted'))),
-                    },
+                    ...(drafts.canDelete(r) || drafts.isSharedWithMe(r) ? [{ label: 'Rename…', icon: 'pencil' as const, onSelect: () => drafts.askRename(r, requests) }] : []),
+                    ...(drafts.canDelete(r)
+                      ? [{ label: 'Delete draft…', icon: 'trash' as const, danger: true, onSelect: () => drafts.askDelete(r, clientName ?? (client?.contact.contactid === r.contactId ? client.contact.fullname : undefined)) }]
+                      : drafts.isSharedWithMe(r)
+                        ? [{ label: 'Remove from my list', icon: 'x' as const, onSelect: () => drafts.removeFromMyList(r) }]
+                        : []),
                   ]
                 : []),
             ]}
@@ -348,6 +352,7 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
           }
         />
       )}
+      {drafts.sheet}
     </article>
   );
 }

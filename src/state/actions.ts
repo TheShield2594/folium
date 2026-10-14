@@ -1,3 +1,4 @@
+import { defaultDraftTitle, shortDraftId } from '../domain/drafts';
 import { prefillSnapshot, type FormFill } from '../domain/prefill';
 import type { Attachment, AuditEvent, SignatureRequest, UserProfile } from '../domain/types';
 import { fillPdf, mergePdfs } from '../pdf/fill';
@@ -91,12 +92,8 @@ export async function saveDraft(opts: {
 }): Promise<SignatureRequest> {
   const { services, packet, fills, contactId, me, owner, existing } = opts;
   const folder = await services.drafts.folderUrl(contactId);
-  if (opts.writePdfs) {
-    const docs = await fillPacket(services, fills, 'fillable', true);
-    for (const d of docs) await services.drafts.saveDraft(contactId, `DRAFT ${d.fileName}`, d.pdf);
-  }
   const attachments = await storeAttachments(services, contactId, packet.attachments);
-  const title = packet.title || (fills.length === 1 ? fills[0].template.name : `${fills[0]?.template.name ?? 'Forms'} + ${fills.length - 1} more`);
+  const title = packet.title || existing?.title || defaultDraftTitle(fills);
   const base: SignatureRequest = existing ?? {
     id: `new-${Date.now()}`,
     contactId,
@@ -131,5 +128,14 @@ export async function saveDraft(opts: {
     draftFolderUrl: folder,
     audit: [...base.audit, audit(me, existing ? 'Draft updated' : 'Draft saved', me.systemuserid !== owner.systemuserid ? `on behalf of ${owner.fullname}` : undefined)],
   };
-  return services.requests.save(req);
+  const saved = await services.requests.save(req);
+  if (!opts.writePdfs) return saved;
+  // File names carry the draft's title and a short ID, so two drafts never overwrite each other.
+  const docs = await fillPacket(services, fills, 'fillable', true);
+  const draftFiles: { name: string; url: string }[] = [];
+  for (const [i, d] of docs.entries()) {
+    const name = `DRAFT ${fills[i].template.formNumber} ${title} – ${shortDraftId(saved.id)}.pdf`.replace(/[\\/:*?"<>|#%]/g, '-');
+    draftFiles.push({ name, ...(await services.drafts.saveDraft(contactId, name, d.pdf)) });
+  }
+  return services.requests.save({ ...saved, draftFiles: [...(existing?.draftFiles ?? []).filter((f) => !draftFiles.some((x) => x.name === f.name)), ...draftFiles] });
 }

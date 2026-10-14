@@ -251,6 +251,39 @@ export function Sheet({ title, onClose, children, footer, wide, icon }: { title:
   );
 }
 
+/** Ask before something destructive. Cancel comes first, so it has focus by default. */
+export function ConfirmSheet({ title, children, confirmLabel, onConfirm, onClose }: { title: string; children: ReactNode; confirmLabel: string; onConfirm: () => Promise<void> | void; onClose: () => void }) {
+  const [busy, setBusy] = useState(false);
+  async function confirm() {
+    setBusy(true);
+    try {
+      await onConfirm();
+      onClose();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Something went wrong');
+      setBusy(false);
+    }
+  }
+  return (
+    <Sheet
+      title={title}
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="gray" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="danger" busy={busy} onClick={confirm}>
+            {confirmLabel}
+          </Button>
+        </>
+      }
+    >
+      <p className="t-callout">{children}</p>
+    </Sheet>
+  );
+}
+
 // ------------------------------------------------------------------ Menu (popover)
 
 export interface MenuItem {

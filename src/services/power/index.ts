@@ -255,6 +255,11 @@ export function createPowerServices(): Services {
   };
 
   // ---------------------------------------------------------------- Requests & packets
+  // Deletes are soft: the row is deactivated (statecode 1) and lists read active rows
+  // only, so Undo reactivates the same row. Hard deletion comes with retention (#19).
+  const ACTIVE = 'statecode eq 0';
+  const deactivate = (table: string, id: string, what: string) => client.updateRecordAsync(table, id, { statecode: 1, statuscode: 2 }).then((r) => unwrap(r, what));
+  const reactivate = (table: string, id: string, what: string) => client.updateRecordAsync(table, id, { statecode: 0, statuscode: 1 }).then((r) => unwrap(r, what));
   type Row = { ev_signaturerequestid: string; ev_payload: string };
   const toRow = (r: SignatureRequest) => ({
     ev_name: r.title,
@@ -270,7 +275,7 @@ export function createPowerServices(): Services {
 
   const requests: RequestStore = {
     async listForContact(contactId) {
-      const rows = unwrap(await client.retrieveMultipleRecordsAsync<Row>(DATAVERSE.signatureRequest, { filter: `_ev_contact_value eq ${contactId}`, orderBy: ['createdon desc'] }), 'Load requests');
+      const rows = unwrap(await client.retrieveMultipleRecordsAsync<Row>(DATAVERSE.signatureRequest, { filter: `_ev_contact_value eq ${contactId} and ${ACTIVE}`, orderBy: ['createdon desc'] }), 'Load requests');
       return rows.map((r) => ({ ...payloadRow<SignatureRequest>(r), id: r.ev_signaturerequestid }));
     },
     async listMine() {
@@ -278,7 +283,7 @@ export function createPowerServices(): Services {
       // and drafts shared with them. Dataverse security decides which rows those are
       // (issue #1); the screens then narrow by ownerId / preparedById / sharedWith.
       // Filtering on _createdby_value here would drop shared and acting-for rows.
-      const rows = unwrap(await client.retrieveMultipleRecordsAsync<Row>(DATAVERSE.signatureRequest, { orderBy: ['modifiedon desc'], top: 500 }), 'Load my requests');
+      const rows = unwrap(await client.retrieveMultipleRecordsAsync<Row>(DATAVERSE.signatureRequest, { filter: ACTIVE, orderBy: ['modifiedon desc'], top: 500 }), 'Load my requests');
       return rows.map((r) => ({ ...payloadRow<SignatureRequest>(r), id: r.ev_signaturerequestid }));
     },
     async get(id) {
@@ -294,13 +299,16 @@ export function createPowerServices(): Services {
       return { ...req, id: created.ev_signaturerequestid };
     },
     async remove(id) {
-      unwrap(await client.deleteRecordAsync(DATAVERSE.signatureRequest, id), 'Delete draft');
+      await deactivate(DATAVERSE.signatureRequest, id, 'Delete draft');
+    },
+    async restore(id) {
+      await reactivate(DATAVERSE.signatureRequest, id, 'Restore draft');
     },
   };
 
   const packets: PacketStore = {
     async list() {
-      const rows = unwrap(await client.retrieveMultipleRecordsAsync<{ ev_formpacketid: string; ev_payload: string }>(DATAVERSE.packet, {}), 'Load packets');
+      const rows = unwrap(await client.retrieveMultipleRecordsAsync<{ ev_formpacketid: string; ev_payload: string }>(DATAVERSE.packet, { filter: ACTIVE }), 'Load packets');
       return rows.map((r) => ({ ...payloadRow<SavedPacket>(r), id: r.ev_formpacketid }));
     },
     async save(p) {
@@ -313,7 +321,10 @@ export function createPowerServices(): Services {
       return { ...p, id: created.ev_formpacketid };
     },
     async remove(id) {
-      unwrap(await client.deleteRecordAsync(DATAVERSE.packet, id), 'Delete packet');
+      await deactivate(DATAVERSE.packet, id, 'Delete packet');
+    },
+    async restore(id) {
+      await reactivate(DATAVERSE.packet, id, 'Restore packet');
     },
   };
 

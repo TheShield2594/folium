@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { findNameClash, nextFreeName } from '../domain/drafts';
 import { prefillPacket, snapshotDiff, prefillSnapshot } from '../domain/prefill';
 import type { ClientRecord, PacketItem } from '../domain/types';
 import { createDemoServices, resetDemo } from '../services/demo';
@@ -98,5 +99,57 @@ describe('snapshotDiff', () => {
   it('ignores an advisor override: the diff is about what CRM says', () => {
     const snap = prefillSnapshot(fillsFor(client, its, { 'contact.address1_city': 'Somewhere' }));
     expect(snap['contact.address1_city']).toBe('Goshen');
+  });
+});
+
+describe('draft and packet names', () => {
+  const list = [
+    { id: '1', name: 'IRA distribution' },
+    { id: '2', name: 'Shared  Rollover set' },
+  ];
+
+  it('finds clashes ignoring case and spacing, across own and shared items', () => {
+    expect(findNameClash('  ira   DISTRIBUTION ', list)?.id).toBe('1');
+    expect(findNameClash('shared rollover set', list)?.id).toBe('2');
+    expect(findNameClash('IRA distribution', list, '1')).toBeUndefined();
+    expect(findNameClash('Roth conversion', list)).toBeUndefined();
+    expect(findNameClash('   ', list)).toBeUndefined();
+  });
+
+  it('suggests the next free name', () => {
+    expect(nextFreeName('Roth', ['IRA distribution'])).toBe('Roth');
+    expect(nextFreeName('IRA distribution', ['IRA distribution'])).toBe('IRA distribution (2)');
+    expect(nextFreeName('IRA distribution', ['ira distribution', 'IRA distribution (2)'])).toBe('IRA distribution (3)');
+    expect(nextFreeName('IRA distribution (2)', ['IRA distribution', 'IRA distribution (2)'])).toBe('IRA distribution (3)');
+  });
+});
+
+describe('deleting drafts and packets', () => {
+  it('soft-deletes a draft and Undo brings back the same row', async () => {
+    const services = createDemoServices();
+    const saved = await saveDraft({ services, packet: packet(), fills: fillsFor(client, items), contactId: 'c-jordan', me, owner: me });
+    await services.requests.remove(saved.id);
+    expect((await services.requests.listForContact('c-jordan')).some((r) => r.id === saved.id)).toBe(false);
+    await services.requests.restore(saved.id);
+    expect((await services.requests.get(saved.id))?.title).toBe(saved.title);
+  });
+
+  it('restores a deleted packet with its ID', async () => {
+    const services = createDemoServices();
+    const [p] = await services.packets.list();
+    await services.packets.remove(p.id);
+    expect((await services.packets.list()).some((x) => x.id === p.id)).toBe(false);
+    await services.packets.restore(p.id);
+    expect((await services.packets.list()).find((x) => x.id === p.id)?.name).toBe(p.name);
+  });
+
+  it('gives two drafts with the same form different SharePoint file names', async () => {
+    const services = createDemoServices();
+    const one = await saveDraft({ services, packet: packet({ title: 'IRA distribution' }), fills: fillsFor(client, items), contactId: 'c-jordan', me, owner: me, writePdfs: true });
+    const two = await saveDraft({ services, packet: packet({ title: 'IRA distribution' }), fills: fillsFor(client, items), contactId: 'c-jordan', me, owner: me, writePdfs: true });
+    expect(one.draftFiles).toHaveLength(2);
+    expect(one.draftFiles![0].name).toMatch(/^DRAFT PX-310 IRA distribution – \w{4}\.pdf$/);
+    const names = new Set([...one.draftFiles!, ...two.draftFiles!].map((f) => f.name));
+    expect(names.size).toBe(4);
   });
 });

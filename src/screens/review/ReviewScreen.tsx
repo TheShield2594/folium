@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { FieldState } from '../../domain/prefill';
+import { defaultDraftTitle } from '../../domain/drafts';
 import { inputsNeeded, snapshotDiff } from '../../domain/prefill';
+import type { SignatureRequest } from '../../domain/types';
 import { summarize } from '../../domain/checks';
 import { sourceKind } from '../../domain/paths';
 import { useServices } from '../../services';
@@ -12,6 +14,7 @@ import { Button, Empty, IconButton, Menu, Segmented, Select, downloadBytes, open
 import { Icon } from '../../ui/Icon';
 import { NoClient } from '../common/NoClient';
 import { PdfView } from '../common/PdfView';
+import { NameSheet } from '../common/NameSheet';
 import { ShareSheet } from '../common/ShareSheet';
 import { Steps } from '../common/Steps';
 import { usePacketView } from '../common/usePacket';
@@ -39,6 +42,7 @@ export function ReviewScreen() {
   const [zoom, setZoom] = useState<'fit' | 'large'>('fit');
   const [busy, setBusy] = useState<string>();
   const [sharing, setSharing] = useState(false);
+  const [naming, setNaming] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
   const [canvasW, setCanvasW] = useState(700);
 
@@ -118,17 +122,21 @@ export function ReviewScreen() {
     );
   }
 
-  async function onSaveDraft() {
+  /** The first save asks for a name; later saves update the same draft. */
+  function onSaveDraft() {
+    if (!packet.requestId) return setNaming(true);
+    writeDraft(packet.title).catch((e) => toast.error(e instanceof Error ? e.message : 'Could not save draft'));
+  }
+
+  async function writeDraft(title: string, into?: SignatureRequest) {
     if (!contactId || !me || !owner || !view) return;
     setBusy('draft');
     try {
-      const existing = packet.requestId ? requests.find((r) => r.id === packet.requestId) : undefined;
-      const saved = await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing, writePdfs: true });
+      const existing = into ?? (packet.requestId ? requests.find((r) => r.id === packet.requestId) : undefined);
+      const saved = await saveDraft({ services, packet: { ...packet, title }, fills: view.fills, contactId, me, owner, existing, writePdfs: true });
       setPacket({ requestId: saved.id, title: saved.title, attachments: saved.attachments, snapshot: saved.prefillSnapshot });
       await refreshRequests();
       toast.ok(`Draft saved to ${client!.contact.firstname}’s SharePoint folder`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not save draft');
     } finally {
       setBusy(undefined);
     }
@@ -388,6 +396,20 @@ export function ReviewScreen() {
         </aside>
       </div>
       {sharing && <ShareSheet onClose={() => setSharing(false)} />}
+      {naming && (
+        <NameSheet
+          title="Save draft"
+          noun="draft"
+          initial={packet.title || defaultDraftTitle(view.fills)}
+          existing={requests.filter((r) => r.status === 'Drafted' && r.contactId === contactId).map((r) => ({ id: r.id, name: r.title }))}
+          saveLabel="Save draft"
+          onSave={(title) => writeDraft(title)}
+          replace={{ label: 'Update that draft', allowed: () => true, run: (c) => writeDraft(c.name, requests.find((r) => r.id === c.id)) }}
+          onClose={() => setNaming(false)}
+        >
+          <p className="t-footnote c3">Saved to {client.contact.firstname}’s SharePoint folder. You can rename it later from Drafts.</p>
+        </NameSheet>
+      )}
     </>
   );
 }

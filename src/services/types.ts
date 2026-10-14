@@ -67,13 +67,18 @@ export interface RequestStore {
   listMine(): Promise<SignatureRequest[]>;
   get(id: string): Promise<SignatureRequest | undefined>;
   save(req: SignatureRequest): Promise<SignatureRequest>;
+  /** Soft delete: the row is deactivated and drops out of the lists. */
   remove(id: string): Promise<void>;
+  /** Undo `remove`, keeping the same row ID. */
+  restore(id: string): Promise<void>;
 }
 
 export interface PacketStore {
   list(): Promise<SavedPacket[]>;
   save(p: SavedPacket): Promise<SavedPacket>;
+  /** Soft delete, like `RequestStore.remove`. */
   remove(id: string): Promise<void>;
+  restore(id: string): Promise<void>;
 }
 
 export interface EnvelopeStatus {

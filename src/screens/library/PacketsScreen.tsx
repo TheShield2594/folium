@@ -4,7 +4,8 @@ import type { SavedPacket } from '../../domain/types';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
 import { latestLive, useApp } from '../../state/store';
-import { Badge, Button, Empty, IconButton, Menu, SearchField, Segmented, toast } from '../../ui/controls';
+import { Badge, Button, ConfirmSheet, Empty, IconButton, Menu, SearchField, Segmented, toast } from '../../ui/controls';
+import { NameSheet } from '../common/NameSheet';
 import { Icon } from '../../ui/Icon';
 
 type Tab = 'all' | 'mine' | 'shared';
@@ -23,6 +24,8 @@ export function PacketsScreen() {
   const navigate = useNavigate();
   const [q, setQ] = useState('');
   const [tab, setTab] = useState<Tab>('all');
+  const [deleting, setDeleting] = useState<SavedPacket>();
+  const [renaming, setRenaming] = useState<SavedPacket>();
 
   const myGroups = useMemo(() => new Set(groups.filter((g) => g.memberIds.includes(me?.systemuserid ?? '')).map((g) => g.id)), [groups, me]);
   const visible = packets.filter((p) => p.owner === me?.fullname || (p.shared && (!p.groupIds?.length || p.groupIds.some((g) => myGroups.has(g)))));
@@ -58,10 +61,18 @@ export function PacketsScreen() {
     navigate('/');
   }
 
+  /** Soft delete, so Undo brings back the same packet (and ID). */
   async function remove(p: SavedPacket) {
     await services.packets.remove(p.id);
     await refreshPackets();
-    toast.ok(`Deleted “${p.name}”`, { label: 'Undo', onClick: async () => (await services.packets.save(p), refreshPackets()) });
+    toast.ok(`Deleted “${p.name}”`, {
+      label: 'Undo',
+      onClick: () =>
+        services.packets
+          .restore(p.id)
+          .then(refreshPackets)
+          .catch((e) => toast.error(e instanceof Error ? e.message : 'Could not restore the packet')),
+    });
   }
 
   return (
@@ -120,8 +131,9 @@ export function PacketsScreen() {
                           ...(isMine || me?.role === 'Admin'
                             ? [
                                 { label: p.shared ? 'Stop sharing' : 'Share with my groups', icon: 'people' as const, onSelect: async () => (await services.packets.save({ ...p, shared: !p.shared, groupIds: p.shared ? [] : [...myGroups] }), refreshPackets()) },
+                                { label: 'Rename…', icon: 'pencil' as const, onSelect: () => setRenaming(p) },
                                 { separator: true, label: '' },
-                                { label: 'Delete', icon: 'trash' as const, danger: true, onSelect: () => remove(p) },
+                                { label: 'Delete…', icon: 'trash' as const, danger: true, onSelect: () => setDeleting(p) },
                               ]
                             : []),
                         ]}
@@ -148,6 +160,23 @@ export function PacketsScreen() {
           )}
         </div>
       </div>
+      {deleting && (
+        <ConfirmSheet title="Delete packet?" confirmLabel="Delete packet" onConfirm={() => remove(deleting)} onClose={() => setDeleting(undefined)}>
+          Delete “{deleting.name}”{deleting.shared ? '? People you shared it with will lose it too.' : '?'} The forms themselves stay in the library.
+        </ConfirmSheet>
+      )}
+      {renaming && (
+        <NameSheet
+          title="Rename packet"
+          noun="packet"
+          initial={renaming.name}
+          existing={visible}
+          exceptId={renaming.id}
+          saveLabel="Rename"
+          onSave={async (name) => (await services.packets.save({ ...renaming, name }), await refreshPackets(), toast.ok(`Renamed to “${name}”`))}
+          onClose={() => setRenaming(undefined)}
+        />
+      )}
     </>
   );
 }
