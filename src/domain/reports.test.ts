@@ -125,4 +125,9 @@ describe('canOpenReports', () => {
     expect(canOpenReports({ role: 'Admin' }, { reportsUrl: ' ' })).toBe(false);
     expect(canOpenReports(undefined, firm)).toBe(false);
   });
+  it('opens only https: links', () => {
+    expect(canOpenReports({ role: 'Admin' }, { reportsUrl: 'javascript:alert(1)' })).toBe(false);
+    expect(canOpenReports({ role: 'Admin' }, { reportsUrl: 'http://app.powerbi.com/x' })).toBe(false);
+    expect(canOpenReports({ role: 'Admin' }, { reportsUrl: 'not a url' })).toBe(false);
+  });
 });

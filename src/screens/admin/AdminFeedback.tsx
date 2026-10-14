@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { categoryLabel, FEEDBACK_STATUSES, filterFeedback, isOpen, resolveFeedback, statusLabel, type FeedbackKind, type FeedbackStatus, type FormFeedback } from '../../domain/feedback';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
@@ -11,6 +11,13 @@ const STATUS_TONE: Record<FeedbackStatus, 'accent' | 'warn' | 'info' | 'danger' 
 
 /** Administration › Form feedback: requests for new forms and problem reports, in one list. */
 export function AdminFeedback() {
+  const me = useApp((s) => s.me);
+  // Admins only: the sidebar hides the link, and this stops a typed-in URL.
+  if (me?.role !== 'Admin') return <Navigate to="/" replace />;
+  return <FeedbackInbox />;
+}
+
+function FeedbackInbox() {
   const services = useServices();
   const templates = useApp((s) => s.templates);
   const users = useApp((s) => s.users);
@@ -117,7 +124,19 @@ export function AdminFeedback() {
                   </thead>
                   <tbody>
                     {shown.map((f) => (
-                      <tr key={f.id} onClick={() => setOpen(f)} style={{ cursor: 'pointer' }}>
+                      <tr
+                        key={f.id}
+                        tabIndex={0}
+                        aria-label={`Open ${f.kind === 'problem' ? 'problem report' : 'form request'}: ${f.name}`}
+                        onClick={() => setOpen(f)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setOpen(f);
+                          }
+                        }}
+                        style={{ cursor: 'pointer' }}
+                      >
                         <td>
                           <div style={{ fontWeight: 600 }}>{f.name}</div>
                           <div className="t-footnote c3">

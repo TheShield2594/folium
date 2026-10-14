@@ -144,6 +144,7 @@ export function SendScreen() {
     ...view.checks.filter((c) => c.level === 'block').map((c) => ({ id: stableCheckId(c.id), templateId: c.templateId })),
     ...attachmentChecks.map((c) => ({ id: c.id, templateId: undefined })),
     ...(problems.length ? [{ id: 'signers', templateId: undefined }] : []),
+    ...(ordered.some((s) => !methodSetUp(docuSign, s.auth)) ? [{ id: 'auth:notSetUp', templateId: undefined }] : []),
     ...(!subject.trim() ? [{ id: 'subject', templateId: undefined }] : []),
     ...(unreachable.length ? [{ id: 'attachments:unreachable', templateId: undefined }] : []),
   ];

@@ -108,7 +108,12 @@ const reverse = <K extends string>(m: Record<K, number>, n: number | undefined):
  * model-driven view can change it.
  */
 export function fromFeedbackRow(row: FeedbackRowIn): FormFeedback {
-  const payload = row.ev_payload ? (JSON.parse(row.ev_payload) as Partial<FormFeedback>) : {};
+  let payload: Partial<FormFeedback> = {};
+  try {
+    if (row.ev_payload) payload = JSON.parse(row.ev_payload) as Partial<FormFeedback>;
+  } catch {
+    // A row edited outside Folium with a broken payload still shows, from its columns.
+  }
   return {
     ...payload,
     id: row.ev_formrequestid,

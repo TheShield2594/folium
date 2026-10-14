@@ -94,6 +94,10 @@ describe('feedback rows', () => {
     });
   });
 
+  it('falls back to the columns when the payload doesn’t parse', () => {
+    expect(fromFeedbackRow({ ev_formrequestid: 'bad', ev_name: 'HSA', ev_requestedby: 'A', ev_payload: '{"kind":"prob' })).toMatchObject({ id: 'bad', kind: 'request', name: 'HSA', requestedBy: 'A', status: 'new' });
+  });
+
   it('takes the status column over the payload, so a flow can change it', () => {
     const row = feedbackRow({ kind: 'request', name: 'x', requestedBy: 'A', createdOn: 'now', status: 'new' });
     expect(fromFeedbackRow({ ev_formrequestid: 'r', ev_payload: row.ev_payload, ev_status: FEEDBACK_STATUS_OPTIONS.wontFix }).status).toBe('wontFix');

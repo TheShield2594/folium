@@ -5,9 +5,18 @@ import type { UsageEvent, UsageEventType } from './usage';
 // the same things in DAX over `ev_usageevent`; these are the reference definitions its
 // numbers are checked against, and what the tests pin down.
 
-/** The Reports link: Admins and people given the reporting role, once the firm has a report URL. */
+/** A report link Folium will open: an `https:` URL, so a stored `javascript:` value never becomes a link. */
+export function isReportUrl(url: string | undefined): boolean {
+  try {
+    return !!url && new URL(url.trim()).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/** The Reports link: Admins and people given the reporting role, once the firm has an `https:` report URL. */
 export function canOpenReports(me: Pick<UserProfile, 'role' | 'canViewReports'> | undefined, firm: Pick<FirmProfile, 'reportsUrl'> | undefined): boolean {
-  return !!me && !!firm?.reportsUrl?.trim() && (me.role === 'Admin' || !!me.canViewReports);
+  return !!me && isReportUrl(firm?.reportsUrl) && (me.role === 'Admin' || !!me.canViewReports);
 }
 
 export interface Range {

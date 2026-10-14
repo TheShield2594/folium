@@ -5,18 +5,19 @@ import { useApp } from '../../state/store';
 import { Badge, toast } from '../../ui/controls';
 import { fmtDay } from '../requests/RequestCard';
 
-const SEEN_KEY = 'folium.feedbackSeen';
+/** Per person, so people sharing a browser don't push each other's seen reports out. */
+const seenKey = (userId: string) => `folium.feedbackSeen.${userId}`;
 
-function readSeen(): string[] {
+function readSeen(userId: string): string[] {
   try {
-    return JSON.parse(localStorage.getItem(SEEN_KEY) ?? '[]') as string[];
+    return JSON.parse(localStorage.getItem(seenKey(userId)) ?? '[]') as string[];
   } catch {
     return [];
   }
 }
-function writeSeen(seen: string[]) {
+function writeSeen(userId: string, seen: string[]) {
   try {
-    localStorage.setItem(SEEN_KEY, JSON.stringify(seen.slice(-200)));
+    localStorage.setItem(seenKey(userId), JSON.stringify(seen.slice(-200)));
   } catch {
     /* ignore */
   }
@@ -34,7 +35,7 @@ export function FeedbackNotices() {
       .listMine(userId)
       .then((mine) => {
         if (!live) return;
-        const seen = readSeen();
+        const seen = readSeen(userId);
         const done = newlyResolved(mine, userId, seen);
         if (!done.length) return;
         const first = done[0];
@@ -43,7 +44,7 @@ export function FeedbackNotices() {
             ? `Marketing marked your report on ${first.formNumber ?? first.name} “${statusLabel(first.status).toLowerCase()}”.${first.resolution ? ` ${first.resolution}` : ''}`
             : `Marketing answered ${done.length} of your form reports. See Settings.`,
         );
-        writeSeen([...seen, ...done.map((f) => `${f.id}:${f.status}`)]);
+        writeSeen(userId, [...seen, ...done.map((f) => `${f.id}:${f.status}`)]);
       })
       .catch(() => undefined);
     return () => {

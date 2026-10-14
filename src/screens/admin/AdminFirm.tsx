@@ -5,6 +5,7 @@ import { Toolbar } from '../../shell/Shell';
 import { useApp } from '../../state/store';
 import { Button, Field, Select, SwitchRow, TextArea, TextInput, toast } from '../../ui/controls';
 import { DEFAULT_IDLE_MINUTES } from '../../state/idle';
+import { isReportUrl } from '../../domain/reports';
 
 /** The firm's text fields (settings below are switches and choices). */
 type TextKey = Exclude<{ [K in keyof FirmProfile]-?: FirmProfile[K] extends string ? K : never }[keyof FirmProfile], 'disclosure'>;
@@ -142,7 +143,13 @@ export function AdminFirm() {
                 Form usage, people, e-signature and quality reports live in Power BI (see docs/REPORTS.md). With a link here, Administrators and people given the reporting role in Users &amp; groups see Reports in the sidebar.
               </p>
             </div>
-            <Field label="Power BI report link" htmlFor="f-reports" optional help="The report’s URL in the Power BI service. Blank hides the Reports link.">
+            <Field
+              label="Power BI report link"
+              htmlFor="f-reports"
+              optional
+              help="The report’s URL in the Power BI service. Blank hides the Reports link."
+              error={f.reportsUrl && !isReportUrl(f.reportsUrl) ? 'Use the report’s https:// link. Other links aren’t shown.' : undefined}
+            >
               <TextInput id="f-reports" type="url" value={f.reportsUrl ?? ''} placeholder="https://app.powerbi.com/groups/…/reports/…" onChange={(e) => setF({ ...f, reportsUrl: e.target.value.trim() || undefined })} />
             </Field>
           </section>

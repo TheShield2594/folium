@@ -45,7 +45,7 @@ Active users (30 days) =
 
 **Time to sign** is per request, not per form row: hours from the earliest `request.sent` to the earliest `request.signed` for requests sent in the range. Build it on a request-level calculated table (`SUMMARIZE` by `ev_request` with `MIN` of each), then take the median and the 90th percentile by **nearest rank** (sort the hours and take the value at `ROUNDUP(p × n, 0)`). DAX's `PERCENTILE.INC` interpolates and can differ on small samples, so don't use it here.
 
-**Blocking checks** come from `ev_detail`'s `blockingChecks` list. Parse `ev_detail` in Power Query (`Json.Document`), expand the list to rows, and count by check ID. IDs are stable across packets: `required`, `check:<n>` (the template's nth check), `format:<field key>`, `state`, `state:licence`, `attachments:count`, `signers`, `subject`.
+**Blocking checks** come from `ev_detail`'s `blockingChecks` list. Parse `ev_detail` in Power Query (`Json.Document`), expand the list to rows, and count by check ID. IDs are stable across packets: `required`, `check:<n>` (the template's nth check), `format:<field key>`, `state`, `state:licence`, `attachments:count`, `attachments:size`, `attachments:unreachable` (an attachment Folium can't reach), `signers`, `auth:notSetUp` (a verification method not set up in DocuSign), `subject`.
 
 ## Pages
 
