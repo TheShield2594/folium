@@ -78,7 +78,8 @@ export function ReviewScreen() {
     }
     return [...seen.current]
       .map((key) => ({ key, fields: all.filter((f) => f.key === key), required: req.get(key) ?? all.some((f) => f.key === key && f.required) }))
-      .filter((n) => n.fields.length > 0);
+      // A locked field leaves the list while it's locked, and comes back if it unlocks.
+      .filter((n) => n.fields.length > 0 && !n.fields.every((f) => f.locked));
   }, [view]);
   const requiredNeeds = needs.filter((n) => n.required);
   const optionalNeeds = needs.filter((n) => !n.required);
