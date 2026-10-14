@@ -15,6 +15,7 @@ import type {
   UserProfile,
   VerificationMethod,
 } from '../domain/types';
+import type { DirectoryUser } from '../domain/advisor';
 
 /** Dataverse reads for the client the advisor is working on. */
 export interface CrmService {
@@ -151,9 +152,22 @@ export interface SigningProvider {
 
 /** Folium users, groups and the firm profile (Admin-managed; users edit their own profile). */
 export interface DirectoryService {
+  /**
+   * The signed-in person: their profile over their directory details (see
+   * `mergeAdvisor`). Records today's sign-in on the profile, at most once a day.
+   */
   currentUser(): Promise<UserProfile>;
+  /** Every profile, active or not, each merged with its directory details and `disabled` flag. */
   listUsers(): Promise<UserProfile[]>;
+  /** Saves overrides only (`profileToSave`): values equal to the directory's aren't stored. */
   saveUser(u: UserProfile): Promise<UserProfile>;
+  /**
+   * Deactivate or reactivate a profile (`ev_foliumprofile.statecode`). Deactivating
+   * also takes the person out of every group. Their requests and drafts are kept.
+   */
+  setActive(systemuserid: string, active: boolean): Promise<void>;
+  /** Directory (`systemuser`) rows for these sign-in emails, with or without a Folium profile. */
+  lookupDirectory(emails: string[]): Promise<DirectoryUser[]>;
   listGroups(): Promise<UserGroup[]>;
   saveGroup(g: UserGroup): Promise<UserGroup>;
   removeGroup(id: string): Promise<void>;

@@ -1,6 +1,8 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import type { ClientRecord, FirmPolicy, FirmProfile, FormTemplate, SavedPacket, SignatureRequest, UserGroup, UserProfile } from '../../domain/types';
+import { mergeAdvisor, profileToSave } from '../../domain/advisor';
 import { withPolicyDefaults } from '../../domain/policy';
+import { needsSeenStamp } from '../../domain/users';
 import { mapDocuSignStatus } from '../../domain/requests';
 import { generateTemplatePdf } from '../../pdf/generate';
 import type {
@@ -16,7 +18,7 @@ import type {
   SigningProvider,
   TemplateLibrary,
 } from '../types';
-import { CLIENTS, FIRM, GROUPS, seedPackets, seedRequests, TEMPLATES, USERS } from './seed';
+import { CLIENTS, DIRECTORY, FIRM, GROUPS, seedPackets, seedRequests, TEMPLATES, USERS } from './seed';
 import { SPECS } from './specs';
 
 // In-browser implementations used in demo mode (and in local dev without a Power
@@ -42,6 +44,8 @@ interface DemoState {
   envelopes?: Record<string, DemoEnvelope>;
   /** Missing in demo data saved before policies existed: defaults apply. */
   policy?: FirmPolicy;
+  /** Deactivated profiles (`statecode` 1 in Dataverse). */
+  inactiveUserIds?: string[];
 }
 
 function load(): DemoState {
@@ -95,19 +99,49 @@ export function setDemoUser(id: string) {
 
 const me = () => state.users.find((u) => u.systemuserid === state.currentUserId) ?? state.users[0];
 
+/** A stored profile as the power service returns it: over its directory row, with its active flag. */
+const asLoaded = (u: UserProfile): UserProfile => {
+  const merged = mergeAdvisor(DIRECTORY.find((d) => d.systemuserid === u.systemuserid), clone(u));
+  return state.inactiveUserIds?.includes(u.systemuserid) ? { ...merged, active: false } : merged;
+};
+
 const directory: DirectoryService = {
   async currentUser() {
-    return clone(me());
+    const u = me();
+    const now = new Date();
+    if (needsSeenStamp(u.lastSeenOn, now)) {
+      u.lastSeenOn = now.toISOString();
+      persist();
+    }
+    return asLoaded(u);
   },
   async listUsers() {
-    return clone(state.users);
+    return state.users.map(asLoaded);
   },
   async saveUser(u) {
+    const stored = profileToSave(u);
     const i = state.users.findIndex((x) => x.systemuserid === u.systemuserid);
-    if (i >= 0) state.users[i] = clone(u);
-    else state.users.push(clone(u));
+    if (i >= 0) state.users[i] = clone(stored);
+    else state.users.push(clone(stored));
     persist();
     return clone(u);
+  },
+  async setActive(id, active) {
+    const u = state.users.find((x) => x.systemuserid === id);
+    if (!u) throw new Error('That person has no Folium profile.');
+    const ids = new Set(state.inactiveUserIds ?? []);
+    if (active) ids.delete(id);
+    else {
+      ids.add(id);
+      u.groupIds = [];
+      for (const g of state.groups) g.memberIds = g.memberIds.filter((m) => m !== id);
+    }
+    state.inactiveUserIds = [...ids];
+    persist();
+  },
+  async lookupDirectory(emails) {
+    const want = new Set(emails.map((e) => e.trim().toLowerCase()));
+    return clone(DIRECTORY.filter((d) => d.email && want.has(d.email.toLowerCase())));
   },
   async listGroups() {
     return clone(state.groups);

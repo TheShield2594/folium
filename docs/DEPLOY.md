@@ -122,7 +122,7 @@ npm run build
 pac code push
 ```
 
-Share the app with the Folium security group. Admins then: set the Firm profile and Settings (sharing, downloads, retention), create groups, give each person a role, and map the first templates (Template library › New from Marketing).
+Share the app with the Folium security group: membership of that Entra ID group is what gives someone Folium, and removing them (or disabling their account when they leave) ends it the same day. There are no seats or expiry dates to manage. Admins then: set the Firm profile and Settings (sharing, downloads, retention, who may edit their own rep details, when people count as dormant), create groups, give each person a role, and map the first templates (Template library › New from Marketing). To load people from Laser App's user export, save it as CSV with the columns `email, role, groups, repCode, branch` and use Users & groups › Import; it's previewed against the directory before anything is saved.
 
 ## Fonts
 

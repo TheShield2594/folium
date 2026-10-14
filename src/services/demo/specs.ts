@@ -339,7 +339,16 @@ export const SPECS: FormSpec[] = [
     sections: [
       { title: 'Section 1 · Primary owner', fields: owner() },
       {
-        title: 'Section 2 · Joint owner',
+        title: 'Section 2 · Identification',
+        fields: [
+          { name: 'ID_DL_Number', label: 'Driver’s licence number', span: 4, source: 'id.client.dlNumber', required: true },
+          { name: 'ID_DL_State', label: 'State', span: 2, source: 'id.client.dlState', limits: { maxLength: 2 } },
+          { name: 'ID_DL_Expires', label: 'Expires', span: 3, source: 'id.client.dlExpires', format: 'date' },
+          { name: 'ID_Citizenship', label: 'Citizenship', span: 3, source: 'id.client.citizenship' },
+        ],
+      },
+      {
+        title: 'Section 3 · Joint owner',
         fields: [
           { name: 'Joint_Name', label: 'Joint owner name', span: 6, source: 'connection[Joint owner].fullname' },
           { name: 'Joint_DOB', label: 'Date of birth', span: 3, source: 'connection[Joint owner].birthdate', format: 'date', limits: { dateMin: '-120y', dateMax: 'today' } },
@@ -347,7 +356,7 @@ export const SPECS: FormSpec[] = [
         ],
       },
       {
-        title: 'Section 3 · Account type',
+        title: 'Section 4 · Account type',
         fields: [
           { name: 'Type_Individual', label: 'Individual', span: 3, source: 'advisor', type: 'checkbox', format: 'checkbox', key: 'newacct.individual' },
           { name: 'Type_Joint', label: 'Joint (JTWROS)', span: 3, source: 'advisor', type: 'checkbox', format: 'checkbox', key: 'newacct.joint' },
@@ -357,8 +366,17 @@ export const SPECS: FormSpec[] = [
           { name: 'Employer', label: 'Employer', span: 8, source: 'contact.ev_employer', required: true },
         ],
       },
-      { title: 'Section 4 · Advisor', fields: rep },
-      { title: 'Section 5 · Signatures', signatures: [ownerSig, { role: 'JointOwner', label: 'Joint owner', optional: true }] },
+      {
+        title: 'Section 5 · Advisor',
+        fields: [
+          ...rep,
+          { name: 'Rep_OSJ', label: 'OSJ number', span: 4, source: 'rep.osjNumber' },
+          { name: 'Rep_Office', label: 'Office address', span: 8, source: 'rep.officeStreet' },
+          { name: 'Rep_OfficeCSZ', label: 'City, state ZIP', span: 6, source: 'rep.officeCityStateZip' },
+          { name: 'Rep_Fax', label: 'Fax', span: 6, source: 'rep.fax', format: 'phone' },
+        ],
+      },
+      { title: 'Section 6 · Signatures', signatures: [ownerSig, { role: 'JointOwner', label: 'Joint owner', optional: true }] },
     ],
     signers: [{ role: 'Owner' }, { role: 'JointOwner', condition: 'connection[Joint owner].fullname' }],
     checks: [{ type: 'oneOf', fields: ['Type_Individual', 'Type_Joint', 'Type_TradIRA', 'Type_RothIRA'], label: 'Pick one account type' }],

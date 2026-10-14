@@ -32,8 +32,8 @@ Demo mode needs nothing else: sample clients, a template library of generated Ac
 - **Signers & send** — signers from the template roles and the client's connections, signing order, SMS/KBA/email verification, message, reminders, expiration.
 - **Signature requests** — Drafted → Sent → Viewed → Signed → In OnBase with audit trail, resend, correct signer, void, download signed PDF + certificate.
 - **Contact & accounts** — fix the client's Dynamics 365 record in place.
-- **Settings** — your own profile, sending defaults, appearance.
-- **Administration** — template library with revision diff and carry-over, signature tab placement, check rules, test with a real contact, publish on an effective date; users, groups (role, region) and the firm profile.
+- **Settings** — your own profile (from your Microsoft profile, with Folium overrides), sending defaults, appearance.
+- **Administration** — template library with revision diff and carry-over, signature tab placement, check rules, test with a real contact, publish on an effective date; users (status and last sign-in, bulk changes, CSV import and export), groups (role, region) and the firm profile.
 - **Roles** — User, Assistant (works on behalf of the Users in their groups, like LaserApp Anywhere) and Admin.
 
 See [docs/PARITY.md](docs/PARITY.md) for the feature-by-feature comparison with LaserApp Anywhere.

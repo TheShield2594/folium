@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { createHashRouter, Navigate, Outlet, RouterProvider } from 'react-router-dom';
 import { FoliumAppIcon } from './brand/FoliumMark';
+import { isActiveUser } from './domain/users';
 import { AdminFirm } from './screens/admin/AdminFirm';
 import { AdminSettings } from './screens/admin/AdminSettings';
 import { AdminPeople } from './screens/admin/AdminPeople';
@@ -17,6 +18,7 @@ import { ReviewScreen } from './screens/review/ReviewScreen';
 import { SendScreen } from './screens/send/SendScreen';
 import { SettingsScreen } from './screens/settings/SettingsScreen';
 import { createServices, ServicesContext } from './services';
+import { setDemoUser } from './services/demo';
 import type { Services } from './services/types';
 import { UnsavedGuards } from './shell/Recovery';
 import { Shell } from './shell/Shell';
@@ -110,6 +112,7 @@ export function App() {
   const ready = useApp((s) => s.ready);
   const error = useApp((s) => s.error);
   const boot = useApp((s) => s.boot);
+  const me = useApp((s) => s.me);
 
   // Keep the open packet in the session journal so a reload doesn't lose it.
   useEffect(() => startJournal(), []);
@@ -142,6 +145,28 @@ export function App() {
         <h3>Folium couldn’t start</h3>
         <p className="t-callout">{error}</p>
         <button className="btn btn-filled" onClick={() => location.reload()}>Try again</button>
+      </div>
+    );
+  }
+
+  if (me && !isActiveUser(me)) {
+    // Deactivated in Folium, or turned off in the directory. Their requests are kept.
+    return (
+      <div className="empty" style={{ height: '100%', justifyContent: 'center' }}>
+        <FoliumAppIcon size={64} />
+        <h3>Your Folium access is turned off</h3>
+        <p className="t-callout">Ask a Folium administrator to reactivate your profile. Requests you sent are still on file.</p>
+        {services.mode === 'demo' && (
+          <button
+            className="btn btn-filled"
+            onClick={() => {
+              setDemoUser('usr-advisor-1');
+              location.reload();
+            }}
+          >
+            Switch back to the demo advisor
+          </button>
+        )}
       </div>
     );
   }

@@ -1,13 +1,16 @@
 import { getContext } from '@microsoft/power-apps/app';
 import { getClient, type DataClient } from '@microsoft/power-apps/data';
 import type { Account, Connection, Contact, FirmPolicy, FirmProfile, FormTemplate, SavedPacket, SignatureRequest, TemplateMapping, UserGroup, UserProfile } from '../../domain/types';
+import { fromSystemUser, mergeAdvisor, profileToSave, SYSTEMUSER_COLUMNS, type DirectoryUser } from '../../domain/advisor';
+import { readIdDocuments } from '../../domain/idDocuments';
+import { needsSeenStamp } from '../../domain/users';
 import { withPolicyDefaults } from '../../domain/policy';
 import { mapDocuSignStatus } from '../../domain/requests';
 import { buildEnvelopeDefinition, ROLE_SEPARATOR } from '../docusign/tabs';
 import { classifyError, FoliumError } from '../errors';
 import type { CrmService, DirectoryService, DraftStore, IncomingFile, PacketStore, RequestStore, Services, SigningProvider, TemplateLibrary } from '../types';
 import { decodeChoices, encodeChoices } from './choices';
-import { CHOICES, CONNECTORS, DATAVERSE, DOCUSIGN, SHAREPOINT, SIGNATURE_STATUS_OPTIONS } from './config';
+import { CHOICES, CONNECTORS, DATAVERSE, DOCUSIGN, ID_DOCUMENT_COLUMNS, SHAREPOINT, SIGNATURE_STATUS_OPTIONS } from './config';
 import { dataSourcesInfo } from './dataSourcesInfo';
 
 // Power Platform implementations. Dataverse tables go through the SDK's data client;
@@ -39,10 +42,25 @@ export function createPowerServices(): Services {
   const payloadRow = <T,>(row: { ev_payload?: string }): T => JSON.parse(row.ev_payload ?? '{}') as T;
 
   // ---------------------------------------------------------------- Directory
-  type ProfileRow = { ev_foliumprofileid: string; _ev_user_value: string; ev_payload: string };
+  // `ev_foliumprofile.statecode` 1 is a deactivated profile: it stays (requests keep
+  // their owner) but drops out of groups, acting-for and share lists.
+  type ProfileRow = { ev_foliumprofileid: string; _ev_user_value: string; ev_payload: string; statecode?: number };
   async function loadProfiles(): Promise<{ row: ProfileRow; profile: UserProfile }[]> {
     const rows = unwrap(await client.retrieveMultipleRecordsAsync<ProfileRow>(DATAVERSE.profile, {}), 'Load users');
-    return rows.map((row) => ({ row, profile: payloadRow<UserProfile>(row) }));
+    return rows.map((row) => ({ row, profile: { ...payloadRow<UserProfile>(row), systemuserid: row._ev_user_value, ...(row.statecode === 1 ? { active: false } : {}) } }));
+  }
+
+  /** `systemuser` rows matching an OData filter, in batches so the URL stays short. */
+  async function systemUsers(clauses: string[], what: string): Promise<DirectoryUser[]> {
+    const out: DirectoryUser[] = [];
+    for (let i = 0; i < clauses.length; i += 40) {
+      const rows = unwrap(
+        await client.retrieveMultipleRecordsAsync<Record<string, unknown>>(DATAVERSE.systemuser, { filter: clauses.slice(i, i + 40).join(' or '), select: SYSTEMUSER_COLUMNS }),
+        what,
+      );
+      out.push(...rows.map(fromSystemUser));
+    }
+    return out;
   }
 
   // `ev_foliumsetting` holds one row per kind of setting, named by `ev_name`: "Firm"
@@ -63,41 +81,51 @@ export function createPowerServices(): Services {
     else unwrap(await client.createRecordAsync(DATAVERSE.settings, row), what);
   }
 
+  const blankProfile = (id: string): UserProfile => ({ systemuserid: id, fullname: '', email: '', phone: '', title: '', role: 'User', groupIds: [], repCode: '', branch: '' });
+
   const directory: DirectoryService = {
     async currentUser() {
       const ctx = await getContext();
-      const users = unwrap(
-        await client.retrieveMultipleRecordsAsync<Record<string, string>>(DATAVERSE.systemuser, {
-          filter: `azureactivedirectoryobjectid eq ${ctx.user.objectId}`,
-          select: ['systemuserid', 'fullname', 'internalemailaddress', 'address1_telephone1', 'title'],
-          top: 1,
-        }),
-        'Load signed-in user',
-      );
-      const u = users[0] ?? {};
-      const saved = (await loadProfiles()).find((p) => p.row._ev_user_value === u.systemuserid)?.profile;
-      return {
-        role: 'User',
-        groupIds: [],
-        repCode: '',
-        branch: '',
-        ...saved,
-        systemuserid: u.systemuserid ?? '',
-        fullname: u.fullname ?? ctx.user.fullName ?? '',
-        email: saved?.email || u.internalemailaddress || ctx.user.userPrincipalName || '',
-        phone: saved?.phone || u.address1_telephone1 || '',
-        title: saved?.title || u.title || '',
-      };
+      const [u] = await systemUsers([`azureactivedirectoryobjectid eq ${ctx.user.objectId}`], 'Load signed-in user');
+      const found = u ? (await loadProfiles()).find((p) => p.row._ev_user_value === u.systemuserid) : undefined;
+      const now = new Date();
+      if (found && needsSeenStamp(found.profile.lastSeenOn, now)) {
+        // Best effort: a failed stamp mustn't stop anyone signing in.
+        const stamped = { ...found.profile, lastSeenOn: now.toISOString() };
+        const r = await client.updateRecordAsync(DATAVERSE.profile, found.row.ev_foliumprofileid, { ev_payload: JSON.stringify(profileToSave(stamped)) });
+        if (r.success) found.profile = stamped;
+      }
+      const dir: DirectoryUser = u ?? { systemuserid: '', fullname: ctx.user.fullName ?? '', email: ctx.user.userPrincipalName ?? undefined };
+      return mergeAdvisor(dir, { ...blankProfile(dir.systemuserid), ...found?.profile, systemuserid: dir.systemuserid });
     },
     async listUsers() {
-      return (await loadProfiles()).map((p) => p.profile);
+      const profiles = await loadProfiles();
+      const ids = [...new Set(profiles.map((p) => p.row._ev_user_value).filter(Boolean))];
+      const dir = await systemUsers(ids.map((id) => `systemuserid eq ${id}`), 'Load directory details');
+      return profiles.map((p) => mergeAdvisor(dir.find((d) => d.systemuserid === p.row._ev_user_value), p.profile));
     },
     async saveUser(u) {
       const existing = (await loadProfiles()).find((p) => p.row._ev_user_value === u.systemuserid);
-      const row = { ev_name: u.fullname, ev_role: u.role, ev_payload: JSON.stringify(u) };
+      const row = { ev_name: u.fullname, ev_role: u.role, ev_payload: JSON.stringify(profileToSave(u)) };
       if (existing) unwrap(await client.updateRecordAsync(DATAVERSE.profile, existing.row.ev_foliumprofileid, row), 'Save user');
       else unwrap(await client.createRecordAsync(DATAVERSE.profile, { ...row, 'ev_user@odata.bind': `/systemusers(${u.systemuserid})` }), 'Create user');
       return u;
+    },
+    async setActive(id, active) {
+      const existing = (await loadProfiles()).find((p) => p.row._ev_user_value === id);
+      if (!existing) throw new Error('That person has no Folium profile.');
+      if (!active) {
+        for (const g of (await directory.listGroups()).filter((x) => x.memberIds.includes(id))) await directory.saveGroup({ ...g, memberIds: g.memberIds.filter((m) => m !== id) });
+      }
+      const payload = active ? existing.profile : { ...existing.profile, groupIds: [] };
+      unwrap(
+        await client.updateRecordAsync(DATAVERSE.profile, existing.row.ev_foliumprofileid, { statecode: active ? 0 : 1, statuscode: active ? 1 : 2, ev_payload: JSON.stringify(profileToSave(payload)) }),
+        active ? 'Reactivate user' : 'Deactivate user',
+      );
+    },
+    async lookupDirectory(emails) {
+      const clean = [...new Set(emails.map((e) => e.trim().toLowerCase()).filter(Boolean))];
+      return systemUsers(clean.map((e) => `internalemailaddress eq '${esc(e)}'`), 'Look up people');
     },
     async listGroups() {
       const rows = unwrap(await client.retrieveMultipleRecordsAsync<{ ev_foliumgroupid: string; ev_payload: string }>(DATAVERSE.group, {}), 'Load groups');
@@ -133,7 +161,11 @@ export function createPowerServices(): Services {
 
   // ---------------------------------------------------------------- CRM
   const contactChoices = CHOICES.contact ?? {};
-  const toContact = (row: Contact) => decodeChoices(row, contactChoices, 'contact');
+  const toContact = (row: Contact): Contact => {
+    const contact = decodeChoices(row, contactChoices, 'contact');
+    const idDocuments = readIdDocuments(row, ID_DOCUMENT_COLUMNS);
+    return idDocuments ? { ...contact, idDocuments } : contact;
+  };
 
   const crm: CrmService = {
     async getClient(contactId) {
@@ -173,7 +205,7 @@ export function createPowerServices(): Services {
       return { contact, accounts, connections };
     },
     async updateContact(contactId, changes) {
-      const { contactid: _id, fullname: _fn, ...writable } = changes;
+      const { contactid: _id, fullname: _fn, idDocuments: _ids, ...writable } = changes;
       unwrap(await client.updateRecordAsync(DATAVERSE.contact, contactId, encodeChoices(writable, contactChoices, 'contact')), 'Update contact');
       return toContact(unwrap(await client.retrieveRecordAsync<Contact>(DATAVERSE.contact, contactId), 'Reload contact'));
     },

@@ -1,3 +1,4 @@
+import { ID_SOURCE_OPTIONS } from '../../domain/idDocuments';
 import { CHOICES } from '../../services/power/config';
 
 /** Fill-from choices for the mapping editor, grouped like the Dataverse schema. */
@@ -55,12 +56,29 @@ export const SOURCE_GROUPS: { label: string; options: [string, string][] }[] = [
     ],
   },
   {
+    label: 'ID documents (from CRM, or entered once per packet)',
+    options: ID_SOURCE_OPTIONS,
+  },
+  {
     label: 'Advisor & firm',
     options: [
       ['rep.fullname', 'Advisor name'],
+      ['rep.middleInitial', 'Advisor middle initial'],
+      ['rep.title', 'Advisor title'],
       ['rep.repCode', 'Rep code'],
+      ['rep.osjNumber', 'OSJ number'],
+      ['rep.riaNumber', 'RIA number'],
       ['rep.phone', 'Advisor phone'],
-      ['rep.email', 'Advisor email'],
+      ['rep.phoneExt', 'Advisor phone extension'],
+      ['rep.mobile', 'Advisor mobile'],
+      ['rep.fax', 'Advisor fax'],
+      ['rep.email', 'Advisor email (sign-in)'],
+      ['rep.formEmail', 'Advisor email (as on forms)'],
+      ['rep.officeStreet', 'Office street and suite'],
+      ['rep.officeCity', 'Office city'],
+      ['rep.officeState', 'Office state'],
+      ['rep.officeZip', 'Office ZIP'],
+      ['rep.officeCityStateZip', 'Office city, state ZIP'],
       ['rep.branch', 'Branch'],
       ['firm.legalName', 'Firm legal name'],
       ['firm.brokerDealer', 'Broker-dealer'],

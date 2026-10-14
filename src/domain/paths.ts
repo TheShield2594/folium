@@ -1,3 +1,5 @@
+import { repComputed } from './advisor';
+import { parseIdSource, resolveIdSource } from './idDocuments';
 import type { Account, Advisor, ClientRecord, Contact, FirmProfile } from './types';
 
 /** What a field source resolves against. `account` is the account the form is about. */
@@ -62,8 +64,9 @@ export function resolvePath(path: string, scope: ResolveScope): string | undefin
   if (kind === 'static') return path.slice('static:'.length);
 
   if (kind === 'rep') {
-    const attr = path.slice('rep.'.length) as keyof Advisor;
-    return str(scope.advisor[attr]);
+    const attr = path.slice('rep.'.length);
+    const v = scope.advisor[attr as keyof Advisor];
+    return typeof v === 'object' ? repComputed(scope.advisor, attr === 'office' ? 'officeStreet' : attr) : (str(v) ?? repComputed(scope.advisor, attr));
   }
 
   if (kind === 'firm') {
@@ -81,6 +84,7 @@ export function resolvePath(path: string, scope: ResolveScope): string | undefin
     return undefined;
   }
 
+  if (path.startsWith('id.')) return resolveIdSource(path, scope.client);
   if (path.startsWith('contact.')) return str(scope.client.contact[path.slice(8)]);
   if (path.startsWith('account.')) return str((scope.account ?? scope.client.accounts[0])?.[path.slice(8)]);
 
@@ -110,6 +114,8 @@ export function describeSource(source: string): string {
   if (kind === 'rep') return 'Advisor profile';
   if (kind === 'firm') return 'Firm profile';
   if (kind === 'computed') return source.includes('today') ? 'Today’s date' : 'Combined from the contact';
+  const id = parseIdSource(source);
+  if (id) return id.who === 'spouse' ? 'Spouse’s ID documents' : 'Client’s ID documents';
   const m = CONNECTION_RE.exec(source);
   if (m) return `Connection: ${m[1]}${m[2] ? ` #${m[2]}` : ''}`;
   if (source.startsWith('account.')) return 'Account record';

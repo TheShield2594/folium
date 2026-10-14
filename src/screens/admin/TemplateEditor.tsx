@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { prettifyFieldName } from '../../domain/format';
+import { parseIdSource } from '../../domain/idDocuments';
 import { mappingWarnings, prefillForm } from '../../domain/prefill';
 import { carryForward, diffRevision, type FieldChange } from '../../domain/revisions';
 import { roleLabel } from '../../domain/signers';
@@ -293,7 +294,12 @@ export function TemplateEditor() {
                                 <TextInput aria-label={`Label for ${m.pdfField}`} value={m.label ?? ''} placeholder={prettifyFieldName(m.pdfField)} onChange={(e) => patchField(m.pdfField, { label: e.target.value || undefined })} />
                               </td>
                               <td style={{ minWidth: 220 }}>
-                                <Select aria-label={`Source for ${m.pdfField}`} value={custom ? '__custom' : m.source} onChange={(e) => patchField(m.pdfField, { source: e.target.value === '__custom' ? 'contact.' : e.target.value })}>
+                                <Select aria-label={`Source for ${m.pdfField}`} value={custom ? '__custom' : m.source} onChange={(e) => {
+                                    const source = e.target.value === '__custom' ? 'contact.' : e.target.value;
+                                    // ID dates come with their format, unless one is already set.
+                                    const idFormat = parseIdSource(source)?.field.format;
+                                    patchField(m.pdfField, { source, ...(idFormat && !m.format ? { format: idFormat } : {}) });
+                                  }}>
                                   {SOURCE_GROUPS.map((g) => (
                                     <optgroup key={g.label} label={g.label}>
                                       {g.options.map(([v, l]) => (

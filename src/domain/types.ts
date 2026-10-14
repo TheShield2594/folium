@@ -1,6 +1,9 @@
 // Core domain model for Folium. Mirrors the Dataverse tables and the
 // provider-neutral template mapping format described in the project brief.
 
+import type { DirectoryUser } from './advisor';
+import type { IdAttr } from './idDocuments';
+
 export type FormSource = 'Everence' | 'Praxis' | 'Carrier';
 
 export type FormCategory =
@@ -210,6 +213,8 @@ export interface Contact {
   ev_region?: string;
   /** Owning advisor (systemuser). */
   ownerid?: string;
+  /** ID documents, when Dynamics holds them (see ID_DOCUMENT_COLUMNS in power/config.ts). */
+  idDocuments?: Partial<Record<IdAttr, string>>;
   /** Choice columns whose stored option Folium couldn't map to a word (column → label and the value Dataverse showed). */
   unrecognisedChoices?: Record<string, { label: string; value: string }>;
   [key: string]: unknown;
@@ -236,11 +241,31 @@ export interface Connection {
 export interface Advisor {
   systemuserid: string;
   fullname: string;
+  middleName?: string;
+  /** Sign-in email (from the directory). */
   email: string;
+  /** Email as printed on forms, when it differs from the sign-in email. */
+  formEmail?: string;
   phone: string;
+  phoneExt?: string;
+  fax?: string;
+  mobile?: string;
+  office?: OfficeAddress;
   repCode: string;
+  /** Office of Supervisory Jurisdiction number. */
+  osjNumber?: string;
+  /** Registered investment adviser number. */
+  riaNumber?: string;
   branch: string;
   title: string;
+}
+
+export interface OfficeAddress {
+  line1: string;
+  suite?: string;
+  city: string;
+  state: string;
+  zip: string;
 }
 
 /** Everything the prefill engine can read for one client. */
@@ -429,6 +454,30 @@ export interface UserProfile extends Advisor {
    * missing means unknown, and nothing is checked.
    */
   licensedStates?: string[];
+  /**
+   * May change their own rep data (title, phones, office…) in Settings. Unset follows
+   * the firm (`FirmPolicy.repDataSelfEdit`). Rep, OSJ and RIA numbers are Admin-only.
+   */
+  canEditRepData?: boolean;
+  /** Who changed which rep field, and when (newest last). */
+  repDataAudit?: RepDataChange[];
+  /** Last day this person opened Folium (ISO timestamp, written at most once a day). */
+  lastSeenOn?: string;
+  /** Read-only, from the services: false when the profile is deactivated (`statecode` 1). */
+  active?: boolean;
+  /** Read-only, from the services: the `systemuser` is disabled in the directory. */
+  disabled?: boolean;
+  /** Read-only, from the services: what the directory holds, under any values set in Folium. */
+  directory?: DirectoryUser;
+}
+
+export interface RepDataChange {
+  at: string;
+  /** Name of the person who made the change. */
+  by: string;
+  field: string;
+  from?: string;
+  to?: string;
 }
 
 export interface UserGroup {
@@ -510,4 +559,8 @@ export interface FirmPolicy {
   maxAttachments?: number;
   /** Most megabytes of supporting documents on one envelope. Default 30. */
   maxAttachmentsMB?: number;
+  /** Whether people may edit their own rep data in Settings unless their profile says otherwise. Default true. */
+  repDataSelfEdit?: boolean;
+  /** Days without signing in before someone shows as dormant in Users & groups. Default 90. */
+  dormantAfterDays?: number;
 }

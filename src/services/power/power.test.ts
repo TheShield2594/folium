@@ -20,8 +20,13 @@ const settingRows: Record<string, Record<string, unknown>> = {};
 /** What the SharePoint connector answers to a file lookup, and the files it was asked to delete. */
 let fileLookup: { success: boolean; data?: { Id: string }; error?: Record<string, unknown> } = { success: true, data: { Id: 'item-1' } };
 const deletedFiles: string[] = [];
+/** `ev_foliumprofile` rows by ID, and `systemuser` rows (as Dataverse returns them). */
+const profileRows: Record<string, Record<string, unknown>> = {};
+const systemUserRows: Record<string, unknown>[] = [];
+/** The values an OData filter compares `col` to with `eq`. */
+const eqValues = (filter: string | undefined, col: string) => [...(filter ?? '').matchAll(new RegExp(`${col} eq '?([^' )]+)'?`, 'g'))].map((m) => m[1].toLowerCase());
 
-vi.mock('@microsoft/power-apps/app', () => ({ getContext: vi.fn() }));
+vi.mock('@microsoft/power-apps/app', () => ({ getContext: vi.fn(async () => ({ user: { objectId: 'aad-taylor', fullName: 'Taylor Brenneman', userPrincipalName: 'taylor@example.org' } })) }));
 vi.mock('@microsoft/power-apps/data', () => ({
   getClient: () => ({
     retrieveRecordAsync: async (_t: string, id: string) => ok({ ...rows[id] }),
@@ -30,6 +35,15 @@ vi.mock('@microsoft/power-apps/data', () => ({
       if (table === 'ev_foliumsettings') {
         const name = /ev_name eq '([^']+)'/.exec(opts?.filter ?? '')?.[1];
         return ok(Object.values(settingRows).filter((r) => !name || r.ev_name === name));
+      }
+      if (table === 'ev_foliumprofiles') return ok(Object.values(profileRows));
+      if (table === 'ev_foliumgroups') return ok([]);
+      if (table === 'systemusers') {
+        const f = opts?.filter;
+        const ids = eqValues(f, 'systemuserid');
+        const aad = eqValues(f, 'azureactivedirectoryobjectid');
+        const emails = eqValues(f, 'internalemailaddress');
+        return ok(systemUserRows.filter((r) => ids.includes(String(r.systemuserid)) || aad.includes(String(r.azureactivedirectoryobjectid)) || emails.includes(String(r.internalemailaddress).toLowerCase())));
       }
       return ok(table === 'connections' ? (connectionRows[opts?.filter?.split(' ')[0] ?? ''] ?? []) : []);
     },
@@ -51,6 +65,7 @@ vi.mock('@microsoft/power-apps/data', () => ({
     updateRecordAsync: async (table: string, id: string, data: Record<string, unknown>) => {
       updates.push({ table, id, data });
       if (settingRows[id]) return (settingRows[id] = { ...settingRows[id], ...data }), ok({});
+      if (profileRows[id]) return (profileRows[id] = { ...profileRows[id], ...data }), ok({});
       const next = { ...rows[id], ...data };
       next[`familystatuscode${FORMATTED}`] = { 1: 'Single', 2: 'Married', 3: 'Divorced', 4: 'Widowed' }[data.familystatuscode as number];
       rows[id] = next;
@@ -201,5 +216,56 @@ describe('deleting draft PDFs', () => {
     const { drafts } = createPowerServices();
     fileLookup = { success: false, error: { status: 429, message: 'Too many requests' } };
     await expect(drafts.removeFile(url)).rejects.toThrow();
+  });
+});
+
+describe('directory', () => {
+  beforeEach(() => {
+    for (const k of Object.keys(profileRows)) delete profileRows[k];
+    systemUserRows.length = 0;
+    systemUserRows.push(
+      { systemuserid: 'su-1', azureactivedirectoryobjectid: 'aad-taylor', fullname: 'Taylor Brenneman', internalemailaddress: 'taylor@example.org', address1_telephone1: '574-555-0142', title: 'Financial advisor', address1_line1: '1110 N Main St', address1_city: 'Goshen', address1_stateorprovince: 'IN', address1_postalcode: '46528', isdisabled: false },
+      { systemuserid: 'su-2', fullname: 'Riley Kauffman', internalemailaddress: 'riley@example.org', isdisabled: true },
+    );
+    profileRows['p-1'] = { ev_foliumprofileid: 'p-1', _ev_user_value: 'su-1', statecode: 0, ev_payload: JSON.stringify({ role: 'Admin', groupIds: [], repCode: 'EV4471', branch: 'Goshen', email: '', phone: '574-555-0000', title: '', lastSeenOn: '2026-01-01T00:00:00.000Z' }) };
+    profileRows['p-2'] = { ev_foliumprofileid: 'p-2', _ev_user_value: 'su-2', statecode: 1, ev_payload: JSON.stringify({ role: 'User', groupIds: [], repCode: 'EV2918', branch: 'Newton', email: '', phone: '', title: '' }) };
+  });
+
+  it('merges the profile over the systemuser and records the sign-in once a day', async () => {
+    const { directory } = createPowerServices();
+    const me = await directory.currentUser();
+    expect(me).toMatchObject({ systemuserid: 'su-1', fullname: 'Taylor Brenneman', email: 'taylor@example.org', phone: '574-555-0000', title: 'Financial advisor', repCode: 'EV4471', role: 'Admin' });
+    expect(me.office).toBeUndefined();
+    const stamps = () => updates.filter((u) => u.table === 'ev_foliumprofiles');
+    expect(stamps()).toHaveLength(1);
+    const stored = JSON.parse(String(stamps()[0].data.ev_payload));
+    expect(stored.lastSeenOn.slice(0, 10)).toBe(new Date().toISOString().slice(0, 10));
+    // Only the override is stored: the directory's title isn't copied in.
+    expect(stored.title).toBe('');
+    expect(stored.phone).toBe('574-555-0000');
+    await directory.currentUser();
+    expect(stamps()).toHaveLength(1);
+  });
+
+  it('lists every profile with its directory details, active flag and disabled account', async () => {
+    const users = await createPowerServices().directory.listUsers();
+    expect(users.map((u) => [u.fullname, u.active, u.disabled])).toEqual([
+      ['Taylor Brenneman', undefined, undefined],
+      ['Riley Kauffman', false, true],
+    ]);
+  });
+
+  it('deactivates by statecode and keeps the profile', async () => {
+    const { directory } = createPowerServices();
+    await directory.setActive('su-1', false);
+    expect(updates.at(-1)).toMatchObject({ table: 'ev_foliumprofiles', id: 'p-1', data: { statecode: 1, statuscode: 2 } });
+    await directory.setActive('su-2', true);
+    expect(updates.at(-1)).toMatchObject({ id: 'p-2', data: { statecode: 0, statuscode: 1 } });
+    await expect(directory.setActive('su-9', false)).rejects.toThrow(/no Folium profile/);
+  });
+
+  it('looks people up by sign-in email', async () => {
+    const found = await createPowerServices().directory.lookupDirectory(['RILEY@example.org', '', 'nobody@example.org']);
+    expect(found).toEqual([{ systemuserid: 'su-2', fullname: 'Riley Kauffman', email: 'riley@example.org', disabled: true }]);
   });
 });
