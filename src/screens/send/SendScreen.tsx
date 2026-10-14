@@ -4,12 +4,12 @@ import { attachmentLimits, attachmentsMB, checkAttachments, MB, outputGate, summ
 import { fillSubject, fillTokens, listForms, SUBJECT_MAX } from '../../domain/format';
 import { relatedPeople } from '../../domain/prefill';
 import { canDownload, sharingAllowed } from '../../domain/policy';
+import { consentUrl, methodSetUp } from '../../domain/docusign';
 import { expiresOnFrom, retentionDays } from '../../domain/requests';
 import { accessCodeWarnings, assignSigners, envelopeSigners, generateAccessCode, recordedSigners, roleLabel, rolesForPacket, validateSigners } from '../../domain/signers';
 import type { SignatureRequest, SignerAssignment, VerificationMethod } from '../../domain/types';
 import { useServices } from '../../services';
 import { classifyError, isConsentRequired } from '../../services/errors';
-import { DOCUSIGN } from '../../services/power/config';
 import { Toolbar } from '../../shell/Shell';
 import { attachmentBytes, audit, fillPacket, packetAsOnePdf, releaseEnvelope, saveDraft, unreachableAttachments, type SendSetup } from '../../state/actions';
 import { useActingFor, useApp, useScope, type SendState } from '../../state/store';
@@ -31,6 +31,7 @@ export function SendScreen() {
   const me = useApp((s) => s.me);
   const firm = useApp((s) => s.firm);
   const policy = useApp((s) => s.policy);
+  const docuSign = useApp((s) => s.docuSign);
   const requests = useApp((s) => s.requests);
   const refreshRequests = useApp((s) => s.refreshRequests);
   const markUsed = useApp((s) => s.markUsed);
@@ -141,6 +142,7 @@ export function SendScreen() {
     ...(sum.blocking ? [`${sum.blocking} pre-send ${sum.blocking === 1 ? 'check needs' : 'checks need'} attention`] : []),
     ...attachmentChecks.map((c) => `${c.title}. ${c.detail}`),
     ...problems.map((p) => p.message),
+    ...ordered.filter((s) => !methodSetUp(docuSign, s.auth)).map((s) => `${AUTH_LABEL[s.auth]} isn’t set up in DocuSign: choose another way to verify ${roleLabel(s.role)}`),
     ...(!subject.trim() ? ['Add an email subject'] : []),
     ...unreachable.map((a) => `Re-attach ${a.name}`),
   ];
@@ -237,7 +239,8 @@ export function SendScreen() {
   }
 
   function consentToast() {
-    if (DOCUSIGN.consentUrl) toast.ok('DocuSign needs your permission for Folium before it can send. Grant it, then send again.', { label: 'Open DocuSign', onClick: () => window.open(DOCUSIGN.consentUrl, '_blank', 'noopener') });
+    const url = consentUrl(docuSign);
+    if (url) toast.ok('DocuSign needs your permission for Folium before it can send. Grant it, then send again.', { label: 'Open DocuSign', onClick: () => window.open(url, '_blank', 'noopener') });
     else toast.error('DocuSign needs permission for Folium before it can send. Ask an administrator to grant consent for the Folium DocuSign app.');
   }
 
@@ -382,8 +385,9 @@ export function SendScreen() {
                       <Field label="Verify with" htmlFor={`auth-${i}`}>
                         <Select id={`auth-${i}`} value={s.auth} onChange={(e) => update(i, { auth: e.target.value as VerificationMethod })}>
                           {(['email', 'sms', 'phone', 'kba'] as const).map((a) => (
-                            <option key={a} value={a}>
+                            <option key={a} value={a} disabled={!methodSetUp(docuSign, a) && a !== s.auth}>
                               {AUTH_LABEL[a]}
+                              {methodSetUp(docuSign, a) ? '' : ' (not set up)'}
                             </option>
                           ))}
                         </Select>

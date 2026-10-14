@@ -2,11 +2,11 @@
   "swagger": "2.0",
   "info": {
     "title": "Folium DocuSign",
-    "description": "The DocuSign eSignature REST v2.1 operations Folium uses: create an envelope from Folium's own PDFs with page + x/y tabs, read status, void/resend, correct recipients, open in-session signing, download the signed PDF and certificate.",
+    "description": "The DocuSign eSignature REST v2.1 operations Folium uses, on the account named in Folium's Administration › Settings: check the account, create an envelope from Folium's own PDFs with page + x/y tabs, read status, void/resend, correct recipients, open in-session signing, download the signed PDF and certificate.",
     "version": "1.0"
   },
   "host": "demo.docusign.net",
-  "basePath": "/restapi/v2.1/accounts/{accountId}",
+  "basePath": "/restapi/v2.1",
   "schemes": ["https"],
   "consumes": ["application/json"],
   "produces": ["application/json"],
@@ -21,11 +21,22 @@
   },
   "security": [{ "oauth2_auth": ["signature"] }],
   "parameters": {
-    "accountId": { "name": "accountId", "in": "path", "required": true, "type": "string", "x-ms-visibility": "internal", "description": "DocuSign API account ID" },
+    "accountId": { "name": "accountId", "in": "path", "required": true, "type": "string", "description": "DocuSign API Account ID (GUID). Folium passes it from Administration › Settings › DocuSign." },
     "envelopeId": { "name": "envelopeId", "in": "path", "required": true, "type": "string" }
   },
   "paths": {
-    "/envelopes": {
+    "/accounts/{accountId}": {
+      "get": {
+        "operationId": "GetAccount",
+        "summary": "Check the connection reaches the account",
+        "description": "Folium's Test connection and Check my DocuSign sign-in. Fails when the signed-in DocuSign user isn't in the account.",
+        "parameters": [{ "$ref": "#/parameters/accountId" }],
+        "responses": {
+          "200": { "description": "OK", "schema": { "type": "object", "properties": { "accountName": { "type": "string" }, "accountIdGuid": { "type": "string" } } } }
+        }
+      }
+    },
+    "/accounts/{accountId}/envelopes": {
       "post": {
         "operationId": "CreateEnvelope",
         "summary": "Create and send an envelope",
@@ -38,7 +49,7 @@
         }
       }
     },
-    "/envelopes/{envelopeId}": {
+    "/accounts/{accountId}/envelopes/{envelopeId}": {
       "get": {
         "operationId": "GetEnvelope",
         "summary": "Get envelope status",
@@ -76,7 +87,7 @@
         "responses": { "200": { "description": "OK" } }
       }
     },
-    "/envelopes/{envelopeId}/recipients": {
+    "/accounts/{accountId}/envelopes/{envelopeId}/recipients": {
       "put": {
         "operationId": "UpdateRecipients",
         "summary": "Correct recipient details",
@@ -89,7 +100,7 @@
         "responses": { "200": { "description": "OK" } }
       }
     },
-    "/envelopes/{envelopeId}/views/recipient": {
+    "/accounts/{accountId}/envelopes/{envelopeId}/views/recipient": {
       "post": {
         "operationId": "CreateRecipientView",
         "summary": "Get a short-lived link for an in-session (embedded) signer",
@@ -116,7 +127,7 @@
         "responses": { "201": { "description": "Created", "schema": { "type": "object", "properties": { "url": { "type": "string" } } } } }
       }
     },
-    "/envelopes/{envelopeId}/documents/{documentId}": {
+    "/accounts/{accountId}/envelopes/{envelopeId}/documents/{documentId}": {
       "get": {
         "operationId": "GetDocument",
         "summary": "Download a document (use 'combined' or 'certificate')",

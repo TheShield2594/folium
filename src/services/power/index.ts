@@ -5,12 +5,13 @@ import { fromSystemUser, mergeAdvisor, profileToSave, SYSTEMUSER_COLUMNS, type D
 import { readIdDocuments } from '../../domain/idDocuments';
 import { needsSeenStamp } from '../../domain/users';
 import { withPolicyDefaults } from '../../domain/policy';
+import { docuSignReady, withDocuSignDefaults, type DocuSignSetup } from '../../domain/docusign';
 import { mapDocuSignStatus } from '../../domain/requests';
 import { buildEnvelopeDefinition, ROLE_SEPARATOR } from '../docusign/tabs';
 import { classifyError, FoliumError } from '../errors';
 import type { CrmService, DirectoryService, DraftStore, IncomingFile, PacketStore, RequestStore, Services, SigningProvider, TemplateLibrary } from '../types';
 import { decodeChoices, encodeChoices } from './choices';
-import { CHOICES, CONNECTORS, DATAVERSE, DOCUSIGN, ID_DOCUMENT_COLUMNS, SHAREPOINT, SIGNATURE_STATUS_OPTIONS } from './config';
+import { CHOICES, CONNECTORS, DATAVERSE, ID_DOCUMENT_COLUMNS, SHAREPOINT, SIGNATURE_STATUS_OPTIONS } from './config';
 import { dataSourcesInfo } from './dataSourcesInfo';
 
 // Power Platform implementations. Dataverse tables go through the SDK's data client;
@@ -64,7 +65,7 @@ export function createPowerServices(): Services {
   }
 
   // `ev_foliumsetting` holds one row per kind of setting, named by `ev_name`: "Firm"
-  // (the firm profile) and "Policy" (firm-wide rules).
+  // (the firm profile), "Policy" (firm-wide rules) and "DocuSign" (the account).
   type SettingRow = { ev_foliumsettingid: string; ev_payload?: string };
   async function settingRow(name: string, what: string): Promise<SettingRow | undefined> {
     const rows = unwrap(await client.retrieveMultipleRecordsAsync<SettingRow>(DATAVERSE.settings, { filter: `ev_name eq '${name}'`, top: 1 }), what);
@@ -157,7 +158,31 @@ export function createPowerServices(): Services {
       await writeSetting('Policy', p, 'Save settings');
       return p;
     },
+    async getDocuSign() {
+      return withDocuSignDefaults(await readSetting<Partial<DocuSignSetup>>('DocuSign', 'Load DocuSign settings'));
+    },
+    async saveDocuSign(d) {
+      await writeSetting('DocuSign', d, 'Save DocuSign settings');
+      docuSignSetup = undefined;
+      return d;
+    },
   };
+
+  // Read once per session (and again after an admin saves it), not before every call.
+  let docuSignSetup: Promise<DocuSignSetup> | undefined;
+  async function docuSign(op: string): Promise<DocuSignSetup> {
+    const s = await (docuSignSetup ??= directory.getDocuSign().catch((e) => {
+      docuSignSetup = undefined;
+      throw e;
+    }));
+    if (!docuSignReady(s)) throw new FoliumError('unknown', op, 'DocuSign isn’t set up yet. An administrator adds the DocuSign account in Administration › Settings.');
+    return s;
+  }
+  /** A DocuSign operation, on the firm's account, through the signed-in person's own connection. */
+  async function ds<T>(operationName: string, parameters: Record<string, unknown>, what: string, setup?: DocuSignSetup): Promise<T> {
+    const { accountId } = setup ?? (await docuSign(what));
+    return connector<T>(CONNECTORS.docuSign, operationName, { accountId, ...parameters }, what);
+  }
 
   // ---------------------------------------------------------------- CRM
   const contactChoices = CHOICES.contact ?? {};
@@ -420,18 +445,24 @@ export function createPowerServices(): Services {
   // ---------------------------------------------------------------- DocuSign (custom connector, see connectors/)
   const signing: SigningProvider = {
     name: 'DocuSign',
+    async checkConnection(setup) {
+      const s = setup ?? (await docuSign('Check DocuSign'));
+      if (!docuSignReady(s)) throw new FoliumError('unknown', 'Check DocuSign', 'Enter the API Account ID first.');
+      const a = await ds<{ accountName?: string; accountIdGuid?: string }>('GetAccount', {}, 'Check DocuSign', s);
+      return { accountId: a.accountIdGuid ?? s.accountId!, accountName: a.accountName ?? 'DocuSign account' };
+    },
     async create(req) {
       // Created as a DocuSign draft: nothing reaches the signers until `release`.
-      const env = buildEnvelopeDefinition(req, DOCUSIGN.idv, 'created');
-      const res = await connector<{ envelopeId: string }>(CONNECTORS.docuSign, 'CreateEnvelope', { body: env }, 'Create envelope');
+      const setup = await docuSign('Create envelope');
+      const env = buildEnvelopeDefinition(req, setup.idv, 'created');
+      const res = await ds<{ envelopeId: string }>('CreateEnvelope', { body: env }, 'Create envelope', setup);
       return { envelopeId: res.envelopeId };
     },
     async release(envelopeId) {
-      await connector(CONNECTORS.docuSign, 'UpdateEnvelope', { envelopeId, body: { status: 'sent' } }, 'Send envelope');
+      await ds('UpdateEnvelope', { envelopeId, body: { status: 'sent' } }, 'Send envelope');
     },
     async getStatus(envelopeId) {
-      const e = await connector<{ status: string; voidedReason?: string; expireDateTime?: string; deliveredDateTime?: string; completedDateTime?: string; recipients?: { signers: { roleName: string; email: string; status: string; signedDateTime?: string }[] } }>(
-        CONNECTORS.docuSign,
+      const e = await ds<{ status: string; voidedReason?: string; expireDateTime?: string; deliveredDateTime?: string; completedDateTime?: string; recipients?: { signers: { roleName: string; email: string; status: string; signedDateTime?: string }[] } }>(
         'GetEnvelope',
         { envelopeId, include: 'recipients' },
         'Envelope status',
@@ -450,23 +481,22 @@ export function createPowerServices(): Services {
     },
     async downloadCompleted(envelopeId) {
       const toBytes = (x: string | Uint8Array) => (typeof x === 'string' ? Uint8Array.from(atob(x), (c) => c.charCodeAt(0)) : x);
-      const pdf = await connector<string | Uint8Array>(CONNECTORS.docuSign, 'GetDocument', { envelopeId, documentId: 'combined' }, 'Download signed PDF');
-      const certificate = await connector<string | Uint8Array>(CONNECTORS.docuSign, 'GetDocument', { envelopeId, documentId: 'certificate' }, 'Download certificate');
+      const pdf = await ds<string | Uint8Array>('GetDocument', { envelopeId, documentId: 'combined' }, 'Download signed PDF');
+      const certificate = await ds<string | Uint8Array>('GetDocument', { envelopeId, documentId: 'certificate' }, 'Download certificate');
       return { pdf: toBytes(pdf), certificate: toBytes(certificate) };
     },
     async void(envelopeId, reason) {
-      await connector(CONNECTORS.docuSign, 'UpdateEnvelope', { envelopeId, body: { status: 'voided', voidedReason: reason } }, 'Void envelope');
+      await ds('UpdateEnvelope', { envelopeId, body: { status: 'voided', voidedReason: reason } }, 'Void envelope');
     },
     async resend(envelopeId) {
-      await connector(CONNECTORS.docuSign, 'UpdateEnvelope', { envelopeId, resend_envelope: true, body: {} }, 'Resend envelope');
+      await ds('UpdateEnvelope', { envelopeId, resend_envelope: true, body: {} }, 'Resend envelope');
     },
     async signingUrl(envelopeId, role, returnUrl) {
-      const e = await connector<{ recipients: { signers: { recipientId: string; roleName: string; name: string; email: string; clientUserId?: string }[] } }>(CONNECTORS.docuSign, 'GetEnvelope', { envelopeId, include: 'recipients' }, 'Envelope recipients');
+      const e = await ds<{ recipients: { signers: { recipientId: string; roleName: string; name: string; email: string; clientUserId?: string }[] } }>('GetEnvelope', { envelopeId, include: 'recipients' }, 'Envelope recipients');
       const r = e.recipients.signers.find((s) => s.roleName.split(ROLE_SEPARATOR).includes(role));
       if (!r) throw new Error(`No ${role} on this envelope`);
       if (!r.clientUserId) throw new Error('This signer was sent by email, not to sign in session.');
-      const view = await connector<{ url: string }>(
-        CONNECTORS.docuSign,
+      const view = await ds<{ url: string }>(
         'CreateRecipientView',
         { envelopeId, body: { userName: r.name, email: r.email, recipientId: r.recipientId, clientUserId: r.clientUserId, returnUrl, authenticationMethod: 'None' } },
         'Open signing',
@@ -475,10 +505,10 @@ export function createPowerServices(): Services {
     },
     // Only the fields being corrected are sent, so DocuSign keeps the access code and clientUserId.
     async correctRecipient(envelopeId, role, change) {
-      const e = await connector<{ recipients: { signers: { recipientId: string; roleName: string }[] } }>(CONNECTORS.docuSign, 'GetEnvelope', { envelopeId, include: 'recipients' }, 'Envelope recipients');
+      const e = await ds<{ recipients: { signers: { recipientId: string; roleName: string }[] } }>('GetEnvelope', { envelopeId, include: 'recipients' }, 'Envelope recipients');
       const r = e.recipients.signers.find((s) => s.roleName.split(ROLE_SEPARATOR).includes(role));
       if (!r) throw new Error(`No ${role} on this envelope`);
-      await connector(CONNECTORS.docuSign, 'UpdateRecipients', { envelopeId, resend_envelope: true, body: { signers: [{ recipientId: r.recipientId, ...change }] } }, 'Correct recipient');
+      await ds('UpdateRecipients', { envelopeId, resend_envelope: true, body: { signers: [{ recipientId: r.recipientId, ...change }] } }, 'Correct recipient');
     },
   };
 

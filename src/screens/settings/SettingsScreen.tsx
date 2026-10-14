@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { FoliumAppIcon } from '../../brand/FoliumMark';
 import { withRepAudit } from '../../domain/advisor';
+import { consentUrl, docuSignReady, DOCUSIGN_ENVIRONMENTS } from '../../domain/docusign';
 import type { UserProfile, VerificationMethod } from '../../domain/types';
 import { useServices } from '../../services';
+import { classifyError, isConsentRequired } from '../../services/errors';
 import { resetDemo, setDemoUser } from '../../services/demo';
 import { Toolbar } from '../../shell/Shell';
 import { useApp, type Theme } from '../../state/store';
@@ -121,6 +123,8 @@ export function SettingsScreen() {
             <StatesPicker label="Licensed in" emptyLabel="Not set" value={p.licensedStates ?? []} onChange={(v) => set({ licensedStates: v.length ? v : undefined })} />
           </section>
 
+          <DocuSignConnection />
+
           <section className="card card-pad stack-4">
             <h2 className="t-title3">Appearance</h2>
             <Segmented<Theme>
@@ -215,5 +219,69 @@ export function SettingsScreen() {
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * The person's own DocuSign sign-in. Power Apps holds it as their connection to Folium's
+ * DocuSign connector (asked for the first time they open Folium); this checks that it
+ * reaches the firm's account.
+ */
+function DocuSignConnection() {
+  const services = useServices();
+  const setup = useApp((s) => s.docuSign);
+  const [check, setCheck] = useState<{ busy?: boolean; ok?: string; error?: string; consent?: boolean }>({});
+  const consent = consentUrl(setup);
+  const ready = docuSignReady(setup);
+
+  async function test() {
+    setCheck({ busy: true });
+    try {
+      const a = await services.signing.checkConnection();
+      setCheck({ ok: `You’re signed in to DocuSign and can send from ${a.accountName}.` });
+    } catch (e) {
+      if (isConsentRequired(e)) setCheck({ consent: true, error: 'DocuSign needs your permission for Folium first.' });
+      else if (classifyError(e) === 'auth')
+        setCheck({ error: 'Your DocuSign sign-in didn’t work, or that DocuSign login isn’t a user in the firm’s account. Fix it in Power Apps › Connections › Folium DocuSign (Edit, then sign in with your work DocuSign login), then reload Folium.' });
+      else setCheck({ error: e instanceof Error ? e.message : 'DocuSign didn’t answer.' });
+    }
+  }
+
+  return (
+    <section className="card card-pad stack-4" aria-labelledby="dsu-h">
+      <div className="row">
+        <h2 id="dsu-h" className="t-title3 grow">DocuSign</h2>
+        {!ready && <Badge tone="warn">Not set up</Badge>}
+        {services.mode === 'demo' && <Badge tone="info">Demo</Badge>}
+      </div>
+      <p className="t-footnote c3">
+        {ready
+          ? `Envelopes you send come from your own DocuSign login (${DOCUSIGN_ENVIRONMENTS[setup.environment].label.toLowerCase()}). Power Apps asked you to sign in to DocuSign the first time you opened Folium. To use a different DocuSign login, edit the Folium DocuSign connection in Power Apps › Connections.`
+          : 'An administrator hasn’t added the firm’s DocuSign account yet (Administration › Settings › DocuSign). Until then nothing can be sent for signature.'}
+      </p>
+      {ready && (
+        <div className="row" style={{ flexWrap: 'wrap' }}>
+          <Button onClick={test} busy={check.busy}>
+            Check my DocuSign sign-in
+          </Button>
+          {check.consent && consent && (
+            <Button variant="tinted" onClick={() => window.open(consent, '_blank', 'noopener')}>
+              Give Folium permission
+            </Button>
+          )}
+        </div>
+      )}
+      {check.ok && (
+        <p className="t-footnote c-accent" role="status">
+          {check.ok}
+        </p>
+      )}
+      {check.error && (
+        <p className="t-footnote c-danger" role="alert">
+          {check.error}
+          {check.consent && !consent ? ' Ask an administrator to grant consent for the Folium DocuSign app.' : check.consent ? ' Grant it, then check again.' : ''}
+        </p>
+      )}
+    </section>
   );
 }

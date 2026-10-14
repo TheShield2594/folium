@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { DEFAULT_ATTACHMENT_LIMITS } from '../../domain/checks';
+import { consentUrl, DEFAULT_REDIRECT_URL, docuSignProblems, DOCUSIGN_ENVIRONMENTS, withDocuSignDefaults, type DocuSignEnvironment, type DocuSignSetup } from '../../domain/docusign';
 import { RETENTION_OPTIONS, retentionDays } from '../../domain/requests';
 import { dormantDays } from '../../domain/users';
 import type { FirmPolicy, PdfDownloadPolicy, RepDataVisibility, SharingPolicy } from '../../domain/types';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
 import { useApp } from '../../state/store';
-import { Button, Field, Select, SwitchRow, TextInput, toast } from '../../ui/controls';
+import { Badge, Button, Field, Select, SwitchRow, TextInput, toast } from '../../ui/controls';
 
 const SHARING: Record<SharingPolicy, { label: string; effect: string }> = {
   off: { label: 'Off', effect: 'Nobody can share a draft. Drafts already shared stay with those people until they’re sent, deleted or expire.' },
@@ -34,19 +35,30 @@ const clampLimit = (raw: string, max: number) => {
 /** Firm-wide rules, saved in their own settings row ("Policy"), shared by every firm profile. */
 export function AdminSettings() {
   const policy = useApp((s) => s.policy);
+  const docuSign = useApp((s) => s.docuSign);
   const reloadDirectory = useApp((s) => s.reloadDirectory);
   const services = useServices();
   const [p, setP] = useState<FirmPolicy>(policy);
+  const [d, setD] = useState<DocuSignSetup>(docuSign);
   const [busy, setBusy] = useState(false);
   useEffect(() => setP(policy), [policy]);
-  const dirty = JSON.stringify(p) !== JSON.stringify(policy);
+  useEffect(() => setD(docuSign), [docuSign]);
+  const policyDirty = JSON.stringify(p) !== JSON.stringify(policy);
+  const docuSignDirty = JSON.stringify(withDocuSignDefaults(d)) !== JSON.stringify(withDocuSignDefaults(docuSign));
+  const problems = docuSignProblems(d);
+  const dirty = policyDirty || docuSignDirty;
   const set = (patch: Partial<FirmPolicy>) => setP({ ...p, ...patch });
   const keep = retentionDays(p);
 
   async function save() {
+    if (Object.keys(problems).length) {
+      toast.error('Fix the DocuSign settings marked below first.');
+      return;
+    }
     setBusy(true);
     try {
-      await services.directory.savePolicy(p);
+      if (policyDirty) await services.directory.savePolicy(p);
+      if (docuSignDirty) await services.directory.saveDocuSign(withDocuSignDefaults(d));
       await reloadDirectory();
       toast.ok('Settings saved');
     } catch (e) {
@@ -156,9 +168,110 @@ export function AdminSettings() {
             />
           </div>
 
+          <DocuSignCard value={d} onChange={setD} problems={problems} />
+
           <p className="t-footnote c3">Folium never collects device location: nothing in the forms workflow needs it.</p>
         </div>
       </div>
     </>
+  );
+}
+
+/** Blank input → undefined, so an emptied field saves as "not set". */
+const typed = (v: string) => v.trim() || undefined;
+
+/**
+ * The firm's DocuSign account. The integration key's secret isn't here: it's in the custom
+ * connector. Each person signs in to DocuSign with their own login the first time they
+ * open Folium, and sends as themselves.
+ */
+function DocuSignCard({ value: d, onChange, problems }: { value: DocuSignSetup; onChange: (d: DocuSignSetup) => void; problems: ReturnType<typeof docuSignProblems> }) {
+  const services = useServices();
+  const [check, setCheck] = useState<{ busy?: boolean; ok?: string; error?: string }>({});
+  const set = (patch: Partial<DocuSignSetup>) => {
+    onChange({ ...d, ...patch });
+    setCheck({});
+  };
+  const setIdv = (k: keyof DocuSignSetup['idv'], v: string) => set({ idv: { ...d.idv, [k]: typed(v) } });
+  const env = DOCUSIGN_ENVIRONMENTS[d.environment];
+  const consent = consentUrl(d);
+
+  async function test() {
+    setCheck({ busy: true });
+    try {
+      const a = await services.signing.checkConnection(d);
+      setCheck({ ok: `Connected to ${a.accountName}. Your DocuSign sign-in can send from this account.` });
+    } catch (e) {
+      setCheck({ error: e instanceof Error ? e.message : 'DocuSign didn’t answer.' });
+    }
+  }
+
+  return (
+    <section className="card card-pad stack-4" aria-labelledby="ds-h">
+      <div className="row">
+        <h2 id="ds-h" className="t-title3 grow">DocuSign</h2>
+        {d.accountId && !problems.accountId ? <Badge tone="accent">Set up</Badge> : <Badge tone="warn">Not set up</Badge>}
+      </div>
+      <p className="t-footnote c3">
+        Envelopes go out from each person’s own DocuSign login. The first time someone opens Folium, Power Apps asks them to sign in to DocuSign; their login must be a user in this account. The integration key’s secret stays in the custom connector and never comes here.
+      </p>
+      <div className="grid-2">
+        <Field label="Environment" htmlFor="ds-env" help={`Sign-in at ${env.authHost}. The connector’s host must be ${env.apiHost}.`}>
+          <Select id="ds-env" value={d.environment} onChange={(e) => set({ environment: e.target.value as DocuSignEnvironment })}>
+            {(Object.keys(DOCUSIGN_ENVIRONMENTS) as DocuSignEnvironment[]).map((k) => (
+              <option key={k} value={k}>
+                {DOCUSIGN_ENVIRONMENTS[k].label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="API Account ID" htmlFor="ds-acct" error={problems.accountId} help={problems.accountId ? undefined : 'DocuSign Admin › Apps and Keys › My Account Information.'}>
+          <TextInput id="ds-acct" value={d.accountId ?? ''} placeholder="1a2b3c4d-…" spellCheck={false} autoComplete="off" onChange={(e) => set({ accountId: typed(e.target.value) })} />
+        </Field>
+        <Field label="Integration key" htmlFor="ds-key" optional error={problems.integrationKey} help={problems.integrationKey ? undefined : 'The Folium app’s key from Apps and Keys. Lets Folium offer the consent link when DocuSign asks for it.'}>
+          <TextInput id="ds-key" value={d.integrationKey ?? ''} placeholder="1a2b3c4d-…" spellCheck={false} autoComplete="off" onChange={(e) => set({ integrationKey: typed(e.target.value) })} />
+        </Field>
+        <Field label="Connector redirect URL" htmlFor="ds-redir" optional error={problems.redirectUrl} help={problems.redirectUrl ? undefined : 'From the custom connector’s Security tab. Add it to the DocuSign app’s redirect URIs too.'}>
+          <TextInput id="ds-redir" type="url" value={d.redirectUrl ?? ''} placeholder={DEFAULT_REDIRECT_URL} spellCheck={false} onChange={(e) => set({ redirectUrl: typed(e.target.value) })} />
+        </Field>
+      </div>
+
+      <div className="stack-3">
+        <h3 className="t-headline">Identity verification</h3>
+        <p className="t-footnote c3">Workflow IDs from DocuSign Admin › Identity Verification. A method left blank can’t be chosen on the Send screen: Folium won’t send with weaker verification than the advisor picked. Email needs no workflow.</p>
+        <div className="grid-2">
+          <Field label="SMS code" htmlFor="ds-sms" optional error={problems.sms}>
+            <TextInput id="ds-sms" value={d.idv.sms ?? ''} placeholder="Workflow ID" spellCheck={false} onChange={(e) => setIdv('sms', e.target.value)} />
+          </Field>
+          <Field label="Phone call" htmlFor="ds-phone" optional error={problems.phone}>
+            <TextInput id="ds-phone" value={d.idv.phone ?? ''} placeholder="Workflow ID" spellCheck={false} onChange={(e) => setIdv('phone', e.target.value)} />
+          </Field>
+          <Field label="ID questions (KBA)" htmlFor="ds-kba" optional error={problems.kba}>
+            <TextInput id="ds-kba" value={d.idv.kba ?? ''} placeholder="Workflow ID" spellCheck={false} onChange={(e) => setIdv('kba', e.target.value)} />
+          </Field>
+        </div>
+      </div>
+
+      <div className="row" style={{ flexWrap: 'wrap' }}>
+        <Button onClick={test} busy={check.busy} disabled={!d.accountId || !!problems.accountId}>
+          Test connection
+        </Button>
+        {consent && (
+          <Button variant="plain" onClick={() => window.open(consent, '_blank', 'noopener')}>
+            Open the consent page
+          </Button>
+        )}
+      </div>
+      {check.ok && (
+        <p className="t-footnote c-accent" role="status">
+          {check.ok}
+        </p>
+      )}
+      {check.error && (
+        <p className="t-footnote c-danger" role="alert">
+          {check.error}
+        </p>
+      )}
+    </section>
   );
 }

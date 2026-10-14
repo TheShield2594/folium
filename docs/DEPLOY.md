@@ -47,20 +47,45 @@ export { dataSourcesInfo } from '../../../.power/schemas/appschemas/dataSourcesI
 
 Check the names in `src/services/power/config.ts` against what `pac` generated (`CONNECTORS.sharePoint`, `CONNECTORS.docuSign`, table names, the SharePoint site URLs).
 
-## 4. DocuSign custom connector
+## 4. DocuSign
 
-Import `connectors/folium-docusign.swagger.json` as a custom connector (Power Apps › Custom connectors › Import an OpenAPI file):
+Every advisor sends from **their own DocuSign login**. An administrator names the firm's DocuSign account once in Folium; each person then signs in to DocuSign the first time they open Folium (Power Apps asks for it, because the connector uses the OAuth authorization code grant and each person gets their own connection). Do it in the developer sandbox first, then repeat for production.
 
-1. Host: `www.docusign.net` for production or `demo.docusign.net` for the developer sandbox. Base path `/restapi/v2.1/accounts/{accountId}`; set the account ID as a policy or connection parameter.
-2. Security: OAuth 2.0, DocuSign authorization code grant (client ID/secret from DocuSign Admin › Apps and Keys; scope `signature`). Add the connector's redirect URL to the DocuSign app.
-3. Operations used by Folium: `CreateEnvelope` (as a draft, `status: created`), `GetEnvelope`, `UpdateEnvelope` (send the draft / void / resend), `UpdateRecipients`, `CreateRecipientView` (in-session signing), `GetDocument` (`combined`, `certificate`).
-4. In DocuSign Admin › Identity Verification, note the workflow IDs for **SMS**, **Phone authentication** and **ID Check (KBA)** and put them in `DOCUSIGN.idv` in `config.ts`. A method whose ID is blank can't be sent (Folium says so instead of sending with weaker verification).
-5. In-session signing needs embedded signing on the DocuSign plan. DocuSign sends the signer back to Folium's `#/signing-return` route with `event=…`; that URL is built from where the app runs, so check it once the hosting decision (#3) is made.
-6. Optional: set `DOCUSIGN.consentUrl` to the DocuSign consent link for the Folium app, so a `consent_required` answer offers it to the advisor instead of a generic error.
-7. Size limits: Folium caps supporting documents at 10 per envelope and 30 MB in total by default (Administration › Settings › Envelopes), and shows the envelope's size on the Send screen. The bytes are base64-encoded into one `CreateEnvelope` request, about a third larger than the files. Before relying on 30 MB, confirm DocuSign's per-document and per-envelope limits and the custom connector's request size limit for Everence's plan, and lower the firm limit if either is smaller.
-8. One DocuSign account. Folium uses a single connection (`CONNECTORS.docuSign`), whose account ID is fixed in the connector. If Everence ever needs a second account (Laser App lets a user pick between two), add a second connection and choose it by group behind the same `SigningProvider`; no screen changes are needed. Ask whether anyone needs one before building it.
+### 4a. In DocuSign (DocuSign Admin)
 
-Access codes need no setup. Folium sends the code with the envelope and saves only that one was set (`accessCodeSet`), never the code.
+1. **Apps and Keys › Add App and Integration Key.** Name it *Folium*. Choose **Authorization Code Grant**, add a secret key and copy it now (it's shown once). Note the **Integration Key**.
+2. Note **My Account Information › API Account ID** (a GUID, not the short account number) and, for production, the **Account Base URI** (e.g. `https://na3.docusign.net`).
+3. **Users.** Every advisor and assistant who sends needs a DocuSign user in this account, with the same email as their work sign-in. Someone whose DocuSign login isn't in the account gets an error in Folium, not a send from somewhere else.
+4. **Identity Verification.** Note the workflow IDs for **SMS**, **Phone authentication** and **ID Check (KBA)**. A method left blank can't be chosen on the Send screen.
+5. In-session signing needs embedded signing on the DocuSign plan.
+
+### 4b. The custom connector (Power Apps › Custom connectors › Import an OpenAPI file)
+
+1. Import `connectors/folium-docusign.swagger.json`. **Host:** `demo.docusign.net` for the sandbox, or the host of the Account Base URI for production (`na3.docusign.net`, not `www.docusign.net` unless that's your base URI). Base path `/restapi/v2.1`. Folium passes the account ID on every call from its settings, so nothing account-specific goes in the connector.
+2. **Security:** OAuth 2.0, *Generic OAuth 2*. Client ID = the integration key, client secret = the secret key, scope `signature`.
+   - Sandbox: authorization URL `https://account-d.docusign.com/oauth/auth`, token and refresh URL `https://account-d.docusign.com/oauth/token`.
+   - Production: the same on `account.docusign.com`.
+3. Save the connector, then copy its **Redirect URL** from the Security tab and add it to the Folium app's **Redirect URIs** in DocuSign Apps and Keys.
+4. **Test:** create a connection (you'll sign in to DocuSign) and run `GetAccount` with the API Account ID. A 200 with your account's name means it works.
+5. Don't share the connection. Each person makes their own the first time they open Folium, so envelopes and the audit trail show who really sent them.
+6. Operations used by Folium: `GetAccount` (connection check), `CreateEnvelope` (as a draft, `status: created`), `GetEnvelope`, `UpdateEnvelope` (send the draft / void / resend), `UpdateRecipients`, `CreateRecipientView` (in-session signing), `GetDocument` (`combined`, `certificate`).
+
+### 4c. In Folium (Administration › Settings › DocuSign)
+
+1. **Environment:** Developer sandbox or Production (it decides where the consent link points; the connector's host must match).
+2. **API Account ID:** from 4a.2.
+3. **Integration key** and **Connector redirect URL** (optional): with these, an advisor whose DocuSign answers `consent_required` is offered the consent page instead of an error. Admins can also open it from here to grant consent for themselves.
+4. **Identity verification:** the SMS, Phone and KBA workflow IDs from 4a.4.
+5. **Test connection**, then **Save**. People pick up the change the next time they open Folium. Each person can check their own sign-in in **Settings › DocuSign › Check my DocuSign sign-in**; if it's the wrong DocuSign login, they edit the *Folium DocuSign* connection in Power Apps › Connections.
+
+Moving to production: import (or update) the connector with the production host and OAuth URLs, have people reconnect, then switch the environment and account ID in Folium. No rebuild.
+
+### 4d. Notes
+
+- **Return URL.** DocuSign sends an in-session signer back to Folium's `#/signing-return` route with `event=…`; that URL is built from where the app runs, so check it once the hosting decision (#3) is made.
+- **Size limits.** Folium caps supporting documents at 10 per envelope and 30 MB in total by default (Administration › Settings › Envelopes), and shows the envelope's size on the Send screen. The bytes are base64-encoded into one `CreateEnvelope` request, about a third larger than the files. Before relying on 30 MB, confirm DocuSign's per-document and per-envelope limits and the custom connector's request size limit for Everence's plan, and lower the firm limit if either is smaller.
+- **One DocuSign account.** If Everence ever needs a second account (Laser App lets a user pick between two), add a second account to the DocuSign setting and choose it by group behind the same `SigningProvider`. Ask whether anyone needs one before building it.
+- **Access codes** need no setup. Folium sends the code with the envelope and saves only that one was set (`accessCodeSet`), never the code.
 
 This answers spike 2: envelopes are created from Folium's own PDF bytes with tabs placed by page + x/y, so the standard DocuSign connector isn't needed.
 

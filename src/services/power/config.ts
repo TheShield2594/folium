@@ -39,16 +39,9 @@ export const SHAREPOINT = {
   attachmentsFolder: 'Folium attachments',
 } as const;
 
-export const DOCUSIGN = {
-  /** Identity-verification workflow IDs from DocuSign Admin › Identity Verification. */
-  idv: { sms: '', phone: '', kba: '' },
-  /**
-   * Where an advisor grants Folium's DocuSign app consent when DocuSign answers
-   * `consent_required` (DocuSign's /oauth/auth URL with the app's client ID, scope
-   * `signature` and the connector's redirect URL). Blank: Folium says to ask an admin.
-   */
-  consentUrl: '',
-} as const;
+// The DocuSign account ID, identity-verification workflow IDs and consent link are set
+// in Administration › Settings › DocuSign (the "DocuSign" `ev_foliumsetting` row), so
+// moving from the sandbox to production needs no rebuild. See DEPLOY.md §4.
 
 /**
  * Dataverse choice (option set) columns Folium reads or writes, keyed by table and
