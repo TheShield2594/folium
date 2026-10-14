@@ -33,9 +33,9 @@ Later: `ev_onbasehandle` (phase 2).
 
 ## ev_foliumprofile — one row per Folium user
 
-`ev_user` (Lookup → systemuser), `ev_role` (Choice: User · Assistant · Admin), `ev_name`, `ev_payload` (`UserProfile`: rep code, OSJ and RIA numbers, branch, region, defaults, sign-off, groupIds, `canEditRepData`, `repDataAudit`, `lastSeenOn`). `statecode` 1 (Inactive, `statuscode` 2) is a profile an Admin deactivated: it's kept, so requests keep their owner.
+`ev_user` (Lookup → systemuser), `ev_role` (Choice: User · Assistant · Admin), `ev_name`, `ev_payload` (`UserProfile`: rep code, OSJ and RIA numbers, branch, region, defaults, sign-off, groupIds, office address, `canEditRepData`, `repDataAudit`, `lastSeenOn`). `statecode` 1 (Inactive, `statuscode` 2) is a profile an Admin deactivated: it's kept, so requests keep their owner.
 
-The payload stores only what Folium overrides. Name, middle name, email, phone, fax, mobile, title and office address are read from the user's `systemuser` row (`fullname`, `middlename`, `internalemailaddress`, `address1_telephone1`, `address1_fax`, `mobilephone`, `title`, `address1_line1`/`line2`/`city`/`stateorprovince`/`postalcode`) every time, and `isdisabled` marks someone who has left. Folium users need read access to those `systemuser` columns. A Compliance view on `ev_foliumprofile` (name, role, status, modified on) can be opened in Excel for audits; Users & groups also downloads the list as CSV.
+The payload stores only what Folium overrides. Name, middle name, email, phone, fax, mobile and title are read from the user's `systemuser` row (`fullname`, `middlename`, `internalemailaddress`, `address1_telephone1`, `address1_fax`, `mobilephone`, `title`) every time, and `isdisabled` marks someone who has left. Folium users need read access to those `systemuser` columns. A Compliance view on `ev_foliumprofile` (name, role, status, modified on) can be opened in Excel for audits; Users & groups also downloads the list as CSV.
 
 ## Contact: ID documents (to confirm)
 

@@ -68,7 +68,7 @@ export function SettingsScreen() {
               <h2 id="prof-h" className="t-title3">{me.role === 'User' ? 'Your advisor details' : 'Your details'}</h2>
               <p className="t-footnote c3">
                 {me.role === 'Assistant' ? 'Forms you prepare use the advisor you’re working for. ' : 'Forms fill rep fields (name, office, phones, rep code) from here. '}
-                Your name, phones, title and office come from your Microsoft profile; anything you change here is used on forms instead.
+                Your name, phones and title come from your Microsoft profile; anything you change here is used on forms instead. Your office address is set here.
               </p>
             </div>
             <RepDetails value={p} onChange={set} editor={me} policy={policy} idPrefix="u" />

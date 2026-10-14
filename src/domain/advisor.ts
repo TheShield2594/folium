@@ -2,14 +2,15 @@ import type { Advisor, FirmPolicy, OfficeAddress, RepDataChange, UserProfile } f
 
 // The advisor details forms print (`rep.*`): directory first, Folium profile on top.
 //
-// Name, middle name, email, phones, title and office address come from the advisor's
-// `systemuser` row (synced from Entra ID), so they stay current when IT updates the
-// directory. A value saved in Folium overrides the directory only while it differs
-// from it, and a blank one never hides it. Rep, OSJ and RIA numbers aren't in the
-// directory: they live only in the Folium profile, and only an Admin sets them.
+// Name, middle name, email, phones and title come from the advisor's `systemuser` row
+// (synced from Entra ID), so they stay current when IT updates the directory. A value
+// saved in Folium overrides the directory only while it differs from it, and a blank
+// one never hides it. The office address, extension and email on forms are set in
+// Folium only. Rep, OSJ and RIA numbers live only in the Folium profile too, and only
+// an Admin sets them.
 
 /** Advisor fields the directory can supply. */
-export const DIRECTORY_FIELDS = ['middleName', 'email', 'phone', 'fax', 'mobile', 'title', 'office'] as const;
+export const DIRECTORY_FIELDS = ['middleName', 'email', 'phone', 'fax', 'mobile', 'title'] as const;
 export type DirectoryField = (typeof DIRECTORY_FIELDS)[number];
 
 /** What the directory holds for one person (the `systemuser` row). */
@@ -46,9 +47,6 @@ const same = (a: unknown, b: unknown) => (blank(a) && blank(b)) || JSON.stringif
 /** A `systemuser` row as a DirectoryUser. */
 export function fromSystemUser(row: Record<string, unknown>): DirectoryUser {
   const s = (k: string) => (typeof row[k] === 'string' && (row[k] as string).trim() ? (row[k] as string).trim() : undefined);
-  const office: OfficeAddress | undefined = s('address1_line1')
-    ? { line1: s('address1_line1')!, suite: s('address1_line2'), city: s('address1_city') ?? '', state: s('address1_stateorprovince') ?? '', zip: s('address1_postalcode') ?? '' }
-    : undefined;
   const out: DirectoryUser = {
     systemuserid: String(row.systemuserid ?? ''),
     fullname: s('fullname') ?? '',
@@ -58,7 +56,6 @@ export function fromSystemUser(row: Record<string, unknown>): DirectoryUser {
     fax: s('address1_fax'),
     mobile: s('mobilephone'),
     title: s('title'),
-    office,
     disabled: row.isdisabled === true || row.isdisabled === 1 || row.isdisabled === 'true' ? true : undefined,
   };
   for (const k of Object.keys(out) as (keyof DirectoryUser)[]) if (out[k] === undefined) delete out[k];
@@ -75,11 +72,6 @@ export const SYSTEMUSER_COLUMNS = [
   'address1_fax',
   'mobilephone',
   'title',
-  'address1_line1',
-  'address1_line2',
-  'address1_city',
-  'address1_stateorprovince',
-  'address1_postalcode',
   'isdisabled',
 ];
 

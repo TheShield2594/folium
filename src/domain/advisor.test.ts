@@ -13,7 +13,6 @@ const dir: DirectoryUser = {
   phone: '574-555-0142',
   fax: '574-555-0199',
   title: 'Financial advisor',
-  office: { line1: '1110 N Main St', suite: 'Suite 200', city: 'Goshen', state: 'IN', zip: '46528' },
 };
 const saved: UserProfile = { systemuserid: 'u1', fullname: '', email: '', phone: '', title: '', repCode: 'EV4471', branch: 'Goshen', role: 'User', groupIds: [] };
 
@@ -21,7 +20,6 @@ describe('mergeAdvisor', () => {
   it('uses the directory value when the profile has none', () => {
     const a = mergeAdvisor(dir, saved);
     expect(a.phone).toBe('574-555-0142');
-    expect(a.office?.city).toBe('Goshen');
     expect(a.fullname).toBe('Taylor Brenneman');
     expect(fieldOrigin(a, 'phone')).toBe('directory');
   });
@@ -35,9 +33,16 @@ describe('mergeAdvisor', () => {
   });
 
   it('never lets a blank override hide a directory value', () => {
-    const a = mergeAdvisor(dir, { ...saved, phone: '  ', office: { line1: '', city: '', state: '', zip: '' } });
+    const a = mergeAdvisor(dir, { ...saved, phone: '  ' });
     expect(a.phone).toBe('574-555-0142');
-    expect(a.office?.line1).toBe('1110 N Main St');
+  });
+
+  it('keeps the office address in Folium only', () => {
+    const office = { line1: '1110 N Main St', suite: 'Suite 200', city: 'Goshen', state: 'IN', zip: '46528' };
+    const a = mergeAdvisor(dir, { ...saved, office });
+    expect(a.office).toEqual(office);
+    expect(profileToSave(a).office).toEqual(office);
+    expect(mergeAdvisor(dir, saved).office).toBeUndefined();
   });
 
   it('stores only overrides, so a reset to the directory value removes the override', () => {
@@ -47,7 +52,6 @@ describe('mergeAdvisor', () => {
     const stored = profileToSave(reset);
     expect(stored.phone).toBe('');
     expect(stored.directory).toBeUndefined();
-    expect(stored.office).toBeUndefined();
     // …and the directory supplies it again on the next load, even after the directory changes.
     expect(mergeAdvisor({ ...dir, phone: '574-555-1111' }, stored).phone).toBe('574-555-1111');
   });
@@ -58,8 +62,9 @@ describe('mergeAdvisor', () => {
   });
 
   it('reads a systemuser row', () => {
-    const d = fromSystemUser({ systemuserid: 'u1', fullname: 'Taylor Brenneman', middlename: 'Jo', internalemailaddress: 'taylor@example.org', address1_telephone1: '574-555-0142', address1_line1: '1110 N Main St', address1_line2: 'Suite 200', address1_city: 'Goshen', address1_stateorprovince: 'IN', address1_postalcode: '46528', isdisabled: false, mobilephone: '' });
-    expect(d).toEqual({ systemuserid: 'u1', fullname: 'Taylor Brenneman', middleName: 'Jo', email: 'taylor@example.org', phone: '574-555-0142', office: { line1: '1110 N Main St', suite: 'Suite 200', city: 'Goshen', state: 'IN', zip: '46528' } });
+    // An address on the systemuser row is ignored: the office is set in Folium.
+    const d = fromSystemUser({ systemuserid: 'u1', fullname: 'Taylor Brenneman', middlename: 'Jo', internalemailaddress: 'taylor@example.org', address1_telephone1: '574-555-0142', address1_line1: '1 Elsewhere Rd', isdisabled: false, mobilephone: '' });
+    expect(d).toEqual({ systemuserid: 'u1', fullname: 'Taylor Brenneman', middleName: 'Jo', email: 'taylor@example.org', phone: '574-555-0142' });
     expect(fromSystemUser({ systemuserid: 'u2', fullname: 'Riley', isdisabled: true }).disabled).toBe(true);
   });
 });
@@ -89,7 +94,7 @@ describe('rep sources', () => {
   });
 
   it('is empty when there is no office or middle name', () => {
-    const bare = { ...scope, advisor: { ...USERS[1] } };
+    const bare = { ...scope, advisor: { ...USERS[4] } };
     expect(resolvePath('rep.middleInitial', bare)).toBeUndefined();
     expect(resolvePath('rep.officeCityStateZip', bare)).toBeUndefined();
   });

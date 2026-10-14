@@ -235,13 +235,13 @@ describe('directory', () => {
     const { directory } = createPowerServices();
     const me = await directory.currentUser();
     expect(me).toMatchObject({ systemuserid: 'su-1', fullname: 'Taylor Brenneman', email: 'taylor@example.org', phone: '574-555-0000', title: 'Financial advisor', repCode: 'EV4471', role: 'Admin' });
-    expect(me.office).toEqual({ line1: '1110 N Main St', city: 'Goshen', state: 'IN', zip: '46528' });
+    expect(me.office).toBeUndefined();
     const stamps = () => updates.filter((u) => u.table === 'ev_foliumprofiles');
     expect(stamps()).toHaveLength(1);
     const stored = JSON.parse(String(stamps()[0].data.ev_payload));
     expect(stored.lastSeenOn.slice(0, 10)).toBe(new Date().toISOString().slice(0, 10));
-    // Only the override is stored: the directory's office and title aren't copied in.
-    expect(stored.office).toBeUndefined();
+    // Only the override is stored: the directory's title isn't copied in.
+    expect(stored.title).toBe('');
     expect(stored.phone).toBe('574-555-0000');
     await directory.currentUser();
     expect(stamps()).toHaveLength(1);
