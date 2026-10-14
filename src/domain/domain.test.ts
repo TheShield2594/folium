@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CLIENTS, FIRM, TEMPLATES, USERS } from '../services/demo/seed';
-import { runChecks, summarize } from './checks';
-import { formatValue, validateFormat } from './format';
+import { outputGate, runChecks, summarize, type CheckResult } from './checks';
+import { formatValue, resolveDateLimit, validateFormat } from './format';
 import { evaluateCondition, resolvePath } from './paths';
 import { fieldKey, inputsNeeded, mappingWarnings, migrateAccountValues, prefillForm, prefillPacket } from './prefill';
 import { carryForward, diffRevision } from './revisions';
@@ -47,6 +47,87 @@ describe('format', () => {
     expect(validateFormat('04/18/1961', 'date')).toBeUndefined();
     expect(validateFormat('abc', 'email')).toBeTruthy();
     expect(validateFormat('140', 'percent')).toBeTruthy();
+  });
+
+  it('validates and formats EIN, SSN-or-TIN, integer and decimal', () => {
+    expect(formatValue('123456789', 'ein')).toBe('12-3456789');
+    expect(validateFormat('12-3456789', 'ein')).toBeUndefined();
+    expect(validateFormat('123-45-6789', 'ein')).toMatch(/EIN like 12-3456789/);
+    expect(validateFormat('12345678', 'ein')).toBeTruthy();
+
+    expect(formatValue('412550193', 'ssnOrTin')).toBe('412-55-0193');
+    expect(formatValue('12-3456789', 'ssnOrTin')).toBe('12-3456789');
+    expect(validateFormat('412-55-0193', 'ssnOrTin')).toBeUndefined();
+    expect(validateFormat('12-3456789', 'ssnOrTin')).toBeUndefined();
+    expect(validateFormat('412550193', 'ssnOrTin')).toBeUndefined();
+    expect(validateFormat('4125-50193', 'ssnOrTin')).toBeTruthy();
+    expect(validateFormat('41255019', 'ssnOrTin')).toBeTruthy();
+
+    expect(formatValue('1,200', 'integer')).toBe('1200');
+    expect(validateFormat('42', 'integer')).toBeUndefined();
+    expect(validateFormat('4.2', 'integer')).toMatch(/whole number/);
+    expect(validateFormat('abc', 'integer')).toBeTruthy();
+    expect(validateFormat('1,200', 'integer')).toBeUndefined();
+    expect(validateFormat('-1,234,567', 'integer')).toBeUndefined();
+    for (const bad of [',', '1,,2', ',5', '12,34', '1234,567', '-']) expect(validateFormat(bad, 'integer')).toBe('Enter a whole number.');
+    expect(validateFormat('4.25', 'decimal')).toBeUndefined();
+    expect(validateFormat('-0.5', 'decimal')).toBeUndefined();
+    expect(validateFormat('4.2.5', 'decimal')).toBeTruthy();
+    expect(validateFormat('x', 'decimal')).toBeTruthy();
+  });
+
+  it('enforces numeric and length limits', () => {
+    expect(validateFormat('5', 'integer', { min: 1, max: 10 })).toBeUndefined();
+    expect(validateFormat('11', 'integer', { min: 1, max: 10 })).toBe('Enter a whole number from 1 to 10.');
+    expect(validateFormat('0.5', 'decimal', { min: 1 })).toBe('Enter a number of at least 1.');
+    expect(validateFormat('2,500', 'currency', { max: 1000 })).toBe('Enter an amount of at most $1,000.00.');
+    // Percent keeps 0–100 without limits, and limits replace it.
+    expect(validateFormat('140', 'percent')).toBe('Enter a percentage from 0% to 100%.');
+    expect(validateFormat('140', 'percent', { max: 200 })).toBeUndefined();
+    expect(validateFormat('5', 'percent', { min: 10, max: 50 })).toBeTruthy();
+
+    expect(validateFormat('IRA-22-4471-99', 'text', { maxLength: 10 })).toBe('Up to 10 characters (this is 14).');
+    expect(validateFormat('IRA-22', undefined, { maxLength: 10 })).toBeUndefined();
+    expect(validateFormat('AB', undefined, { minLength: 3 })).toBe('At least 3 characters.');
+    // Length is measured on the printed value: 9 digits print as 11 characters.
+    expect(validateFormat('412550193', 'ssn', { maxLength: 10 })).toBeTruthy();
+  });
+
+  it('enforces date ranges, relative to a pinned today', () => {
+    const today = new Date(2026, 9, 13);
+    const dob = { dateMin: '-120y', dateMax: 'today' };
+    expect(resolveDateLimit('today', today)).toBe('2026-10-13');
+    expect(resolveDateLimit('-120y', today)).toBe('1906-10-13');
+    expect(resolveDateLimit('+30d', today)).toBe('2026-11-12');
+    expect(resolveDateLimit('-6m', today)).toBe('2026-04-13');
+    expect(resolveDateLimit('2020-01-31', today)).toBe('2020-01-31');
+    expect(resolveDateLimit('nonsense', today)).toBeUndefined();
+
+    expect(validateFormat('1961-04-18', 'date', dob, today)).toBeUndefined();
+    expect(validateFormat('2026-10-13', 'date', dob, today)).toBeUndefined();
+    expect(validateFormat('2031-01-01', 'date', dob, today)).toBe('Enter a date from 10/13/1906 to today.');
+    expect(validateFormat('1880-01-01', 'date', dob, today)).toBeTruthy();
+    expect(validateFormat('10/12/2026', 'date', { dateMin: 'today' }, today)).toBe('Enter a date on or after today.');
+    expect(validateFormat('2027-01-01', 'date', { dateMax: '2026-12-31' }, today)).toBe('Enter a date on or before 12/31/2026.');
+  });
+
+  it('prints dates in the template’s layout', () => {
+    expect(formatValue('1961-04-18', 'date', { dateLayout: 'YYYY-MM-DD' })).toBe('1961-04-18');
+    expect(formatValue('4/18/1961', 'date', { dateLayout: 'MMDDYYYY' })).toBe('04181961');
+    expect(formatValue('1961-04-18', 'date', { dateLayout: 'DD/MM/YYYY' })).toBe('18/04/1961');
+    expect(formatValue('1961-04-18', 'date', {})).toBe('04/18/1961');
+  });
+
+  it('flags a future CRM birthdate as a blocking format check', () => {
+    const future = { ...scope, client: { ...client, contact: { ...client.contact, birthdate: '2031-04-18' } } };
+    const fill = prefillForm(bene, future, {});
+    const dob = fill.fields.find((f) => f.mapping.source === 'contact.birthdate')!;
+    expect(dob.origin).toBe('crm');
+    expect(dob.formatError).toMatch(/today/);
+    const checks = runChecks([fill], { scope: future, values: {}, latestFor: () => bene });
+    expect(checks.find((c) => c.id === `format:${dob.key}`)?.level).toBe('block');
+    // Today's real data passes.
+    expect(prefillForm(bene, scope, {}).fields.find((f) => f.mapping.source === 'contact.birthdate')!.formatError).toBeUndefined();
   });
 });
 
@@ -279,3 +360,42 @@ describe('docusign', () => {
     expect(() => buildEnvelopeDefinition({ ...req, signers: [{ ...req.signers[0], auth: 'email' as const }] }, {})).not.toThrow();
   });
 });
+
+describe('output gate', () => {
+  const pass: CheckResult = { id: 'required', level: 'pass', title: 'All required fields are filled' };
+  const warn: CheckResult = { id: 't:kind', level: 'warn', title: 'Scanned PDF' };
+  const block: CheckResult = { id: 't:required', level: 'block', title: '2 required fields', templateId: 't', fieldKey: 'k' };
+  const clean = [pass, warn];
+  const open = [pass, warn, block];
+
+  it('blocks send, flatten and print while a check blocks, and only then', () => {
+    for (const mode of ['send', 'flatten', 'print'] as const) {
+      expect(outputGate(clean, mode)).toEqual({ allowed: true, blockers: [], draftMark: false });
+      expect(outputGate(open, mode)).toEqual({ allowed: false, blockers: [block], draftMark: false });
+    }
+  });
+
+  it('keeps the editable PDF but marks it draft while checks are open', () => {
+    expect(outputGate(clean, 'fillable')).toEqual({ allowed: true, blockers: [], draftMark: false });
+    expect(outputGate(open, 'fillable')).toEqual({ allowed: true, blockers: [block], draftMark: true });
+    // A firm can ask for Laser App's stricter behaviour.
+    expect(outputGate(open, 'fillable', { blockFillable: true }).allowed).toBe(false);
+    expect(outputGate(clean, 'fillable', { blockFillable: true }).allowed).toBe(true);
+  });
+
+  it('always allows and always marks drafts', () => {
+    expect(outputGate(clean, 'draft')).toMatchObject({ allowed: true, draftMark: true });
+    expect(outputGate(open, 'draft')).toMatchObject({ allowed: true, draftMark: true });
+  });
+
+  it('never blocks on warnings', () => {
+    for (const mode of ['send', 'flatten', 'print', 'fillable', 'draft'] as const) expect(outputGate([warn, warn], mode).allowed).toBe(true);
+  });
+
+  it('blocks print for a retired revision', () => {
+    const retired = { ...bene, status: 'Retired' as const };
+    const checks = runChecks([prefillForm(retired, scope, {})], { scope, values: {}, latestFor: () => bene });
+    expect(outputGate(checks, 'print').blockers.some((b) => b.id === 'current-revisions')).toBe(true);
+  });
+});
+

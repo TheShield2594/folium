@@ -3,9 +3,13 @@ import type { FirmProfile } from '../../domain/types';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
 import { useApp } from '../../state/store';
-import { Button, Field, TextArea, TextInput, toast } from '../../ui/controls';
+import { Button, Field, Select, SwitchRow, TextArea, TextInput, toast } from '../../ui/controls';
+import { DEFAULT_IDLE_MINUTES } from '../../state/idle';
 
-const FIELDS: { key: keyof FirmProfile; label: string; span?: boolean; mono?: boolean }[] = [
+/** The firm's text fields (settings below are switches and choices). */
+type TextKey = Exclude<{ [K in keyof FirmProfile]-?: FirmProfile[K] extends string ? K : never }[keyof FirmProfile], 'disclosure'>;
+
+const FIELDS: { key: TextKey; label: string; span?: boolean; mono?: boolean }[] = [
   { key: 'name', label: 'Display name' },
   { key: 'legalName', label: 'Legal name' },
   { key: 'address1', label: 'Street', span: true },
@@ -76,6 +80,33 @@ export function AdminFirm() {
               <TextArea id="f-disc" rows={3} value={f.disclosure} onChange={(e) => setF({ ...f, disclosure: e.target.value })} />
             </Field>
           </section>
+          <div className="list">
+            <SwitchRow
+              label="Block the editable PDF while checks are open"
+              detail="Flattened PDFs, printing and DocuSign are always blocked until review’s checks pass. Off: the editable PDF still downloads, stamped “DRAFT — NOT FOR SIGNATURE”."
+              checked={!!f.blockFillableWhenIncomplete}
+              onChange={(v) => setF({ ...f, blockFillableWhenIncomplete: v || undefined })}
+            />
+            <SwitchRow
+              label="Save drafts automatically when work is left idle"
+              detail="After an advisor leaves unsaved changes untouched, Folium counts down for 2 minutes in the tab title, then saves the packet as a draft. Moving the mouse or typing cancels it."
+              checked={!!f.idleAutoSave}
+              onChange={(v) => setF({ ...f, idleAutoSave: v || undefined })}
+            />
+          </div>
+          {f.idleAutoSave && (
+            <section className="card card-pad">
+              <Field label="Start the countdown after" htmlFor="f-idle">
+                <Select id="f-idle" value={String(f.idleAutoSaveMinutes ?? DEFAULT_IDLE_MINUTES)} onChange={(e) => setF({ ...f, idleAutoSaveMinutes: Number(e.target.value) })}>
+                  {[10, 15, 25, 45, 60].map((m) => (
+                    <option key={m} value={m}>
+                      {m} minutes idle
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </section>
+          )}
         </div>
       </div>
     </>

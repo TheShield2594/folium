@@ -4,14 +4,15 @@ import type { FieldState } from '../../domain/prefill';
 import { defaultDraftTitle } from '../../domain/drafts';
 import { inputsNeeded, snapshotDiff } from '../../domain/prefill';
 import type { SignatureRequest } from '../../domain/types';
-import { summarize } from '../../domain/checks';
+import { outputGate, summarize, type CheckResult } from '../../domain/checks';
 import { sourceKind } from '../../domain/paths';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
-import { packetAsOnePdf, saveDraft } from '../../state/actions';
+import { audit, packetAsOnePdf, saveDraft } from '../../state/actions';
 import { useActingFor, useApp } from '../../state/store';
 import { Button, Empty, IconButton, Menu, Segmented, Select, downloadBytes, openPdf, toast } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
+import { BlockersSheet } from '../common/BlockersSheet';
 import { NoClient } from '../common/NoClient';
 import { PdfView } from '../common/PdfView';
 import { NameSheet } from '../common/NameSheet';
@@ -30,6 +31,7 @@ export function ReviewScreen() {
   const me = useApp((s) => s.me);
   const refreshRequests = useApp((s) => s.refreshRequests);
   const markUsed = useApp((s) => s.markUsed);
+  const firm = useApp((s) => s.firm);
   const requests = useApp((s) => s.requests);
   const setPacketAccount = useApp((s) => s.setPacketAccount);
   const owner = useActingFor();
@@ -43,6 +45,8 @@ export function ReviewScreen() {
   const [busy, setBusy] = useState<string>();
   const [sharing, setSharing] = useState(false);
   const [naming, setNaming] = useState(false);
+  /** Set when an output was refused, to list what's blocking it. */
+  const [blocked, setBlocked] = useState<{ title: string; blockers: CheckResult[] }>();
   const canvasRef = useRef<HTMLDivElement>(null);
   const [canvasW, setCanvasW] = useState(700);
 
@@ -93,9 +97,11 @@ export function ReviewScreen() {
 
   // Jump to the form + field for a key (from checks or the inputs list).
   function focusKey(key: string | undefined, templateId?: string) {
-    if (!view || !key) return;
+    if (!view) return;
     const idx = templateId ? view.fills.findIndex((f) => f.template.id === templateId) : view.fills.findIndex((f) => f.fields.some((x) => x.key === key));
     if (idx >= 0) setActive(idx);
+    // Form-level checks (an out-of-date revision) just switch to the form.
+    if (!key) return;
     setSelected(key);
     if (optionalNeeds.some((n) => n.key === key)) setShowOptional(true);
     requestAnimationFrame(() => document.getElementById(`in-${cssKey(key)}`)?.querySelector<HTMLElement>('input, select, textarea')?.focus());
@@ -143,9 +149,9 @@ export function ReviewScreen() {
         existing,
         writePdfs: true,
         // Keep the row's identity even if writing the PDFs fails, so a retry updates it.
-        onSaved: (row) => setPacket({ requestId: row.id, title: row.title, attachments: row.attachments, snapshot: row.prefillSnapshot }),
+        onSaved: (row) => setPacket({ requestId: row.id, title: row.title, attachments: row.attachments, snapshot: row.prefillSnapshot, dirty: false }),
       });
-      setPacket({ requestId: saved.id, title: saved.title, attachments: saved.attachments, snapshot: saved.prefillSnapshot });
+      setPacket({ requestId: saved.id, title: saved.title, attachments: saved.attachments, snapshot: saved.prefillSnapshot, dirty: false });
       toast.ok(`Draft saved to ${client!.contact.firstname}’s SharePoint folder`);
     } finally {
       await refreshRequests().catch(() => undefined);
@@ -155,18 +161,36 @@ export function ReviewScreen() {
 
   async function download(mode: 'fillable' | 'flatten' | 'print') {
     if (!view) return;
+    // Anything a client could wet-sign needs every blocking check cleared first.
+    const gate = outputGate(view.checks, mode, { blockFillable: firm?.blockFillableWhenIncomplete });
+    if (!gate.allowed) {
+      setBlocked({ title: mode === 'print' ? 'Can’t print yet' : mode === 'flatten' ? 'Can’t make the PDF to sign yet' : 'Can’t download yet', blockers: gate.blockers });
+      return;
+    }
     setBusy('download');
     try {
-      const bytes = await packetAsOnePdf(services, view.fills, mode === 'fillable' ? 'fillable' : 'flatten');
-      const name = `${client!.contact.lastname} - ${packet.title || view.fills.map((f) => f.template.formNumber).join(', ')}${mode === 'fillable' ? ' (fillable)' : ''}.pdf`;
+      const bytes = await packetAsOnePdf(services, view.fills, mode === 'fillable' ? 'fillable' : 'flatten', gate.draftMark);
+      const name = `${client!.contact.lastname} - ${packet.title || view.fills.map((f) => f.template.formNumber).join(', ')}${mode === 'fillable' ? (gate.draftMark ? ' (fillable, draft)' : ' (fillable)') : ''}.pdf`;
       if (mode === 'print') openPdf(bytes);
       else downloadBytes(bytes, name);
       markUsed(view.templates.map((t) => t.id));
+      if (gate.draftMark) recordIncompleteDownload(gate.blockers);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not build the PDF');
     } finally {
       setBusy(undefined);
     }
+  }
+
+  /** Let supervision see that an incomplete (draft-marked) PDF left Folium. Needs a saved draft to note it on. */
+  function recordIncompleteDownload(blockers: CheckResult[]) {
+    const row = packet.requestId ? requests.find((r) => r.id === packet.requestId) : undefined;
+    if (!row || !me) return;
+    const detail = `${blockers.length} open ${blockers.length === 1 ? 'check' : 'checks'}: ${blockers.map((b) => b.title).join('; ')}`.slice(0, 400);
+    services.requests
+      .save({ ...row, audit: [...row.audit, audit(me, 'Downloaded editable PDF marked draft', detail)] })
+      .then(() => refreshRequests())
+      .catch(() => undefined);
   }
 
   function renderNeed(key: string, fields: FieldState[]) {
@@ -196,9 +220,9 @@ export function ReviewScreen() {
             </Button>
           )}
           items={[
-            { label: 'Fillable PDF (editable)', icon: 'doc', onSelect: () => download('fillable') },
-            { label: 'Flattened PDF to sign in person', icon: 'lock', onSelect: () => download('flatten') },
-            { label: 'Print…', icon: 'printer', onSelect: () => download('print') },
+            { label: sum?.blocking ? 'Fillable PDF (marked draft)' : 'Fillable PDF (editable)', icon: 'doc', onSelect: () => download('fillable') },
+            { label: sum?.blocking ? `Flattened PDF to sign in person (${sum.blocking} to fix)` : 'Flattened PDF to sign in person', icon: 'lock', onSelect: () => download('flatten') },
+            { label: sum?.blocking ? `Print… (${sum.blocking} to fix)` : 'Print…', icon: 'printer', onSelect: () => download('print') },
           ]}
         />
         <Menu
@@ -407,6 +431,7 @@ export function ReviewScreen() {
         </aside>
       </div>
       {sharing && <ShareSheet onClose={() => setSharing(false)} />}
+      {blocked && <BlockersSheet title={blocked.title} blockers={blocked.blockers} fills={view.fills} onJump={(c) => focusKey(c.fieldKey, c.templateId)} onClose={() => setBlocked(undefined)} />}
       {naming && (
         <NameSheet
           title="Save draft"

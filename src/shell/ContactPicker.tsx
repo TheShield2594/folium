@@ -38,8 +38,8 @@ export function ContactPicker({ onClose }: { onClose: () => void }) {
 
   async function pick(c: Contact) {
     try {
-      await openContact(c.contactid);
-      onClose();
+      // False when the advisor chose to stay with their unsaved packet.
+      if (await openContact(c.contactid)) onClose();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not open contact');
     }

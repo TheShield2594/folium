@@ -14,6 +14,7 @@ import type {
   UserProfile,
 } from '../domain/types';
 import type { Services } from '../services/types';
+import { clearJournal, debounced, newerThanDraft, readJournal, sensitiveKeys, worthKeeping, writeJournal, type Journal } from './journal';
 
 // Small persisted per-viewer conveniences (favorites, recents, theme). Never business data.
 function readLocal<T>(key: string, fallback: T): T {
@@ -44,9 +45,30 @@ export interface Packet {
   sharedWith: string[];
   /** CRM values when the open draft was saved; see `snapshotDiff`. */
   snapshot?: Record<string, string>;
+  /** Changed since it was opened or last saved. Cleared by Save draft and Send. */
+  dirty?: boolean;
+  /** A DocuSign send in flight, kept here (and in the journal) so it survives a reload. */
+  send?: SendState;
+}
+
+/**
+ * Where a send got to. `created`: DocuSign holds the envelope as a draft; finishing
+ * releases it. `sent`: DocuSign sent it and Folium still has to record it. `unknown`:
+ * creating it failed in a way that may have landed; the advisor checks before sending again.
+ */
+export interface SendState {
+  phase: 'created' | 'sent' | 'unknown';
+  envelopeId?: string;
+  at: string;
 }
 
 const emptyPacket = (): Packet => ({ items: [], values: {}, title: '', attachments: [], sharedWith: [] });
+
+/** setPacket keys that are bookkeeping, not the advisor's work, so they don't make a packet dirty. */
+const CLEAN_KEYS = new Set<keyof Packet>(['requestId', 'snapshot', 'send', 'dirty']);
+
+/** What to do with unsaved work before it's replaced. */
+export type LeaveChoice = 'save' | 'discard' | 'cancel';
 
 interface AppState {
   services?: Services;
@@ -74,11 +96,20 @@ interface AppState {
   theme: Theme;
   sidebarOpen: boolean;
   paletteOpen: boolean;
+  /** Set while asking what to do with unsaved work; the Shell renders the question. */
+  leavePrompt?: { reason: 'switch' | 'open-draft' | 'navigate'; resolve: (c: LeaveChoice) => void };
+  /** A journalled packet from before a reload, offered back by the Shell. */
+  pendingRestore?: Journal;
 
   boot(services: Services, contactId?: string): Promise<void>;
   reloadDirectory(): Promise<void>;
   setActingFor(userId: string): void;
-  openContact(contactId: string): Promise<void>;
+  /** Resolves false when the advisor chose to keep their unsaved packet instead. */
+  openContact(contactId: string): Promise<boolean>;
+  /** Ask before unsaved work is replaced. True when it's fine to go ahead. */
+  confirmReplacePacket(reason?: 'switch' | 'open-draft'): Promise<boolean>;
+  restoreJournal(): Promise<void>;
+  discardJournal(): void;
   refreshClient(): Promise<void>;
   refreshRequests(): Promise<void>;
   refreshTemplates(): Promise<void>;
@@ -119,6 +150,9 @@ export function suggestAccount(t: FormTemplate, client?: ClientRecord) {
   return undefined;
 }
 
+/** Counts contact picks, so a slow load for an earlier pick never lands over a later one. */
+let openSeq = 0;
+
 export const useApp = create<AppState>((set, get) => ({
   ready: false,
   users: [],
@@ -149,8 +183,19 @@ export const useApp = create<AppState>((set, get) => ({
       const savedActing = readLocal<string | undefined>('folium.actingFor', undefined);
       const actingForId = me.role === 'Assistant' ? (actableUsers(me, users, groups).some((u) => u.systemuserid === savedActing) ? savedActing : actableUsers(me, users, groups)[0]?.systemuserid) : me.systemuserid;
       set({ me, users, groups, firm, templates, packets, actingForId, ready: true });
+      const journal = readJournal(me.systemuserid);
+      if (journal && worthKeeping(journal.packet)) set({ pendingRestore: journal });
       const start = contactId ?? readLocal<string | undefined>('folium.lastContact', undefined);
       if (start) await get().openContact(start).catch(() => undefined);
+      // Don't offer a copy older than the draft it came from (a colleague may have saved since).
+      if (journal?.packet.requestId && get().pendingRestore === journal) {
+        const row = await services.requests.get(journal.packet.requestId).catch(() => undefined);
+        const updated = row?.audit.at(-1)?.at;
+        if (row && !journal.packet.send && !newerThanDraft(journal, updated)) {
+          clearJournal(me.systemuserid);
+          if (get().pendingRestore === journal) set({ pendingRestore: undefined });
+        }
+      }
     } catch (e) {
       set({ error: e instanceof Error ? e.message : String(e), ready: true });
     }
@@ -169,19 +214,55 @@ export const useApp = create<AppState>((set, get) => ({
 
   async openContact(contactId) {
     const s = get().services!;
-    if (get().contactId !== contactId) set({ packet: emptyPacket() });
-    set({ contactId, clientLoading: true });
-    writeLocal('folium.lastContact', contactId);
+    const switching = get().contactId !== contactId;
+    if (switching && !(await get().confirmReplacePacket('switch'))) return false;
+    // Nothing on screen changes until the new client has loaded, so a failed load keeps
+    // the current client and packet.
+    const pick = ++openSeq;
+    set({ clientLoading: true });
     try {
       const [client, requests] = await Promise.all([s.crm.getClient(contactId), s.requests.listForContact(contactId)]);
       // A newer pick wins: ignore a slow response for a contact the user has moved away from.
-      if (get().contactId !== contactId) return;
-      set({ client, requests, clientLoading: false });
+      if (pick !== openSeq) return true;
+      writeLocal('folium.lastContact', contactId);
+      set({ contactId, client, requests, clientLoading: false, ...(switching ? { packet: emptyPacket() } : {}) });
+      return true;
     } catch (e) {
-      if (get().contactId !== contactId) return;
-      set({ clientLoading: false, client: undefined, contactId: undefined });
+      if (pick === openSeq) set({ clientLoading: false });
       throw e;
     }
+  },
+
+  async confirmReplacePacket(reason = 'switch') {
+    if (!get().packet.dirty || !get().packet.items.length) return true;
+    const choice = await new Promise<LeaveChoice>((resolve) => set({ leavePrompt: { reason, resolve } }));
+    set({ leavePrompt: undefined });
+    if (choice === 'cancel') return false;
+    // Discard: the caller replaces the packet once its own work succeeds (a client opens,
+    // a draft loads). Until then it stays on screen, no longer counted as unsaved.
+    if (choice === 'discard') set({ packet: { ...get().packet, dirty: false } });
+    return true;
+  },
+
+  async restoreJournal() {
+    const j = get().pendingRestore;
+    if (!j) return;
+    if (get().contactId !== j.contactId) {
+      // openContact asks about unsaved work on screen first (Save draft / Discard / Cancel).
+      // Keep the offer if the advisor cancels or the client can't be opened (a failed load
+      // throws; the banner reports it).
+      if (!(await get().openContact(j.contactId))) return;
+    }
+    set({ pendingRestore: undefined, packet: { ...emptyPacket(), ...j.packet, dirty: true } });
+  },
+  discardJournal() {
+    const { pendingRestore, me } = get();
+    if (pendingRestore && me) {
+      // Only drop what's stored if it's still the copy we offered (not newer work since).
+      const current = readJournal(me.systemuserid);
+      if (current?.savedAt === pendingRestore.savedAt) clearJournal(me.systemuserid);
+    }
+    set({ pendingRestore: undefined });
   },
 
   async refreshClient() {
@@ -205,11 +286,11 @@ export const useApp = create<AppState>((set, get) => ({
     const { packet, templates, client } = get();
     if (packet.items.some((i) => i.templateId === templateId)) return;
     const t = templates.find((x) => x.id === templateId);
-    set({ packet: { ...packet, items: [...packet.items, { templateId, accountId: accountId ?? (t ? suggestAccount(t, client) : undefined) }] } });
+    set({ packet: { ...packet, dirty: true, items: [...packet.items, { templateId, accountId: accountId ?? (t ? suggestAccount(t, client) : undefined) }] } });
   },
   removeFromPacket(templateId) {
     const { packet } = get();
-    set({ packet: { ...packet, items: packet.items.filter((i) => i.templateId !== templateId) } });
+    set({ packet: { ...packet, dirty: true, items: packet.items.filter((i) => i.templateId !== templateId) } });
   },
   moveInPacket(templateId, delta) {
     const items = [...get().packet.items];
@@ -217,20 +298,21 @@ export const useApp = create<AppState>((set, get) => ({
     const j = i + delta;
     if (i < 0 || j < 0 || j >= items.length) return;
     [items[i], items[j]] = [items[j], items[i]];
-    set({ packet: { ...get().packet, items } });
+    set({ packet: { ...get().packet, dirty: true, items } });
   },
   setPacketAccount(templateId, accountId) {
     const { packet } = get();
-    set({ packet: { ...packet, items: packet.items.map((i) => (i.templateId === templateId ? { templateId, accountId } : i)) } });
+    set({ packet: { ...packet, dirty: true, items: packet.items.map((i) => (i.templateId === templateId ? { templateId, accountId } : i)) } });
   },
   setValue(key, value) {
     const values = { ...get().packet.values };
     if (value === undefined) delete values[key];
     else values[key] = value;
-    set({ packet: { ...get().packet, values } });
+    set({ packet: { ...get().packet, dirty: true, values } });
   },
   setPacket(p) {
-    set({ packet: { ...get().packet, ...p } });
+    const work = (Object.keys(p) as (keyof Packet)[]).some((k) => !CLEAN_KEYS.has(k));
+    set({ packet: { ...get().packet, ...p, dirty: p.dirty ?? (work || get().packet.dirty) } });
   },
   clearPacket() {
     set({ packet: emptyPacket() });
@@ -267,6 +349,9 @@ export const useApp = create<AppState>((set, get) => ({
         attachments: req.attachments,
         sharedWith: req.sharedWith ?? [],
         snapshot: req.prefillSnapshot,
+        // A send that stopped after DocuSign created the envelope picks up where it left off.
+        send: req.status === 'Drafted' && req.envelopeId && req.envelopePhase === 'created' ? { phase: 'created', envelopeId: req.envelopeId, at: req.audit.at(-1)?.at ?? req.createdOn } : undefined,
+        dirty: false,
       },
     });
   },
@@ -294,6 +379,33 @@ export const useApp = create<AppState>((set, get) => ({
     set({ paletteOpen: open });
   },
 }));
+
+// ------------------------------------------------------------------ journal
+
+/**
+ * Keep the open packet in the session journal, a second after it stops changing, and
+ * write at once when the page is going away. Returns a stop function.
+ */
+export function startJournal(): () => void {
+  const write = () => {
+    const { me, contactId, packet, client, pendingRestore, templates } = useApp.getState();
+    if (!me) return;
+    if (contactId && worthKeeping(packet)) writeJournal({ userId: me.systemuserid, contactId, contactName: client?.contact.fullname, packet, sensitive: sensitiveKeys(templates) });
+    // Leave an offered copy alone until the advisor answers the banner.
+    else if (!pendingRestore) clearJournal(me.systemuserid);
+  };
+  const d = debounced(write, 1000);
+  const unsub = useApp.subscribe((s, prev) => {
+    if (s.packet !== prev.packet || s.contactId !== prev.contactId) d.schedule();
+  });
+  const flush = () => d.flush();
+  window.addEventListener('pagehide', flush);
+  return () => {
+    unsub();
+    d.cancel();
+    window.removeEventListener('pagehide', flush);
+  };
+}
 
 // ------------------------------------------------------------------ selectors
 

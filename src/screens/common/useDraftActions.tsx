@@ -28,7 +28,7 @@ export function useDraftActions(onChanged?: () => void) {
         onConfirm={async () => {
           await services.requests.remove(r.id);
           const wasOpen = useApp.getState().packet.requestId === r.id;
-          if (wasOpen) useApp.getState().setPacket({ requestId: undefined });
+          if (wasOpen) useApp.getState().setPacket({ requestId: undefined, dirty: true });
           await changed();
           const undo = {
             label: 'Undo',

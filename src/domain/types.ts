@@ -27,7 +27,38 @@ export type PdfKind = 'fillable' | 'xfa' | 'flat';
  */
 export type FieldSource = string;
 
-export type FieldFormat = 'text' | 'date' | 'ssn' | 'ssnLast4' | 'phone' | 'zip' | 'email' | 'currency' | 'percent' | 'checkbox';
+export type FieldFormat =
+  | 'text'
+  | 'date'
+  | 'ssn'
+  | 'ssnLast4'
+  | 'ein'
+  | 'ssnOrTin'
+  | 'phone'
+  | 'zip'
+  | 'email'
+  | 'currency'
+  | 'percent'
+  | 'integer'
+  | 'decimal'
+  | 'checkbox';
+
+export type DateLayout = 'MM/DD/YYYY' | 'YYYY-MM-DD' | 'MMDDYYYY' | 'DD/MM/YYYY';
+
+/** Per-field limits on top of the format. No limits means the format's defaults. */
+export interface FieldLimits {
+  /** For integer, decimal, currency and percent (percent defaults to 0–100). */
+  min?: number;
+  max?: number;
+  /** For text. `maxLength` is copied from the PDF field's MaxLen when there is one. */
+  minLength?: number;
+  maxLength?: number;
+  /** ISO date, or relative to today: `today`, `-120y`, `+1y`, `-30d`, `+6m`. */
+  dateMin?: string;
+  dateMax?: string;
+  /** How a date prints on the form. Defaults to MM/DD/YYYY. */
+  dateLayout?: DateLayout;
+}
 
 export interface FieldMapping {
   pdfField: string;
@@ -38,6 +69,7 @@ export interface FieldMapping {
   /** Canonical data key. Fields that share a key share a value across every form in a packet ("enter once"). */
   key?: string;
   format?: FieldFormat;
+  limits?: FieldLimits;
   /** Short guidance shown next to the input. */
   help?: string;
   /** Only required when this condition holds (same grammar as signer conditions). */
@@ -265,6 +297,8 @@ export interface SignatureRequest {
   createdOn: string;
   provider: 'DocuSign';
   envelopeId?: string;
+  /** `created` while the envelope is a DocuSign draft that Folium hasn't released yet. */
+  envelopePhase?: 'created';
   status: SignatureStatus;
   documents: RequestDocument[];
   signers: SignerAssignment[];
@@ -344,4 +378,10 @@ export interface FirmProfile {
   crd: string;
   /** Default email message footer for envelopes. */
   disclosure: string;
+  /** Refuse the editable PDF too while checks are open (Laser App's stricter behaviour). */
+  blockFillableWhenIncomplete?: boolean;
+  /** Save the open packet as a draft when an advisor leaves unsaved work idle. Off unless turned on. */
+  idleAutoSave?: boolean;
+  /** Minutes idle before the 2-minute countdown to the auto-save starts. Default 25. */
+  idleAutoSaveMinutes?: number;
 }

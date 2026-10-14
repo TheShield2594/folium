@@ -1,3 +1,4 @@
+import { fitsBox } from '../pdf/layout';
 import { toNumber } from './format';
 import { evaluateCondition, type ResolveScope } from './paths';
 import { valuesForAccount, type FormFill } from './prefill';
@@ -136,6 +137,13 @@ export function runChecks(fills: FormFill[], ctx: CheckContext): CheckResult[] {
   // 5. Flat / XFA PDFs need overlay fields before they can be filled.
   for (const fill of fills) {
     if (fill.template.pdfKind !== 'fillable') {
+      // Overlay text shrinks to fit; past 6pt it runs out of the box. Warn, don't block:
+      // the advisor may know the carrier accepts it.
+      for (const f of fill.fields) {
+        const r = f.mapping.rect;
+        if (!r || f.origin === 'signer' || !f.display || f.mapping.format === 'checkbox' || fitsBox(f.display, r)) continue;
+        results.push({ id: `${fill.template.id}:fit:${f.key}`, level: 'warn', title: `${f.label}: may not fit on the form`, detail: `${fill.template.name}. Shorten it if the carrier is strict.`, templateId: fill.template.id, fieldKey: f.key });
+      }
       results.push({
         id: `${fill.template.id}:kind`,
         level: 'warn',
@@ -155,4 +163,34 @@ export function summarize(results: CheckResult[]) {
     warnings: results.filter((r) => r.level === 'warn').length,
     passed: results.filter((r) => r.level === 'pass').length,
   };
+}
+
+export type OutputMode = 'send' | 'flatten' | 'print' | 'fillable' | 'draft';
+
+export interface OutputGate {
+  allowed: boolean;
+  /** The blocking checks, in the order review lists them. */
+  blockers: CheckResult[];
+  /** Stamp "DRAFT — NOT FOR SIGNATURE" on the output. */
+  draftMark: boolean;
+}
+
+/**
+ * Whether a packet may leave Folium in a given form. Anything a client could sign
+ * (send, flattened PDF, print) needs every blocking check cleared. The editable PDF
+ * stays available so an advisor can finish a form by hand, but carries the draft mark
+ * while checks are open, unless the firm opts into blocking it too. Drafts are always
+ * allowed and always marked. Warnings never block.
+ */
+export function outputGate(results: CheckResult[], mode: OutputMode, opts: { blockFillable?: boolean } = {}): OutputGate {
+  const blockers = results.filter((r) => r.level === 'block');
+  const open = blockers.length > 0;
+  switch (mode) {
+    case 'draft':
+      return { allowed: true, blockers, draftMark: true };
+    case 'fillable':
+      return { allowed: !(open && opts.blockFillable), blockers, draftMark: open };
+    default:
+      return { allowed: !open, blockers, draftMark: false };
+  }
 }

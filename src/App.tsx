@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { createHashRouter, Navigate, Outlet, RouterProvider } from 'react-router-dom';
 import { FoliumAppIcon } from './brand/FoliumMark';
 import { AdminFirm } from './screens/admin/AdminFirm';
 import { AdminPeople } from './screens/admin/AdminPeople';
@@ -16,8 +16,9 @@ import { SendScreen } from './screens/send/SendScreen';
 import { SettingsScreen } from './screens/settings/SettingsScreen';
 import { createServices, ServicesContext } from './services';
 import type { Services } from './services/types';
+import { UnsavedGuards } from './shell/Recovery';
 import { Shell } from './shell/Shell';
-import { useApp } from './state/store';
+import { startJournal, useApp } from './state/store';
 import { Toasts } from './ui/controls';
 
 /** Folium is opened from the Contact form with `?contactId=<guid>` (or `#/...?contactId=`). */
@@ -63,11 +64,49 @@ function Launch() {
   );
 }
 
+function Root() {
+  return (
+    <>
+      <Shell>
+        <Outlet />
+      </Shell>
+      <Toasts />
+      <UnsavedGuards />
+    </>
+  );
+}
+
+// A data router, so leaving Review or Send with unsaved work can be confirmed (useBlocker).
+const router = createHashRouter([
+  {
+    element: <Root />,
+    children: [
+      { path: '/', element: <LibraryScreen /> },
+      { path: '/packets', element: <PacketsScreen /> },
+      { path: '/recent', element: <RecentScreen /> },
+      { path: '/review', element: <ReviewScreen /> },
+      { path: '/send', element: <SendScreen /> },
+      { path: '/requests', element: <RequestsScreen /> },
+      { path: '/drafts', element: <DraftsScreen /> },
+      { path: '/client', element: <ClientScreen /> },
+      { path: '/settings', element: <SettingsScreen /> },
+      { path: '/admin/templates', element: <AdminTemplates /> },
+      { path: '/admin/templates/:id', element: <TemplateEditor /> },
+      { path: '/admin/people', element: <AdminPeople /> },
+      { path: '/admin/firm', element: <AdminFirm /> },
+      { path: '*', element: <Navigate to="/" replace /> },
+    ],
+  },
+]);
+
 export function App() {
   const [services, setServices] = useState<Services>();
   const ready = useApp((s) => s.ready);
   const error = useApp((s) => s.error);
   const boot = useApp((s) => s.boot);
+
+  // Keep the open packet in the session journal so a reload doesn't lose it.
+  useEffect(() => startJournal(), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -103,27 +142,7 @@ export function App() {
 
   return (
     <ServicesContext.Provider value={services}>
-      <HashRouter>
-        <Shell>
-          <Routes>
-            <Route path="/" element={<LibraryScreen />} />
-            <Route path="/packets" element={<PacketsScreen />} />
-            <Route path="/recent" element={<RecentScreen />} />
-            <Route path="/review" element={<ReviewScreen />} />
-            <Route path="/send" element={<SendScreen />} />
-            <Route path="/requests" element={<RequestsScreen />} />
-            <Route path="/drafts" element={<DraftsScreen />} />
-            <Route path="/client" element={<ClientScreen />} />
-            <Route path="/settings" element={<SettingsScreen />} />
-            <Route path="/admin/templates" element={<AdminTemplates />} />
-            <Route path="/admin/templates/:id" element={<TemplateEditor />} />
-            <Route path="/admin/people" element={<AdminPeople />} />
-            <Route path="/admin/firm" element={<AdminFirm />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </Shell>
-        <Toasts />
-      </HashRouter>
+      <RouterProvider router={router} />
     </ServicesContext.Provider>
   );
 }

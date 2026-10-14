@@ -5,6 +5,8 @@ export interface InspectedField {
   name: string;
   type: 'text' | 'checkbox' | 'radio' | 'dropdown' | 'other';
   rects: FieldRect[];
+  /** The text field's MaxLen, when the PDF sets one. */
+  maxLength?: number;
 }
 
 export interface PdfInspection {
@@ -47,6 +49,7 @@ export async function inspectPdf(bytes: Uint8Array): Promise<PdfInspection> {
   const fields: InspectedField[] = form.getFields().map((f) => ({
     name: f.getName(),
     type: typeOf(f),
+    maxLength: f instanceof PDFTextField ? f.getMaxLength() || undefined : undefined,
     rects: f.acroField.getWidgets().map((w): FieldRect => {
       const r = w.getRectangle();
       const idx = widgetPage.get(w.dict) ?? 0;

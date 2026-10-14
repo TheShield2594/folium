@@ -11,6 +11,7 @@ import {
   type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
 } from 'react';
+import { repeatsBanner } from '../services/errors';
 import { createPortal } from 'react-dom';
 import { create } from 'zustand';
 import { Icon, type IconName } from './Icon';
@@ -404,7 +405,9 @@ const useToasts = create<{ toasts: Toast[]; push: (t: Omit<Toast, 'id'>) => void
 
 export const toast = {
   ok: (text: string, action?: Toast['action']) => useToasts.getState().push({ text, tone: 'ok', action }),
-  error: (text: string) => useToasts.getState().push({ text, tone: 'error' }),
+  error: (text: string) => {
+    if (!repeatsBanner(text)) useToasts.getState().push({ text, tone: 'error' });
+  },
 };
 
 export function Toasts() {

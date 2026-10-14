@@ -2,6 +2,7 @@ import { getContext } from '@microsoft/power-apps/app';
 import { getClient, type DataClient } from '@microsoft/power-apps/data';
 import type { Account, Connection, Contact, FirmProfile, FormTemplate, SavedPacket, SignatureRequest, SignatureStatus, TemplateMapping, UserGroup, UserProfile } from '../../domain/types';
 import { buildEnvelopeDefinition, ROLE_SEPARATOR } from '../docusign/tabs';
+import { classifyError, FoliumError } from '../errors';
 import type { CrmService, DirectoryService, DraftStore, IncomingFile, PacketStore, RequestStore, Services, SigningProvider, TemplateLibrary } from '../types';
 import { decodeChoices, encodeChoices } from './choices';
 import { CHOICES, CONNECTORS, DATAVERSE, DOCUSIGN, SHAREPOINT } from './config';
@@ -15,11 +16,12 @@ import { dataSourcesInfo } from './dataSourcesInfo';
 interface OpResult<T> {
   success: boolean;
   data: T;
-  error?: { message?: string };
+  error?: { message?: string; code?: string; status?: number };
 }
 
+/** The SDK reports failures as `{ success: false }`; turn them into classified errors. */
 function unwrap<T>(r: OpResult<T>, what: string): T {
-  if (!r.success) throw new Error(`${what} failed: ${r.error?.message ?? 'unknown error'}`);
+  if (!r.success) throw new FoliumError(classifyError(r.error), what, `${what} failed: ${r.error?.message ?? 'unknown error'}`, r.error);
   return r.data;
 }
 
@@ -334,10 +336,14 @@ export function createPowerServices(): Services {
 
   const signing: SigningProvider = {
     name: 'DocuSign',
-    async send(req) {
-      const env = buildEnvelopeDefinition(req, DOCUSIGN.idv);
-      const res = await connector<{ envelopeId: string }>(CONNECTORS.docuSign, 'CreateEnvelope', { body: env }, 'Send envelope');
+    async create(req) {
+      // Created as a DocuSign draft: nothing reaches the signers until `release`.
+      const env = buildEnvelopeDefinition(req, DOCUSIGN.idv, 'created');
+      const res = await connector<{ envelopeId: string }>(CONNECTORS.docuSign, 'CreateEnvelope', { body: env }, 'Create envelope');
       return { envelopeId: res.envelopeId };
+    },
+    async release(envelopeId) {
+      await connector(CONNECTORS.docuSign, 'UpdateEnvelope', { envelopeId, body: { status: 'sent' } }, 'Send envelope');
     },
     async getStatus(envelopeId) {
       const e = await connector<{ status: string; deliveredDateTime?: string; completedDateTime?: string; recipients?: { signers: { roleName: string; email: string; status: string; signedDateTime?: string }[] } }>(

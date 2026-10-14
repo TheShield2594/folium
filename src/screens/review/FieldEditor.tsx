@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { isTruthy, maskValue } from '../../domain/format';
 import { sourceKind } from '../../domain/paths';
 import type { FieldState } from '../../domain/prefill';
+import type { FieldFormat } from '../../domain/types';
 import { Badge, Button, IconButton, TextInput } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
 
@@ -10,6 +11,8 @@ function toInputDate(v: string) {
   const us = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(v);
   return us ? `${us[3]}-${us[1].padStart(2, '0')}-${us[2].padStart(2, '0')}` : v;
 }
+
+const PLACEHOLDER: Partial<Record<FieldFormat, string>> = { currency: '$0.00', percent: '0%', phone: '(555) 555-5555', ssn: '000-00-0000', ein: '00-0000000', ssnOrTin: '000-00-0000 or 00-0000000', zip: '00000' };
 
 /** One input, shaped by the field's format. */
 export function FieldInput({ field, value, onChange, hideLabel }: { field: FieldState; value: string; onChange: (v: string) => void; hideLabel?: boolean }) {
@@ -28,7 +31,7 @@ export function FieldInput({ field, value, onChange, hideLabel }: { field: Field
     );
   }
 
-  const sensitive = f === 'ssn';
+  const sensitive = f === 'ssn' || f === 'ssnOrTin';
   return (
     <div className="field">
       {!hideLabel && (
@@ -43,9 +46,9 @@ export function FieldInput({ field, value, onChange, hideLabel }: { field: Field
           need={need}
           aria-invalid={field.formatError && value ? true : undefined}
           type={f === 'date' ? 'date' : f === 'email' ? 'email' : sensitive && !reveal ? 'password' : 'text'}
-          inputMode={f === 'currency' || f === 'percent' || f === 'zip' || f === 'ssn' || f === 'ssnLast4' ? 'decimal' : f === 'phone' ? 'tel' : undefined}
+          inputMode={f === 'integer' || f === 'ssn' || f === 'ssnLast4' || f === 'ein' || f === 'ssnOrTin' || f === 'zip' ? 'numeric' : f === 'currency' || f === 'percent' || f === 'decimal' ? 'decimal' : f === 'phone' ? 'tel' : undefined}
           value={f === 'date' ? toInputDate(value) : value}
-          placeholder={f === 'currency' ? '$0.00' : f === 'percent' ? '0%' : f === 'phone' ? '(555) 555-5555' : f === 'ssn' ? '000-00-0000' : undefined}
+          placeholder={PLACEHOLDER[f ?? 'text']}
           onChange={(e) => onChange(e.target.value)}
           spellCheck={f ? false : true}
           autoComplete="off"

@@ -1,4 +1,4 @@
-import type { FieldFormat, FieldRect, Placement } from '../domain/types';
+import type { FieldFormat, FieldLimits, FieldRect, Placement } from '../domain/types';
 
 // A small layout language for the demo form templates. In production the PDFs come
 // from Marketing's SharePoint library; these specs exist so the demo (and the tests)
@@ -15,6 +15,7 @@ export interface SpecField {
   required?: boolean;
   requiredWhen?: string;
   format?: FieldFormat;
+  limits?: FieldLimits;
   key?: string;
   help?: string;
   type?: 'text' | 'checkbox';
@@ -118,4 +119,34 @@ export function layoutSpec(sections: SpecSection[]): Layout {
   }
   out.pageCount = page;
   return out;
+}
+
+// ------------------------------------------------------------------ text fit
+
+/** Helvetica advance widths (1/1000 em) for printable ASCII 32–126, from the standard AFM. */
+const HELVETICA = [
+  278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556,
+  1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556,
+  333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556, 556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584,
+];
+
+/**
+ * Width of `text` in Helvetica at `size` points, without kerning (so never narrower
+ * than what pdf-lib draws). Characters outside ASCII count as a digit's width.
+ */
+export function helveticaWidth(text: string, size: number): number {
+  let units = 0;
+  for (const ch of text) {
+    const c = ch.charCodeAt(0);
+    units += c >= 32 && c <= 126 ? HELVETICA[c - 32] : 556;
+  }
+  return (units * size) / 1000;
+}
+
+/** Overlay text is drawn 2pt in from each side (see fillPdf). */
+export const OVERLAY_PADDING = 4;
+
+/** Whether overlay text fits its box at `minSize` points, the smallest size Folium will shrink it to. */
+export function fitsBox(text: string, rect: Pick<FieldRect, 'width'>, minSize = 6): boolean {
+  return helveticaWidth(text, minSize) <= rect.width - OVERLAY_PADDING;
 }
