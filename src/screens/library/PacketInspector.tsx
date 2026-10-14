@@ -3,9 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { findNameClash, nextFreeName } from '../../domain/drafts';
 import type { SavedPacket } from '../../domain/types';
 import { useServices } from '../../services';
-import { useApp } from '../../state/store';
+import { US_STATES, availableIn, normalizeState, pickVariant } from '../../domain/states';
+import { PACKET_LIMIT, currentTemplates, packetState, useApp } from '../../state/store';
 import { Button, Field, IconButton, Select, Sheet, SwitchRow, TextInput, toast } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
+import { addForm } from '../common/addForm';
 import { usePacketView } from '../common/usePacket';
 
 /** The packet being assembled — Apple-style inspector on the right of Find forms. */
@@ -16,11 +18,17 @@ export function PacketInspector() {
   const moveInPacket = useApp((s) => s.moveInPacket);
   const setPacketAccount = useApp((s) => s.setPacketAccount);
   const clearPacket = useApp((s) => s.clearPacket);
+  const setPacket = useApp((s) => s.setPacket);
+  const replaceInPacket = useApp((s) => s.replaceInPacket);
+  const templates = useApp((s) => s.templates);
   const view = usePacketView();
   const navigate = useNavigate();
   const [saving, setSaving] = useState(false);
 
   const blocking = view?.checks.filter((c) => c.level === 'block').length ?? 0;
+  const full = packet.items.length >= PACKET_LIMIT;
+  const state = packetState(packet, client);
+  const homeState = normalizeState(client?.contact.address1_stateorprovince);
 
   return (
     <aside className="card sticky inspector" aria-label="This packet">
@@ -43,31 +51,62 @@ export function PacketInspector() {
             <p className="t-footnote c3">
               {packet.items.length} {packet.items.length === 1 ? 'form' : 'forms'} · {view?.totals.pages ?? 0} pages
             </p>
+            <label className="row t-callout" style={{ gap: 8 }}>
+              <span className="grow">Approved in</span>
+              <Select
+                aria-label="State the forms must be approved in"
+                value={packet.state ?? ''}
+                onChange={(e) => setPacket({ state: e.target.value || undefined })}
+                style={{ width: 'auto', minHeight: 32, fontSize: 13 }}
+              >
+                <option value="">{homeState ? `${homeState} (client’s address)` : 'Choose a state…'}</option>
+                {US_STATES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </Select>
+            </label>
             <ol className="packet-list">
               {packet.items.map((item, i) => {
                 const t = view?.templates.find((x) => x.id === item.templateId);
-                const fill = view?.fills.find((f) => f.template.id === item.templateId);
+                const fill = view?.fills.find((f) => f.itemId === item.id);
                 if (!t) return null;
-                const needsAccount = !!t.appliesTo?.length && (client?.accounts.length ?? 0) > 1;
+                const name = item.copy ? `${t.name} (copy ${item.copy})` : t.name;
+                const needsAccount = (!!t.appliesTo?.length || !!item.copy) && (client?.accounts.length ?? 0) > 1;
                 return (
-                  <li key={item.templateId}>
+                  <li key={item.id}>
                     <div className="row" style={{ alignItems: 'flex-start' }}>
                       <span className="num tabular">{i + 1}</span>
                       <div className="grow" style={{ minWidth: 0 }}>
-                        <div className="t-headline ellipsis">{t.name}</div>
+                        <div className="t-headline ellipsis">{name}</div>
                         <div className="t-footnote c3">
                           <span className="mono">{t.formNumber}</span>
                           {fill && fill.missingCount > 0 ? <span className="c-warn"> · {fill.missingCount} to fill</span> : <span className="c-accent"> · ready</span>}
                         </div>
                       </div>
                       <div className="row" style={{ gap: 0 }}>
-                        <IconButton icon="chevronUp" label={`Move ${t.name} up`} size={15} disabled={i === 0} onClick={() => moveInPacket(t.id, -1)} />
-                        <IconButton icon="chevronDown" label={`Move ${t.name} down`} size={15} disabled={i === packet.items.length - 1} onClick={() => moveInPacket(t.id, 1)} />
-                        <IconButton icon="x" label={`Remove ${t.name}`} size={15} onClick={() => removeFromPacket(t.id)} />
+                        <IconButton icon="chevronUp" label={`Move ${name} up`} size={15} disabled={i === 0} onClick={() => moveInPacket(item.id, -1)} />
+                        <IconButton icon="chevronDown" label={`Move ${name} down`} size={15} disabled={i === packet.items.length - 1} onClick={() => moveInPacket(item.id, 1)} />
+                        <IconButton icon="x" label={`Remove ${name}`} size={15} onClick={() => removeFromPacket(item.id)} />
                       </div>
                     </div>
+                    {!availableIn(t, state) && (
+                      <div className="row t-footnote c-warn" style={{ marginTop: 6, gap: 6 }}>
+                        <Icon name="warning" size={13} />
+                        <span className="grow">Not approved in {state}</span>
+                        {(() => {
+                          const v = t.variantGroup ? pickVariant(currentTemplates(templates), t.variantGroup, state) : undefined;
+                          return v && v.id !== t.id ? (
+                            <button className="btn btn-plain btn-sm" onClick={() => replaceInPacket(item.id, v.id)}>
+                              Use the {state} version
+                            </button>
+                          ) : null;
+                        })()}
+                      </div>
+                    )}
                     {needsAccount && (
-                      <Select aria-label={`Account for ${t.name}`} value={item.accountId ?? ''} onChange={(e) => setPacketAccount(t.id, e.target.value)} style={{ marginTop: 8, minHeight: 32, fontSize: 13 }}>
+                      <Select aria-label={`Account for ${name}`} value={item.accountId ?? ''} onChange={(e) => setPacketAccount(item.id, e.target.value)} style={{ marginTop: 8, minHeight: 32, fontSize: 13 }}>
                         <option value="" disabled>
                           Choose account…
                         </option>
@@ -78,6 +117,9 @@ export function PacketInspector() {
                         ))}
                       </Select>
                     )}
+                    <button className="btn btn-plain btn-sm" style={{ marginTop: 4, paddingLeft: 0 }} disabled={full} title={full ? `A packet holds up to ${PACKET_LIMIT} forms` : undefined} onClick={() => addForm(t.id, undefined, { duplicate: true })}>
+                      <Icon name="plus" size={13} strokeWidth={2.2} /> Add another copy
+                    </button>
                   </li>
                 );
               })}

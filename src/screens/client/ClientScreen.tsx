@@ -211,6 +211,15 @@ export function ClientScreen() {
                     </Select>
                   </Field>
                 )}
+                {sec.title === 'Personal' && (
+                  <Field label="Gender" htmlFor="c-gender">
+                    <Select id="c-gender" value={String(draft.gendercode ?? c.gendercode ?? '')} onChange={(e) => setDraft({ ...draft, gendercode: e.target.value as Contact['gendercode'] })}>
+                      <option value="">—</option>
+                      <option value="female">Female</option>
+                      <option value="male">Male</option>
+                    </Select>
+                  </Field>
+                )}
               </div>
             </section>
           ))}

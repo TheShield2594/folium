@@ -31,7 +31,7 @@ describe('idle auto-save timing', () => {
     const me = USERS[0];
     const t = TEMPLATES.find((x) => x.id === 'tpl-ev1120-0326')!;
     const fills = prefillPacket([{ template: t }], { client: CLIENTS['c-jordan'], advisor: me, firm: FIRM }, {});
-    const packet = { items: [{ templateId: t.id }], values: {}, title: 'Beneficiaries', attachments: [], sharedWith: [] };
+    const packet = { items: [{ id: 'pi-1', templateId: t.id }], values: {}, title: 'Beneficiaries', attachments: [], sharedWith: [] };
     const saved = await saveDraft({ services, packet, fills, contactId: 'c-jordan', me, owner: me, auditNote: 'saved automatically after 25 minutes idle' });
     expect(saved.audit.at(-1)).toMatchObject({ action: 'Draft saved', detail: 'saved automatically after 25 minutes idle' });
     const plain = await saveDraft({ services, packet, fills, contactId: 'c-jordan', me, owner: me, existing: saved });

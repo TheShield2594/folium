@@ -1,11 +1,13 @@
 import { formatValue, prettifyFieldName, validateFormat } from './format';
 import { ConditionError, conditionTerms, describeSource, evaluateCondition, explainCondition, parseCondition, resolvePath, sourceKind, type ResolveScope, type TermLabel } from './paths';
-import type { Account, FieldMapping, FormTemplate, TemplateMapping } from './types';
+import type { Account, ClientRecord, Contact, FieldMapping, FormTemplate, TemplateMapping } from './types';
 
 export type FieldOrigin = 'crm' | 'rep' | 'firm' | 'computed' | 'static' | 'edited' | 'advisor' | 'signer' | 'missing';
 
 export interface FieldState {
   templateId: string;
+  /** The packet item (form instance) this field is on. */
+  itemId: string;
   mapping: FieldMapping;
   /** Canonical key shared across forms in a packet. */
   key: string;
@@ -32,6 +34,10 @@ export interface FieldState {
 
 export interface FormFill {
   template: FormTemplate;
+  /** The packet item this is: a form's id in the packet, distinct for each copy. Defaults to the template id. */
+  itemId: string;
+  /** 2 and up on an added copy of a form. */
+  copy?: number;
   account?: Account;
   /** The account `account.*` fields resolved against, including the first-account fallback. */
   accountId?: string;
@@ -45,9 +51,23 @@ export interface FormFill {
  * The canonical key for a field. Fields with the same key share one value across
  * every form in a packet — LaserApp's "enter once, use everywhere". Account fields
  * are scoped to the account the form is about, so a correction on one account's
- * form never leaks onto a form about another account.
+ * form never leaks onto a form about another account. On an added copy of a form
+ * (`copyId`, the copy's item id), advisor-entered fields are scoped to that copy, so
+ * typing on copy 2 never changes copy 1; client data stays shared.
  */
-export function fieldKey(m: FieldMapping, t: Pick<FormTemplate, 'formNumber'>, accountId?: string): string {
+export function fieldKey(m: FieldMapping, t: Pick<FormTemplate, 'formNumber'>, accountId?: string, copyId?: string): string {
+  const base = baseKey(m, t, accountId);
+  return copyId && perCopy(m) ? copyKey(copyId, base) : base;
+}
+
+/**
+ * Fields a copy keeps its own value for: what the advisor types, and person blocks
+ * (beneficiary 2 on one IRA's form needn't be the same person on the other's), even
+ * when the block reads a connection from CRM.
+ */
+const perCopy = (m: FieldMapping) => (sourceKind(m.source) === 'advisor' || !!m.person) && !m.shareAcrossCopies;
+
+function baseKey(m: FieldMapping, t: Pick<FormTemplate, 'formNumber'>, accountId?: string): string {
   if (m.key) return m.key;
   const kind = sourceKind(m.source);
   if (kind === 'advisor' || kind === 'signer') return `${t.formNumber}:${m.pdfField}`;
@@ -56,6 +76,10 @@ export function fieldKey(m: FieldMapping, t: Pick<FormTemplate, 'formNumber'>, a
 }
 
 export const accountKey = (accountId: string, attr: string) => `account[${accountId}].${attr}`;
+export const copyKey = (itemId: string, key: string) => `${itemId}/${key}`;
+
+/** The item id a copy's own values are keyed under: set for copy 2 and later, never for the first. */
+export const copyScope = (item: { id?: string; copy?: number } | undefined) => (item?.id && (item.copy ?? 1) > 1 ? item.id : undefined);
 
 /** The account a form's `account.*` sources resolve against (see resolvePath). */
 export const formAccountId = (scope: Pick<ResolveScope, 'account' | 'client'>) => (scope.account ?? scope.client.accounts[0])?.accountid;
@@ -63,13 +87,32 @@ export const formAccountId = (scope: Pick<ResolveScope, 'account' | 'client'>) =
 /**
  * Values as conditions on one form see them: overrides for this form's account also
  * answer to the plain `account.<attr>` path, so `account.ev_accounttype == Roth IRA`
- * keeps working.
+ * keeps working. On a copy, the copy's own values answer to their plain keys too.
  */
-export function valuesForAccount(values: Record<string, string>, accountId: string | undefined): Record<string, string> {
-  if (!accountId) return values;
+export function valuesForAccount(values: Record<string, string>, accountId: string | undefined, copyId?: string): Record<string, string> {
+  if (!accountId && !copyId) return values;
   const prefix = `account[${accountId}].`;
+  const mine = copyId ? `${copyId}/` : undefined;
   const out = { ...values };
-  for (const [k, v] of Object.entries(values)) if (k.startsWith(prefix)) out[`account.${k.slice(prefix.length)}`] = v;
+  for (const [k, v] of Object.entries(values)) {
+    if (accountId && k.startsWith(prefix)) out[`account.${k.slice(prefix.length)}`] = v;
+    if (mine && k.startsWith(mine)) out[k.slice(mine.length)] = v;
+  }
+  return out;
+}
+
+/**
+ * Values for a new copy of a form: its advisor fields start from the original's
+ * (`fromCopyId` when the original is itself a copy), so the advisor edits only what
+ * differs.
+ */
+export function seedCopyValues(t: FormTemplate, values: Record<string, string>, toItemId: string, fromCopyId?: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const m of t.mapping.fields) {
+    if (!perCopy(m)) continue;
+    const from = fieldKey(m, t, undefined, fromCopyId);
+    if (from in values) out[fieldKey(m, t, undefined, toItemId)] = values[from];
+  }
   return out;
 }
 
@@ -86,6 +129,23 @@ export function migrateAccountValues(values: Record<string, string>, firstAccoun
       const scoped = accountKey(firstAccountId, k.slice('account.'.length));
       if (!(scoped in values)) out[scoped] = v;
     } else out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Values to carry when one form is swapped for another version of it (another state's).
+ * A field whose key differs between the two (keys that default to the form number) gets
+ * the old value under its new key, matched by PDF field name. Nothing is overwritten.
+ */
+export function carryVariantValues(from: FormTemplate, to: FormTemplate, values: Record<string, string>, copyId?: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const m of from.mapping.fields) {
+    const n = to.mapping.fields.find((x) => x.pdfField === m.pdfField);
+    if (!n) continue;
+    const a = fieldKey(m, from, undefined, copyId);
+    const b = fieldKey(n, to, undefined, copyId);
+    if (a !== b && a in values && !(b in values)) out[b] = values[a];
   }
   return out;
 }
@@ -139,12 +199,14 @@ export function prefillForm(
   template: FormTemplate,
   scope: ResolveScope,
   values: Record<string, string>,
+  item?: { id?: string; copy?: number },
 ): FormFill {
   const accountId = formAccountId(scope);
-  const condValues = valuesForAccount(values, accountId);
+  const copyId = copyScope(item);
+  const condValues = valuesForAccount(values, accountId, copyId);
   const labels = termLabels(template.mapping);
   const fields = template.mapping.fields.map((m): FieldState => {
-    const key = fieldKey(m, template, accountId);
+    const key = fieldKey(m, template, accountId, copyId);
     const kind = sourceKind(m.source);
     const crmValue = kind === 'advisor' || kind === 'signer' ? undefined : resolvePath(m.source, scope);
     const edited = Object.prototype.hasOwnProperty.call(values, key) ? values[key] : undefined;
@@ -162,14 +224,18 @@ export function prefillForm(
     else if (value) origin = kind === 'advisor' ? 'advisor' : (kind as FieldOrigin);
     else origin = 'missing';
 
-    const missing = kind !== 'signer' && !locked && required && !value.trim();
+    const choice = !!(m.checkedWhen || m.options);
+    // A radio prints nothing for a value with no option, so a required one is still missing.
+    // (A box in a `checkedWhen` set is blank whenever another box is ticked, so its value counts.)
+    const missing = kind !== 'signer' && !locked && required && (!value.trim() || (!!m.options && !choiceDisplay(m, value)));
     return {
       templateId: template.id,
+      itemId: item?.id ?? template.id,
       mapping: m,
       key,
       label: m.label ?? prettifyFieldName(m.pdfField),
       value,
-      display: m.format === 'checkbox' ? value : formatValue(value, m.format, m.limits),
+      display: choiceDisplay(m, value) ?? (m.format === 'checkbox' ? value : formatValue(value, m.format, m.limits)),
       origin,
       sourceLabel: describeSource(m.source),
       crmValue: origin === 'edited' ? crmValue : undefined,
@@ -177,7 +243,7 @@ export function prefillForm(
       required,
       missing,
       // CRM values are checked too, so bad data already in D365 surfaces here.
-      formatError: locked ? undefined : validateFormat(value, m.format, m.limits, scope.today),
+      formatError: locked || choice ? undefined : validateFormat(value, m.format, m.limits, scope.today),
       locked,
       lockReason: locked ? explainCondition(m.lockWhen, labels) : undefined,
     };
@@ -186,6 +252,8 @@ export function prefillForm(
   const relevant = fields.filter((f) => f.origin !== 'signer');
   return {
     template,
+    itemId: item?.id ?? template.id,
+    copy: item?.copy && item.copy > 1 ? item.copy : undefined,
     account: scope.account,
     accountId: template.mapping.fields.some((m) => m.source.startsWith('account.')) ? accountId : scope.account?.accountid,
     fields,
@@ -195,9 +263,44 @@ export function prefillForm(
   };
 }
 
+const sameWord = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * What a box or radio mapped to a choice prints: `Yes` when the value is the box's word
+ * (empty otherwise), or the radio option for the value. Undefined for other fields.
+ */
+export function choiceDisplay(m: Pick<FieldMapping, 'checkedWhen' | 'options'>, value: string): string | undefined {
+  if (m.checkedWhen) return value && sameWord(value, m.checkedWhen) ? 'Yes' : '';
+  if (m.options) return Object.entries(m.options).find(([k]) => value && sameWord(k, value))?.[1] ?? '';
+  return undefined;
+}
+
+/** The choices a set of fields sharing one key offers (each box's word, or each radio value), in mapping order. */
+export function choiceOptions(fields: Pick<FieldState, 'mapping' | 'label'>[]): { value: string; label: string }[] {
+  const out = new Map<string, string>();
+  for (const f of fields) {
+    if (f.mapping.checkedWhen && !out.has(f.mapping.checkedWhen.toLowerCase())) out.set(f.mapping.checkedWhen.toLowerCase(), f.label);
+    for (const k of Object.keys(f.mapping.options ?? {})) if (!out.has(k.toLowerCase())) out.set(k.toLowerCase(), k.charAt(0).toUpperCase() + k.slice(1));
+  }
+  return [...out.entries()].map(([value, label]) => ({ value, label }));
+}
+
+const CHOICE_NAMES: Record<string, string> = { familystatuscode: 'Marital status', gendercode: 'Gender', ev_employmentstatus: 'Employment status' };
+
+/** What a set of choice boxes asks, from their source: `contact.familystatuscode` → "Marital status". */
+export function choiceQuestion(source: string, fallback: string): string {
+  const attr = /\.([a-z0-9_]+)$/i.exec(source)?.[1];
+  const prefix = /^connection\[([^\]#]+)/.exec(source)?.[1];
+  const name = attr ? CHOICE_NAMES[attr] : undefined;
+  return name ? (prefix ? `${prefix}: ${name.toLowerCase()}` : name) : fallback;
+}
+
 export interface PacketFillInput {
   template: FormTemplate;
   account?: Account;
+  /** The packet item; defaults to the template id. */
+  itemId?: string;
+  copy?: number;
 }
 
 export function prefillPacket(
@@ -205,7 +308,7 @@ export function prefillPacket(
   scope: Omit<ResolveScope, 'account'>,
   values: Record<string, string>,
 ): FormFill[] {
-  return items.map((it) => prefillForm(it.template, { ...scope, account: it.account }, values));
+  return items.map((it) => prefillForm(it.template, { ...scope, account: it.account }, values, { id: it.itemId, copy: it.copy }));
 }
 
 /**
@@ -237,6 +340,60 @@ export function inputsNeeded(fills: FormFill[]): { key: string; fields: FieldSta
   return [...byKey.entries()]
     .map(([key, fields]) => ({ key, fields, required: fields.some((f) => f.required || (f.formatError && f.value)) }))
     .sort((a, b) => Number(b.required) - Number(a.required));
+}
+
+// ---------------------------------------------------------------- Person blocks
+
+/** Someone a person block (a beneficiary, a joint owner) can be filled from. */
+export interface Person {
+  /** Contact id, when the person is in Dynamics. */
+  contactId?: string;
+  name: string;
+  /** Their relationship to the client ("Spouse", "Son"), or "Client" for the client. */
+  role: string;
+  contact?: Contact;
+  sharePct?: number;
+}
+
+/** Who filled a block, kept with the packet and its draft. */
+export interface PersonPick {
+  contactId?: string;
+  name: string;
+  role: string;
+}
+
+/** The client and everyone connected to them, for "Fill from…" and signer pickers. */
+export function relatedPeople(client: ClientRecord): Person[] {
+  const me: Person = { contactId: client.contact.contactid, name: client.contact.fullname, role: 'Client', contact: client.contact };
+  return [me, ...client.connections.map((c): Person => ({ contactId: c.contact.contactid, name: c.contact.fullname, role: c.role, contact: c.contact, sharePct: c.ev_sharepct }))];
+}
+
+/** The person blocks on some forms, in the order they first appear. */
+export function personBlocks(fills: FormFill[]): string[] {
+  return [...new Set(fills.flatMap((f) => f.fields.map((x) => x.mapping.person?.block).filter((b): b is string => !!b)))];
+}
+
+/** Where a block's pick is kept: per copy on an added copy of a form, like its values. */
+export const blockKey = (block: string, fill: Pick<FormFill, 'itemId' | 'copy'>) => {
+  const scope = copyScope({ id: fill.itemId, copy: fill.copy });
+  return scope ? copyKey(scope, block) : block;
+};
+
+/**
+ * The values that fill a person block from one person: each field in the block gets the
+ * person's value for its `person.attr` (a contact column, `role` or `ev_sharepct`).
+ * With no person ("Someone new"), the block is cleared for the advisor to type.
+ */
+export function fillBlockFromPerson(fills: FormFill[], block: string, person: Person | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const f of fills.flatMap((x) => x.fields)) {
+    const attr = f.mapping.person?.block === block ? f.mapping.person.attr : undefined;
+    if (!attr || f.locked) continue;
+    let v: unknown = '';
+    if (person) v = attr === 'role' ? person.role : attr === 'ev_sharepct' ? person.sharePct : attr === 'fullname' ? person.name : person.contact?.[attr];
+    out[f.key] = v === undefined || v === null ? '' : String(v);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- Draft snapshots

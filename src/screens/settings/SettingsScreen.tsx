@@ -5,6 +5,7 @@ import { useServices } from '../../services';
 import { resetDemo, setDemoUser } from '../../services/demo';
 import { Toolbar } from '../../shell/Shell';
 import { useApp, type Theme } from '../../state/store';
+import { StatesPicker } from '../common/StatesPicker';
 import { Avatar, Badge, Button, Field, Segmented, Select, TextArea, TextInput, toast } from '../../ui/controls';
 
 /** Your own Folium profile (User Data), preferences and appearance. */
@@ -114,6 +115,12 @@ export function SettingsScreen() {
                 </Field>
               </div>
             </div>
+          </section>
+
+          <section className="card card-pad stack-4" aria-labelledby="lic-h">
+            <h2 id="lic-h" className="t-title3">Insurance licences</h2>
+            <p className="t-footnote c3">The states you’re licensed to sell insurance in. Folium warns before you send an insurance form for a client in another state. Leave it empty to skip the check.</p>
+            <StatesPicker label="Licensed in" emptyLabel="Not set" value={p.licensedStates ?? []} onChange={(v) => set({ licensedStates: v.length ? v : undefined })} />
           </section>
 
           <section className="card card-pad stack-4">

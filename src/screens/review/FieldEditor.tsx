@@ -2,9 +2,9 @@ import { useId, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { isTruthy, maskValue } from '../../domain/format';
 import { sourceKind } from '../../domain/paths';
-import type { FieldState } from '../../domain/prefill';
+import { choiceQuestion, type FieldState } from '../../domain/prefill';
 import type { FieldFormat } from '../../domain/types';
-import { Badge, Button, IconButton, TextInput } from '../../ui/controls';
+import { Badge, Button, IconButton, Select, TextInput } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
 
 function toInputDate(v: string) {
@@ -14,8 +14,11 @@ function toInputDate(v: string) {
 
 const PLACEHOLDER: Partial<Record<FieldFormat, string>> = { currency: '$0.00', percent: '0%', phone: '(555) 555-5555', ssn: '000-00-0000', ein: '00-0000000', ssnOrTin: '000-00-0000 or 00-0000000', zip: '00000' };
 
-/** One input, shaped by the field's format. */
-export function FieldInput({ field, value, onChange, hideLabel }: { field: FieldState; value: string; onChange: (v: string) => void; hideLabel?: boolean }) {
+/**
+ * One input, shaped by the field's format. `choices`: the values a set of boxes or a
+ * radio group sharing this field's key offers; with more than one, it's a picker.
+ */
+export function FieldInput({ field, value, onChange, hideLabel, choices }: { field: FieldState; value: string; onChange: (v: string) => void; hideLabel?: boolean; choices?: { value: string; label: string }[] }) {
   const id = useId();
   const f = field.mapping.format;
   const [reveal, setReveal] = useState(false);
@@ -35,6 +38,41 @@ export function FieldInput({ field, value, onChange, hideLabel }: { field: Field
           Locked {field.lockReason ?? ''}. It prints blank{value ? '; what you entered comes back if that changes' : ''}.
         </span>
       </div>
+    );
+  }
+
+  if ((field.mapping.checkedWhen || field.mapping.options) && choices && choices.length > 1) {
+    const label = choiceQuestion(field.mapping.source, field.label);
+    return (
+      <div className="field">
+        {!hideLabel && (
+          <label htmlFor={id} className="row" style={{ gap: 6 }}>
+            {label}
+            {field.required && <span className="c-warn" aria-label="required">•</span>}
+          </label>
+        )}
+        <Select id={id} aria-label={hideLabel ? label : undefined} value={choices.find((c) => c.value === value.trim().toLowerCase())?.value ?? ''} onChange={(e) => onChange(e.target.value)}>
+          <option value="">None ticked</option>
+          {choices.map((c) => (
+            <option key={c.value} value={c.value}>
+              {c.label}
+            </option>
+          ))}
+        </Select>
+        {value && !choices.some((c) => c.value === value.trim().toLowerCase()) && <span className="help">On file: “{value}”, which none of the boxes match.</span>}
+      </div>
+    );
+  }
+
+  if (field.mapping.checkedWhen) {
+    // One box of a set: ticking it sets the shared value to this box's word.
+    const word = field.mapping.checkedWhen;
+    return (
+      <label className="row" style={{ minHeight: 32, cursor: 'pointer' }}>
+        <input type="checkbox" className="check" checked={isTruthy(field.display)} onChange={(e) => onChange(e.target.checked ? word : '')} />
+        <span className="t-callout" style={{ fontWeight: 600 }}>{field.label}</span>
+        {field.required && <span className="c-warn t-footnote">required</span>}
+      </label>
     );
   }
 
@@ -78,7 +116,7 @@ export function FieldInput({ field, value, onChange, hideLabel }: { field: Field
 }
 
 /** The selected field: edit it, see where it came from, put the CRM value back. */
-export function FieldEditor({ field, value, onChange, onClose, usedOn }: { field: FieldState; value: string | undefined; onChange: (v: string | undefined) => void; onClose: () => void; usedOn: string[] }) {
+export function FieldEditor({ field, value, onChange, onClose, usedOn, choices }: { field: FieldState; value: string | undefined; onChange: (v: string | undefined) => void; onClose: () => void; usedOn: string[]; choices?: { value: string; label: string }[] }) {
   const navigate = useNavigate();
   const kind = sourceKind(field.mapping.source);
   const fromCrm = kind === 'crm';
@@ -88,7 +126,7 @@ export function FieldEditor({ field, value, onChange, onClose, usedOn }: { field
         <span className="grow t-caption c3">SELECTED FIELD</span>
         <IconButton icon="x" label="Done" size={15} onClick={onClose} />
       </div>
-      <FieldInput field={field} value={value ?? field.value} onChange={(v) => onChange(v)} />
+      <FieldInput field={field} value={value ?? field.value} onChange={(v) => onChange(v)} choices={choices} />
       <div className="row wrap" style={{ gap: 6 }}>
         <Badge tone={field.origin === 'edited' || field.origin === 'advisor' ? 'info' : field.missing ? 'warn' : 'accent'}>
           {field.origin === 'edited' ? 'Changed on this form' : field.sourceLabel}

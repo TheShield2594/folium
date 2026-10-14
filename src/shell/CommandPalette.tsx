@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { searchTemplates } from '../screens/library/search';
-import { currentTemplates, useApp, visibleTemplates } from '../state/store';
+import { PACKET_LIMIT, currentTemplates, useApp, visibleTemplates } from '../state/store';
 import { toast } from '../ui/controls';
 import { Icon, type IconName } from '../ui/Icon';
 
@@ -55,8 +55,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         detail: `${t.formNumber} · ${t.issuer ?? t.source}`,
         run: () => {
           if (!client) return toast.error('Choose a client first.');
-          addToPacket(t.id);
-          toast.ok(`Added ${t.name}`);
+          const r = addToPacket(t.id);
+          if (r === 'full') toast.error(`A packet holds up to ${PACKET_LIMIT} forms.`);
+          else toast.ok(r === 'present' ? `${t.name} is already in the packet` : `Added ${t.name}`);
         },
       }));
     const pk: Cmd[] = packets

@@ -120,22 +120,33 @@ export function createPowerServices(): Services {
         await client.retrieveMultipleRecordsAsync<Account>(DATAVERSE.account, { filter: `${DATAVERSE.accountContactLookup} eq ${contactId} and statecode eq 0` }),
         'Load accounts',
       );
-      const conns = unwrap(
-        await client.retrieveMultipleRecordsAsync<Record<string, string>>(DATAVERSE.connection, {
-          filter: `_record1id_value eq ${contactId} and statecode eq 0`,
-          select: ['_record2id_value', '_record2roleid_value', 'ev_sharepct'],
-        }),
-        'Load connections',
-      );
+      // Connections in both directions: where the client is record 1 (the other person's
+      // role is record 2's) and where they're record 2. Dataverse often keeps a reciprocal
+      // row too, so the same person in the same role is listed once.
+      const FORMATTED = '@OData.Community.Display.V1.FormattedValue';
+      const sides = [
+        { me: '_record1id_value', other: '_record2id_value', role: '_record2roleid_value' },
+        { me: '_record2id_value', other: '_record1id_value', role: '_record1roleid_value' },
+      ];
       const connections: Connection[] = [];
-      for (const c of conns) {
-        const other = await client.retrieveRecordAsync<Contact>(DATAVERSE.contact, c._record2id_value);
-        if (!other.success) continue;
-        connections.push({
-          role: c['_record2roleid_value@OData.Community.Display.V1.FormattedValue'] ?? 'Connection',
-          contact: toContact(other.data),
-          ev_sharepct: c.ev_sharepct ? Number(c.ev_sharepct) : undefined,
-        });
+      const seen = new Set<string>();
+      for (const side of sides) {
+        const conns = unwrap(
+          await client.retrieveMultipleRecordsAsync<Record<string, string>>(DATAVERSE.connection, {
+            filter: `${side.me} eq ${contactId} and statecode eq 0`,
+            select: [side.other, side.role, 'ev_sharepct'],
+          }),
+          'Load connections',
+        );
+        for (const c of conns) {
+          const role = c[`${side.role}${FORMATTED}`] ?? 'Connection';
+          const id = c[side.other];
+          if (!id || id === contactId || seen.has(`${id}|${role.toLowerCase()}`)) continue;
+          const other = await client.retrieveRecordAsync<Contact>(DATAVERSE.contact, id);
+          if (!other.success) continue;
+          seen.add(`${id}|${role.toLowerCase()}`);
+          connections.push({ role, contact: toContact(other.data), ev_sharepct: c.ev_sharepct ? Number(c.ev_sharepct) : undefined });
+        }
       }
       return { contact, accounts, connections };
     },
@@ -202,6 +213,13 @@ export function createPowerServices(): Services {
       if (!t) throw new Error('Template not found');
       const next = { ...t, mapping, status: t.status === 'Needs mapping' && mapping.fields.length ? ('Draft' as const) : t.status, modifiedOn: new Date().toISOString() };
       unwrap(await client.updateRecordAsync(DATAVERSE.formTemplate, id, { ev_payload: JSON.stringify(next), ev_status: next.status }), 'Save mapping');
+      return next;
+    },
+    async saveDetails(id, details) {
+      const t = (await templates.list()).find((x) => x.id === id);
+      if (!t) throw new Error('Template not found');
+      const next: FormTemplate = { ...t, states: details.states?.length ? details.states : undefined, variantGroup: details.variantGroup?.trim() || undefined, modifiedOn: new Date().toISOString() };
+      unwrap(await client.updateRecordAsync(DATAVERSE.formTemplate, id, { ev_payload: JSON.stringify(next) }), 'Save details');
       return next;
     },
     async setStatus(id, status, effectiveDate) {

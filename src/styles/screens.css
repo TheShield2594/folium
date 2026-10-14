@@ -28,6 +28,12 @@
 .form-row:hover {
   background: var(--fill);
 }
+/* Not approved in the packet's state: still findable by search, but quieter. */
+.form-row.off .info,
+.form-row.off .cell-fill,
+.form-row.off .cell-signers {
+  opacity: 0.55;
+}
 .form-row.in {
   background: var(--accent-tint);
 }

@@ -109,11 +109,11 @@ export function PdfView({ template, fields = [], placements = [], width = 640, a
                     .filter((r) => r.page === page)
                     .map((r, j) => {
                       const tone = f.locked ? 'locked' : f.origin === 'signer' ? 'signer' : f.missing || f.formatError ? 'need' : f.origin === 'edited' || f.origin === 'advisor' ? 'edit' : f.value ? 'crm' : 'empty';
-                      const isCheck = f.mapping.format === 'checkbox';
+                      const isCheck = f.mapping.format === 'checkbox' || !!f.mapping.checkedWhen;
                       const shown = f.origin === 'signer' ? '' : maskSensitive ? maskValue(f.display, f.mapping.format) : f.display;
                       return (
                         <button
-                          key={`${f.key}-${j}`}
+                          key={`${f.mapping.pdfField}-${j}`}
                           type="button"
                           className={`hl hl-${tone}${activeKey === f.key ? ' active' : ''}`}
                           style={{ left: r.x * s, top: r.y * s, width: Math.max(r.width * s, 10), height: Math.max(r.height * s, 10), fontSize: Math.max(8, Math.min(11, r.height * s * 0.62)) }}
@@ -126,7 +126,7 @@ export function PdfView({ template, fields = [], placements = [], width = 640, a
                           aria-label={`${f.label}: ${f.locked ? `locked ${f.lockReason ?? ''}`.trim() : f.value ? shown || 'filled' : f.origin === 'signer' ? 'completed by signer' : 'empty'}`}
                           title={f.locked ? `${f.label} · Locked ${f.lockReason ?? ''}`.trim() : `${f.label} · ${f.sourceLabel}`}
                         >
-                          {showValues && !f.locked && (isCheck ? (/^(true|yes|y|x|on|1|checked)$/i.test(f.value) ? '✕' : '') : shown)}
+                          {showValues && !f.locked && (isCheck ? (/^(true|yes|y|x|on|1|checked)$/i.test(f.display) ? '✕' : '') : shown)}
                         </button>
                       );
                     }),

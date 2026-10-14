@@ -48,7 +48,11 @@ export function sensitiveKeys(templates: FormTemplate[]): SensitiveTest {
       if (!m.key && m.source.startsWith('account.')) accountAttrs.add(m.source.slice('account.'.length));
     }
   }
-  return (key) => exact.has(key) || accountAttrs.has(/^account\[[^\]]+\]\.(.+)$/.exec(key)?.[1] ?? '');
+  return (key) => {
+    // A copy's own values are keyed `<itemId>/<key>`: judge them by the key underneath.
+    const base = key.replace(/^pi-[^/]+\//, '');
+    return exact.has(base) || accountAttrs.has(/^account\[[^\]]+\]\.(.+)$/.exec(base)?.[1] ?? '');
+  };
 }
 
 const keep = (sensitive?: SensitiveTest) => ([k]: [string, string]) => !sensitive?.(k) && !SENSITIVE.test(k);

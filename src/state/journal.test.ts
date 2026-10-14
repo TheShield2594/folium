@@ -5,7 +5,7 @@ import { CLIENTS, TEMPLATES } from '../services/demo/seed';
 import { ago, clearJournal, newerThanDraft, readJournal, redactPacket, sensitiveKeys, writeJournal } from './journal';
 import { startJournal, useApp, type Packet } from './store';
 
-const items: PacketItem[] = [{ templateId: 'tpl-ev1120-0326' }, { templateId: 'tpl-px310-0826', accountId: 'a-j3' }];
+const items: PacketItem[] = [{ id: 'pi-1', templateId: 'tpl-ev1120-0326' }, { id: 'pi-2', templateId: 'tpl-px310-0826', accountId: 'a-j3' }];
 const values = { 'bene.Prim.1.pct': '100', 'withholding.federal': '10', 'contact.ev_ssn': '412-55-0193', 'bene.Prim.1.ssn': '123-45-6789', 'own.tin': '12-3456789' };
 const packet = (p: Partial<Packet> = {}): Packet => ({ items, values: {}, title: '', attachments: [], sharedWith: [], ...p });
 
@@ -45,8 +45,11 @@ describe('packet journal', () => {
     expect(sensitive('ownerTaxId')).toBe(true);
     expect(sensitive('account[a-j1].ev_tin')).toBe(true);
     expect(sensitive('note')).toBe(false);
+    // A copy's own value is judged by the key underneath.
+    expect(sensitive('pi-2/ownerTaxId')).toBe(true);
+    expect(sensitive('pi-2/note')).toBe(false);
     // The form is no longer in the packet, but the value it left behind is still left out.
-    const p = packet({ items: [{ templateId: 'tpl-ev1120-0326' }], values: { ownerTaxId: '12-3456789', 'account[a-j1].ev_tin': '12-3456789', note: 'hello' }, snapshot: { ownerTaxId: '98-7654321', 'contact.fullname': 'Jordan' } });
+    const p = packet({ items: [{ id: 'pi-1', templateId: 'tpl-ev1120-0326' }], values: { ownerTaxId: '12-3456789', 'account[a-j1].ev_tin': '12-3456789', note: 'hello' }, snapshot: { ownerTaxId: '98-7654321', 'contact.fullname': 'Jordan' } });
     writeJournal({ userId: 'u', contactId: 'c', packet: { ...p, dirty: true }, sensitive });
     const saved = readJournal('u')!.packet;
     expect(saved.values).toEqual({ note: 'hello' });
@@ -176,7 +179,7 @@ describe('unsaved-work guards', () => {
     useApp.getState().setPacket({ attachments: [] });
     expect(useApp.getState().packet.dirty).toBe(true);
     useApp.getState().setPacket({ dirty: false });
-    useApp.getState().moveInPacket('tpl-px310-0826', -1);
+    useApp.getState().moveInPacket('pi-2', -1);
     expect(useApp.getState().packet.dirty).toBe(true);
   });
 

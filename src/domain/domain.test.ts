@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { CLIENTS, FIRM, TEMPLATES, USERS } from '../services/demo/seed';
+import type { FieldMapping } from './types';
 import { outputGate, runChecks, summarize, type CheckResult } from './checks';
 import { formatValue, resolveDateLimit, validateFormat } from './format';
 import { buildCondition, conditionTerms, evaluateCondition, explainCondition, parseCondition, resolvePath } from './paths';
-import { fieldKey, inputsNeeded, mappingWarnings, migrateAccountValues, prefillForm, prefillPacket, termLabels, validateMapping } from './prefill';
+import { carryVariantValues, choiceDisplay, choiceOptions, fieldKey, fillBlockFromPerson, personBlocks, relatedPeople, inputsNeeded, mappingWarnings, migrateAccountValues, prefillForm, prefillPacket, seedCopyValues, termLabels, validateMapping } from './prefill';
 import { carryForward, diffRevision } from './revisions';
 import { assignSigners, rolesForPacket, validateSigners } from './signers';
 import { buildEnvelopeDefinition, placementsToTabs } from '../services/docusign/tabs';
@@ -259,6 +260,131 @@ describe('prefill', () => {
       expect(mappingWarnings(a.mapping)).toEqual([]);
       const shared = { ...a.mapping, fields: [{ pdfField: 'AcctNo', source: 'account.ev_accountno', required: false, key: 'acct' }] };
       expect(mappingWarnings(shared)).toHaveLength(1);
+    });
+  });
+
+  describe('copies of one form', () => {
+    const swp = tpl('tpl-px310-0826');
+    const acct = (id: string) => client.accounts.find((a) => a.accountid === id)!;
+    const val = (fill: ReturnType<typeof prefillForm>, pdf: string) => fill.fields.find((f) => f.mapping.pdfField === pdf)!;
+    const items = [
+      { template: swp, account: acct('a-j1'), itemId: 'pi-1' },
+      { template: swp, account: acct('a-j3'), itemId: 'pi-2', copy: 2 },
+    ];
+
+    it('keeps advisor values typed on copy 2 off copy 1, and client data shared', () => {
+      const [one, two] = prefillPacket(items, scope, { 'swp.amount': '500', 'pi-2/swp.amount': '750' });
+      expect(val(one, 'SWP_Amount').value).toBe('500');
+      expect(val(two, 'SWP_Amount').value).toBe('750');
+      expect(val(two, 'SWP_Amount').key).toBe('pi-2/swp.amount');
+      expect(val(one, 'Owner_Name_Full').key).toBe(val(two, 'Owner_Name_Full').key);
+      expect([one.itemId, two.itemId, two.copy]).toEqual(['pi-1', 'pi-2', 2]);
+    });
+
+    it('scopes account values by account, not by copy', () => {
+      const [one, two] = prefillPacket(items, scope, {});
+      const acctField = swp.mapping.fields.find((m) => m.source === 'account.ev_accountno')!;
+      expect(val(one, acctField.pdfField).value).toBe('IRA-22-4471');
+      expect(val(two, acctField.pdfField).value).toBe('PX-7712-0045');
+    });
+
+    it('carries values to another state’s version of a form', () => {
+      const other = { ...swp, id: 'tpl-x', formNumber: 'PX-310-VA', mapping: { ...swp.mapping, fields: [...swp.mapping.fields, { pdfField: 'Note', source: 'advisor', required: false }] } };
+      const from = { ...swp, mapping: { ...swp.mapping, fields: [...swp.mapping.fields, { pdfField: 'Note', source: 'advisor', required: false }] } };
+      expect(carryVariantValues(from, other, { 'PX-310:Note': 'hi', 'swp.amount': '5' })).toEqual({ 'PX-310-VA:Note': 'hi' });
+      expect(carryVariantValues(from, other, { 'pi-2/PX-310:Note': 'hi' }, 'pi-2')).toEqual({ 'pi-2/PX-310-VA:Note': 'hi' });
+    });
+
+    it('starts a copy from the original’s values', () => {
+      const seeded = seedCopyValues(swp, { 'swp.amount': '500', 'swp.monthly': 'Yes', 'contact.fullname': 'J' }, 'pi-2');
+      expect(seeded).toEqual({ 'pi-2/swp.amount': '500', 'pi-2/swp.monthly': 'Yes' });
+      expect(seedCopyValues(swp, seeded, 'pi-3', 'pi-2')).toEqual({ 'pi-3/swp.amount': '500', 'pi-3/swp.monthly': 'Yes' });
+    });
+
+    it('shares a field marked shareAcrossCopies', () => {
+      const shared = { ...swp, mapping: { ...swp.mapping, fields: swp.mapping.fields.map((m) => (m.key === 'swp.start' ? { ...m, shareAcrossCopies: true } : m)) } };
+      const [, two] = prefillPacket([{ template: shared, itemId: 'pi-1' }, { template: shared, itemId: 'pi-2', copy: 2 }], scope, { 'swp.start': '2026-11-02' });
+      expect(val(two, 'SWP_Start').value).toBe('2026-11-02');
+    });
+
+    it('checks each copy on its own, and warns when two copies share an account', () => {
+      const fills = prefillPacket([items[0], { ...items[1], account: acct('a-j1') }], scope, { 'swp.monthly': 'Yes' });
+      const results = runChecks(fills, { scope, values: { 'swp.monthly': 'Yes' }, latestFor: () => undefined });
+      expect(results.find((r) => r.id === 'pi-1:check:0')?.level).toBe('pass');
+      expect(results.find((r) => r.id === 'pi-2:check:0')?.level).toBe('block');
+      expect(results.find((r) => r.id.startsWith('same-account:'))).toMatchObject({ level: 'warn', itemId: 'pi-2' });
+    });
+  });
+
+  describe('choice boxes', () => {
+    const box = (word: string, extra: Partial<FieldMapping> = {}): FieldMapping => ({ pdfField: `MS_${word}`, label: word, source: 'contact.familystatuscode', required: false, format: 'checkbox', checkedWhen: word, ...extra });
+    const form = { ...bene, id: 'tpl-ms', mapping: { ...bene.mapping, fields: [box('single'), box('married')], checks: [{ type: 'oneOf' as const, fields: ['MS_single', 'MS_married'] }] } };
+
+    it('ticks the box whose word is the CRM value, keeping the word as the value', () => {
+      const fill = prefillForm(form, scope, {});
+      expect(fill.fields.map((f) => [f.value, f.display, f.key])).toEqual([
+        ['married', '', 'contact.familystatuscode'],
+        ['married', 'Yes', 'contact.familystatuscode'],
+      ]);
+      expect(fill.fields.every((f) => !f.formatError)).toBe(true);
+      // One value drives the set, so a pick-one check sees one box ticked.
+      expect(runChecks([fill], { scope, values: {}, latestFor: () => undefined }).find((r) => r.id.endsWith(':check:0'))?.level).toBe('pass');
+      const edited = prefillForm(form, scope, { 'contact.familystatuscode': 'single' });
+      expect(edited.fields.map((f) => f.display)).toEqual(['Yes', '']);
+      expect(edited.fields[0].origin).toBe('edited');
+    });
+
+    it('maps a radio value to its PDF option', () => {
+      expect(choiceDisplay({ options: { married: 'M', single: 'S' } }, 'Married')).toBe('M');
+      expect(choiceDisplay({ options: { married: 'M' } }, 'widowed')).toBe('');
+      expect(choiceDisplay({}, 'x')).toBeUndefined();
+    });
+
+    it('counts a required radio with no option for the value as missing', () => {
+      const radio = { ...form, mapping: { ...form.mapping, checks: [], fields: [{ pdfField: 'MS', source: 'contact.familystatuscode', required: true, options: { single: 'S' } }] } };
+      expect(prefillForm(radio, scope, {}).fields[0]).toMatchObject({ value: 'married', display: '', missing: true });
+      expect(prefillForm(radio, scope, { 'contact.familystatuscode': 'single' }).fields[0].missing).toBe(false);
+    });
+
+    it('lists the choices a set offers', () => {
+      const fill = prefillForm(form, scope, {});
+      expect(choiceOptions(fill.fields)).toEqual([
+        { value: 'single', label: 'single' },
+        { value: 'married', label: 'married' },
+      ]);
+    });
+  });
+
+  describe('person blocks', () => {
+    const withSon = { ...client, connections: [...client.connections, { role: 'Son', contact: { ...client.connections[0].contact, contactid: 'c-ben', fullname: 'Ben Miller', firstname: 'Ben', birthdate: '1995-02-03', ev_ssn: '123-45-6789' }, ev_sharepct: 50 }] };
+    const sc = { ...scope, client: withSon };
+
+    it('lists the client and every related person', () => {
+      expect(relatedPeople(withSon).map((p) => `${p.name} · ${p.role}`)).toEqual(['Jordan A. Miller · Client', 'Sam Miller · Spouse', 'Sam Miller · Joint owner', 'Ruth Miller-Kauffman · Trusted contact', 'Ben Miller · Son']);
+    });
+
+    it('keeps a person block per copy, even when it reads CRM', () => {
+      const [one, two] = prefillPacket([{ template: bene, itemId: 'pi-1' }, { template: bene, itemId: 'pi-2', copy: 2 }], sc, {});
+      const son = relatedPeople(withSon).find((p) => p.role === 'Son')!;
+      const values = fillBlockFromPerson([two], 'Primary beneficiary 1', son);
+      expect(Object.keys(values).every((k) => k.startsWith('pi-2/'))).toBe(true);
+      const [a, b] = prefillPacket([{ template: bene, itemId: 'pi-1' }, { template: bene, itemId: 'pi-2', copy: 2 }], sc, values);
+      const name = (f: typeof a) => f.fields.find((x) => x.mapping.pdfField === 'Bene1_Name')!.value;
+      expect([name(a), name(b)]).toEqual(['Sam Miller', 'Ben Miller']);
+      expect(one.fields.find((x) => x.mapping.pdfField === 'Bene1_Name')!.key).toBe('bene.Prim.1.name');
+    });
+
+    it('fills beneficiary 2 from any connection, and clears it for someone new', () => {
+      const fill = prefillForm(bene, sc, {});
+      expect(personBlocks([fill])).toEqual(['Primary beneficiary 1', 'Primary beneficiary 2', 'Primary beneficiary 3', 'Contingent beneficiary 1', 'Contingent beneficiary 2']);
+      const son = relatedPeople(withSon).find((p) => p.role === 'Son')!;
+      const values = fillBlockFromPerson([fill], 'Primary beneficiary 2', son);
+      expect(values).toEqual({ 'bene.Prim.2.name': 'Ben Miller', 'bene.Prim.2.rel': 'Son', 'bene.Prim.2.dob': '1995-02-03', 'bene.Prim.2.ssn': '123-45-6789', 'bene.Prim.2.pct': '50' });
+      const after = prefillForm(bene, sc, values);
+      expect(after.fields.find((f) => f.mapping.pdfField === 'Bene2_DOB')?.display).toBe('02/03/1995');
+      expect(Object.values(fillBlockFromPerson([fill], 'Primary beneficiary 2', undefined)).every((v) => v === '')).toBe(true);
+      // Beneficiary 1 reads the spouse from CRM; filling it from the son overrides it.
+      expect(fillBlockFromPerson([fill], 'Primary beneficiary 1', son)['bene.Prim.1.name']).toBe('Ben Miller');
     });
   });
 

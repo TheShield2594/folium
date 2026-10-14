@@ -1,3 +1,5 @@
+import { CHOICES } from '../../services/power/config';
+
 /** Fill-from choices for the mapping editor, grouped like the Dataverse schema. */
 export const SOURCE_GROUPS: { label: string; options: [string, string][] }[] = [
   {
@@ -26,6 +28,8 @@ export const SOURCE_GROUPS: { label: string; options: [string, string][] }[] = [
       ['computed.cityStateZip', 'City, State ZIP'],
       ['contact.ev_clientid', 'Client ID'],
       ['contact.ev_employer', 'Employer'],
+      ['contact.familystatuscode', 'Marital status'],
+      ['contact.gendercode', 'Gender'],
     ],
   },
   {
@@ -74,3 +78,14 @@ export const SOURCE_GROUPS: { label: string; options: [string, string][] }[] = [
 ];
 
 export const KNOWN_SOURCES = new Set(SOURCE_GROUPS.flatMap((g) => g.options.map((o) => o[0])));
+
+/**
+ * The words a Dynamics choice column holds (see CHOICES), for "Checked when" and radio
+ * options: `contact.familystatuscode` → single, married, divorced, widowed. Connections
+ * are contacts too.
+ */
+export function choiceWords(source: string): string[] {
+  const attr = /^(?:contact|connection\[[^\]]+\])\.([a-z0-9_]+)$/i.exec(source)?.[1];
+  const def = attr ? CHOICES.contact?.[attr] : undefined;
+  return def ? Object.values(def.options) : [];
+}

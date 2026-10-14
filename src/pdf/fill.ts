@@ -49,7 +49,8 @@ export async function fillPdf(template: Uint8Array, fields: FieldState[], opts: 
         // pdf-lib throws past MaxLen, so cut it; the report says which fields lost text.
         field.setText(max ? f.display.slice(0, max) : f.display);
       } else if (field instanceof PDFCheckBox) {
-        if (isTruthy(f.value)) field.check();
+        // `display`: a box mapped with `checkedWhen` holds the CRM word as its value.
+        if (isTruthy(f.display)) field.check();
         else field.uncheck();
       } else if (field instanceof PDFDropdown) {
         const opt = field.getOptions().find((o) => o.toLowerCase() === f.display.toLowerCase());
@@ -81,7 +82,7 @@ export async function fillPdf(template: Uint8Array, fields: FieldState[], opts: 
       }
       const page = pages[r.page - 1];
       if (!page) continue;
-      const text = f.mapping.format === 'checkbox' ? (isTruthy(f.value) ? 'X' : '') : f.display;
+      const text = f.mapping.format === 'checkbox' || f.mapping.checkedWhen ? (isTruthy(f.display) ? 'X' : '') : f.display;
       if (!text) continue;
       let size = Math.min(10, r.height - 3);
       while (size > 5 && font.widthOfTextAtSize(text, size) > r.width - 4) size -= 0.5;

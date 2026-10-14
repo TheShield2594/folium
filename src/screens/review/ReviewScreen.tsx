@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { FieldState } from '../../domain/prefill';
 import { defaultDraftTitle } from '../../domain/drafts';
-import { inputsNeeded, snapshotDiff } from '../../domain/prefill';
+import { blockKey, choiceOptions, copyScope, fillBlockFromPerson, inputsNeeded, personBlocks, relatedPeople, snapshotDiff } from '../../domain/prefill';
 import type { SignatureRequest } from '../../domain/types';
-import { outputGate, summarize, type CheckResult } from '../../domain/checks';
+import { formLabel, outputGate, summarize, type CheckResult } from '../../domain/checks';
 import { sourceKind } from '../../domain/paths';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
@@ -26,6 +26,7 @@ export function ReviewScreen() {
   const client = useApp((s) => s.client);
   const packet = useApp((s) => s.packet);
   const setValue = useApp((s) => s.setValue);
+  const setValues = useApp((s) => s.setValues);
   const setPacket = useApp((s) => s.setPacket);
   const contactId = useApp((s) => s.contactId);
   const me = useApp((s) => s.me);
@@ -76,7 +77,7 @@ export function ReviewScreen() {
     // Fields named by a failing template check (pick-one boxes, shares) count as required.
     for (const fill of view.fills) {
       fill.template.mapping.checks.forEach((c, i) => {
-        if (view.checks.find((r) => r.id === `${fill.template.id}:check:${i}`)?.level !== 'block') return;
+        if (view.checks.find((r) => r.id === `${fill.itemId}:check:${i}`)?.level !== 'block') return;
         // Pick-one groups need attention as a set; for totals, the first share is enough.
         const names = c.type === 'oneOf' ? c.fields : 'fields' in c ? c.fields.slice(0, 1) : [c.field];
         for (const f of fill.fields) if (names.includes(f.mapping.pdfField) && req.has(f.key)) req.set(f.key, true);
@@ -102,10 +103,12 @@ export function ReviewScreen() {
   }
   const selectedField: FieldState | undefined = useMemo(() => fill?.fields.find((f) => f.key === editorKey) ?? view?.fills.flatMap((f) => f.fields).find((f) => f.key === editorKey), [fill, view, editorKey]);
 
-  // Jump to the form + field for a key (from checks or the inputs list).
-  function focusKey(key: string | undefined, templateId?: string) {
+  // Jump to the form + field for a key (from checks or the inputs list). `formId` is a
+  // packet item id, or a template id for checks that only know the form.
+  function focusKey(key: string | undefined, formId?: string) {
     if (!view) return;
-    const idx = templateId ? view.fills.findIndex((f) => f.template.id === templateId) : view.fills.findIndex((f) => f.fields.some((x) => x.key === key));
+    const byItem = formId ? view.fills.findIndex((f) => f.itemId === formId) : -1;
+    const idx = byItem >= 0 ? byItem : formId ? view.fills.findIndex((f) => f.template.id === formId) : view.fills.findIndex((f) => f.fields.some((x) => x.key === key));
     if (idx >= 0) setActive(idx);
     // Form-level checks (an out-of-date revision) just switch to the form.
     if (!key) return;
@@ -201,12 +204,38 @@ export function ReviewScreen() {
       .catch(() => undefined);
   }
 
+  /**
+   * Fill a person block on the open form from someone related to the client. Forms
+   * that share the block's keys follow (the same beneficiary 2 everywhere); an added
+   * copy keeps its own.
+   */
+  function pickPerson(block: string, choice: string) {
+    if (!view || !fill) return;
+    const scope = copyScope({ id: fill.itemId, copy: fill.copy });
+    const same = view.fills.filter((f) => copyScope({ id: f.itemId, copy: f.copy }) === scope);
+    const people = relatedPeople(client!);
+    const k = blockKey(block, fill);
+    const { [k]: _old, ...rest } = packet.personBlocks ?? {};
+    if (choice === 'crm') {
+      // Back to what the template maps: drop the overrides.
+      setValues(Object.fromEntries(Object.keys(fillBlockFromPerson(same, block, undefined)).map((key) => [key, undefined])));
+      setPacket({ personBlocks: rest });
+      return;
+    }
+    const person = choice === 'new' ? undefined : people[Number(choice)];
+    setValues(fillBlockFromPerson(same, block, person));
+    setPacket({ personBlocks: { ...rest, [k]: person ? { contactId: person.contactId, name: person.name, role: person.role } : { name: 'Someone new', role: '' } } });
+  }
+
+  /** The choices a set of boxes or a radio group sharing a key offers, across the packet. */
+  const choicesFor = (key: string) => choiceOptions(view!.fills.flatMap((x) => x.fields).filter((x) => x.key === key));
+
   function renderNeed(key: string, fields: FieldState[]) {
     const f = fields[0];
-    const forms = [...new Set(fields.map((x) => view!.fills.find((v) => v.template.id === x.templateId)?.template.name))];
+    const forms = [...new Set(fields.map((x) => view!.fills.find((v) => v.itemId === x.itemId)).map((v) => (v ? formLabel(v) : undefined)))];
     return (
       <div key={key} id={`in-${cssKey(key)}`} className={['input-row', selected === key && 'active'].filter(Boolean).join(' ')} onFocus={() => setSelected(key)}>
-        <FieldInput field={f} value={packet.values[key] ?? f.value} onChange={(v) => setValue(key, v)} />
+        <FieldInput field={f} value={packet.values[key] ?? f.value} onChange={(v) => setValue(key, v)} choices={choicesFor(key)} />
         <div className="where" style={{ marginTop: 6 }}>
           {forms.length > 1 ? `Used on ${forms.length} forms — enter it once` : forms[0]}
           {sourceKind(f.mapping.source) === 'crm' && ' · not on file in CRM'}
@@ -250,15 +279,15 @@ export function ReviewScreen() {
 
       <div className="doc-tabs" role="tablist" aria-label="Forms in this packet">
         {view.fills.map((f, i) => (
-          <button key={f.template.id} role="tab" className="doc-tab" aria-selected={i === active} onClick={() => setActive(i)}>
-            {f.template.name}
+          <button key={f.itemId} role="tab" className="doc-tab" aria-selected={i === active} onClick={() => setActive(i)}>
+            {formLabel(f)}
             {f.missingCount ? <span className="count-dot">{f.missingCount}</span> : <Icon name="checkCircle" size={16} className="ok" />}
           </button>
         ))}
       </div>
 
       <div className="review" style={{ flex: 1, minHeight: 0 }}>
-        <section className="review-canvas" ref={canvasRef} aria-label={`${fill?.template.name} preview`}>
+        <section className="review-canvas" ref={canvasRef} aria-label={`${fill ? formLabel(fill) : ''} preview`}>
           <div className="row wrap" style={{ maxWidth: width, margin: '0 auto 14px', justifyContent: 'space-between' }}>
             <div className="legend" aria-label="Legend">
               <span><i style={{ background: 'var(--hl-crm)', boxShadow: 'inset 0 -1.5px 0 var(--hl-crm-line)' }} />From CRM</span>
@@ -279,13 +308,13 @@ export function ReviewScreen() {
           </div>
           {fill && (
             <PdfView
-              key={fill.template.id}
+              key={fill.itemId}
               template={fill.template}
               fields={fill.fields}
               placements={fill.template.mapping.placements}
               width={width}
               activeKey={selected}
-              onFieldClick={(f) => f.origin !== 'signer' && focusKey(f.key, f.templateId)}
+              onFieldClick={(f) => f.origin !== 'signer' && focusKey(f.key, f.itemId)}
               pageLabel={(p) => (
                 <span className="t-footnote c3">
                   {fill.template.formNumber} · page {p} of {fill.template.pageCount}
@@ -302,19 +331,21 @@ export function ReviewScreen() {
               value={packet.values[selectedField.key]}
               onChange={(v) => setValue(selectedField.key, v)}
               onClose={() => (setSelected(undefined), setEditorKey(undefined))}
-              usedOn={view.fills.filter((f) => f.fields.some((x) => x.key === selectedField.key)).map((f) => f.template.name)}
+              usedOn={view.fills.filter((f) => f.fields.some((x) => x.key === selectedField.key)).map(formLabel)}
+              choices={choicesFor(selectedField.key)}
             />
           )}
 
           {replaced.map((item) => {
-            const t = view.templates.find((x) => x.id === item.templateId);
-            if (!t) return null;
+            const f = view.fills.find((x) => x.itemId === item.id);
+            if (!f) return null;
+            const name = formLabel(f);
             return (
-              <section key={item.templateId} className="banner" role="alert" style={{ alignItems: 'flex-start', flexDirection: 'column', gap: 8 }}>
+              <section key={item.id} className="banner" role="alert" style={{ alignItems: 'flex-start', flexDirection: 'column', gap: 8 }}>
                 <span className="t-callout">
-                  <Icon name="warning" size={16} /> <strong>{t.name}:</strong> the account this draft used is no longer active. Pick one.
+                  <Icon name="warning" size={16} /> <strong>{name}:</strong> the account this draft used is no longer active. Pick one.
                 </span>
-                <Select aria-label={`Account for ${t.name}`} value={item.accountId ?? ''} onChange={(e) => setPacketAccount(item.templateId, e.target.value)}>
+                <Select aria-label={`Account for ${name}`} value={item.accountId ?? ''} onChange={(e) => setPacketAccount(item.id, e.target.value)}>
                   <option value="" disabled>
                     Choose account…
                   </option>
@@ -325,7 +356,7 @@ export function ReviewScreen() {
                   ))}
                 </Select>
                 {item.accountId && (
-                  <Button variant="plain" size="sm" onClick={() => setPacketAccount(item.templateId, item.accountId!)}>
+                  <Button variant="plain" size="sm" onClick={() => setPacketAccount(item.id, item.accountId!)}>
                     Keep {client.accounts.find((a) => a.accountid === item.accountId)?.name}
                   </Button>
                 )}
@@ -353,6 +384,32 @@ export function ReviewScreen() {
                   </div>
                 </div>
               ))}
+            </section>
+          )}
+
+          {fill && personBlocks([fill]).length > 0 && (
+            <section className="card card-pad stack-3" aria-labelledby="people-h">
+              <h2 id="people-h" className="t-headline">People on this form</h2>
+              <p className="t-footnote c3">Fill a whole block from anyone related to {client.contact.firstname}, or clear it for someone new.</p>
+              {personBlocks([fill]).map((block) => {
+                const pick = packet.personBlocks?.[blockKey(block, fill)];
+                const people = relatedPeople(client);
+                return (
+                  <div key={block} className="field">
+                    <label htmlFor={`pb-${cssKey(block)}`}>{block}</label>
+                    <Select id={`pb-${cssKey(block)}`} value="" onChange={(e) => e.target.value && pickPerson(block, e.target.value)}>
+                      <option value="">{pick ? `${pick.name}${pick.role ? ` · ${pick.role}` : ''}` : 'As on the form · Fill from…'}</option>
+                      {people.map((p, i) => (
+                        <option key={`${p.contactId}-${p.role}`} value={String(i)}>
+                          {p.name} · {p.role}
+                        </option>
+                      ))}
+                      <option value="new">Someone new (clear the block)</option>
+                      {pick && <option value="crm">Undo: as the form maps it</option>}
+                    </Select>
+                  </div>
+                );
+              })}
             </section>
           )}
 
@@ -401,7 +458,7 @@ export function ReviewScreen() {
                   </>
                 );
                 return c.level !== 'pass' && (c.fieldKey || c.templateId) ? (
-                  <button key={c.id} className="check-row" onClick={() => focusKey(c.fieldKey, c.templateId)}>
+                  <button key={c.id} className="check-row" onClick={() => focusKey(c.fieldKey, c.itemId ?? c.templateId)}>
                     {content}
                     <Icon name="chevronRight" size={14} className="c3" />
                   </button>
@@ -439,7 +496,7 @@ export function ReviewScreen() {
         </aside>
       </div>
       {sharing && <ShareSheet onClose={() => setSharing(false)} />}
-      {blocked && <BlockersSheet title={blocked.title} blockers={blocked.blockers} fills={view.fills} onJump={(c) => focusKey(c.fieldKey, c.templateId)} onClose={() => setBlocked(undefined)} />}
+      {blocked && <BlockersSheet title={blocked.title} blockers={blocked.blockers} fills={view.fills} onJump={(c) => focusKey(c.fieldKey, c.itemId ?? c.templateId)} onClose={() => setBlocked(undefined)} />}
       {naming && (
         <NameSheet
           title="Save draft"

@@ -60,6 +60,7 @@ export const DOCUSIGN = {
 export const CHOICES: ChoiceMap = {
   contact: {
     familystatuscode: { label: 'Marital status', options: { 1: 'single', 2: 'married', 3: 'divorced', 4: 'widowed' } },
+    gendercode: { label: 'Gender', options: { 1: 'male', 2: 'female' } },
   },
 };
 

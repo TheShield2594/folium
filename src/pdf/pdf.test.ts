@@ -150,3 +150,47 @@ describe('pdf', () => {
   });
 });
 
+
+describe('choice boxes and radios', () => {
+  const t = TEMPLATES.find((x) => x.id === 'tpl-ev1120-0326')!;
+
+  it('ticks the box whose word matches the CRM value, in fillable and flattened output', async () => {
+    const blank = await services.templates.getPdf(t);
+    const fill = prefillForm(t, scope, {});
+    const box = (name: string) => fill.fields.find((f) => f.mapping.pdfField === name)!;
+    expect(box('Owner_Marital_Married')).toMatchObject({ value: 'married', display: 'Yes', key: 'contact.familystatuscode' });
+    expect(box('Owner_Marital_Single').display).toBe('');
+    const out = await fillPdf(blank, fill.fields, { kind: 'fillable' });
+    const form = (await PDFDocument.load(out.pdf)).getForm();
+    expect(form.getCheckBox('Owner_Marital_Married').isChecked()).toBe(true);
+    expect(form.getCheckBox('Owner_Marital_Single').isChecked()).toBe(false);
+    // Ticking "Single" in review moves the one shared value.
+    const single = prefillForm(t, scope, { 'contact.familystatuscode': 'single' });
+    const again = (await PDFDocument.load((await fillPdf(blank, single.fields, { kind: 'fillable' })).pdf)).getForm();
+    expect([again.getCheckBox('Owner_Marital_Single').isChecked(), again.getCheckBox('Owner_Marital_Married').isChecked()]).toEqual([true, false]);
+    const flat = await fillPdf(blank, fill.fields, { kind: 'fillable', flatten: true });
+    expect((await PDFDocument.load(flat.pdf)).getForm().getFields()).toHaveLength(0);
+  });
+
+  it('selects the radio option mapped for the value, and inspection reads the options', async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 200]);
+    const form = doc.getForm();
+    const radio = form.createRadioGroup('Marital');
+    radio.addOptionToPage('S', page, { x: 20, y: 120, width: 12, height: 12 });
+    radio.addOptionToPage('M', page, { x: 60, y: 120, width: 12, height: 12 });
+    const box = form.createCheckBox('Retired');
+    box.addToPage(page, { x: 100, y: 120, width: 12, height: 12 });
+    const blank = await doc.save();
+
+    const info = await inspectPdf(blank);
+    expect(info.fields.find((f) => f.name === 'Marital')).toMatchObject({ type: 'radio', options: ['S', 'M'] });
+    expect(info.fields.find((f) => f.name === 'Retired')?.options).toEqual(['Yes']);
+
+    const tpl: FormTemplate = { ...t, id: 'tpl-radio', mapping: { ...t.mapping, checks: [], fields: [{ pdfField: 'Marital', source: 'contact.familystatuscode', required: false, options: { single: 'S', married: 'M' } }] } };
+    const fill = prefillForm(tpl, scope, {});
+    expect(fill.fields[0].display).toBe('M');
+    const out = (await PDFDocument.load((await fillPdf(blank, fill.fields, { kind: 'fillable' })).pdf)).getForm();
+    expect(out.getRadioGroup('Marital').getSelected()).toBe('M');
+  });
+});

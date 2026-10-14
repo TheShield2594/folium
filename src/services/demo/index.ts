@@ -221,6 +221,16 @@ const templates: TemplateLibrary = {
     persist();
     return clone(t);
   },
+  async saveDetails(id, details) {
+    const t = state.templates.find((x) => x.id === id);
+    if (!t) throw new Error('Template not found');
+    t.states = details.states?.length ? [...details.states] : undefined;
+    t.variantGroup = details.variantGroup?.trim() || undefined;
+    t.modifiedOn = new Date().toISOString();
+    t.modifiedBy = me().fullname;
+    persist();
+    return clone(t);
+  },
   async setStatus(id, status, effectiveDate) {
     const t = state.templates.find((x) => x.id === id);
     if (!t) throw new Error('Template not found');
@@ -254,6 +264,9 @@ const templates: TemplateLibrary = {
       mapping: { formNumber: init.formNumber ?? 'NEW', revision: init.revision ?? 'New', fields: [], signers: prev?.mapping.signers ?? [{ role: 'Owner' }], placements: [], checks: [] },
       keywords: prev?.keywords,
       appliesTo: prev?.appliesTo,
+      // A new revision is approved where the last one was, unless the admin says otherwise.
+      states: init.states ?? prev?.states,
+      variantGroup: init.variantGroup ?? prev?.variantGroup,
       description: prev?.description,
       modifiedOn: new Date().toISOString(),
       modifiedBy: file.uploadedBy,

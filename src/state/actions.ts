@@ -1,4 +1,5 @@
 import { defaultDraftTitle, shortDraftId } from '../domain/drafts';
+import { formLabel } from '../domain/checks';
 import { prefillSnapshot, type FormFill } from '../domain/prefill';
 import type { Attachment, AuditEvent, SignatureRequest, UserProfile } from '../domain/types';
 import { fillPdf, mergePdfs } from '../pdf/fill';
@@ -7,6 +8,7 @@ import type { Packet } from './store';
 
 export interface FilledDoc {
   templateId: string;
+  itemId: string;
   name: string;
   fileName: string;
   pdf: Uint8Array;
@@ -25,8 +27,10 @@ export async function fillPacket(services: Services, fills: FormFill[], mode: 'f
     const { pdf } = await fillPdf(blank, f.fields, { kind: f.template.pdfKind, flatten: mode === 'flatten', draftMark });
     out.push({
       templateId: f.template.id,
-      name: f.template.name,
-      fileName: `${f.template.formNumber} ${f.template.name}.pdf`,
+      itemId: f.itemId,
+      name: formLabel(f),
+      // Copies get their own file name, so the envelope doesn't hold two of the same name.
+      fileName: `${f.template.formNumber} ${formLabel(f)}.pdf`,
       pdf,
       placements: f.template.mapping.placements,
     });
@@ -136,8 +140,10 @@ export async function saveDraft(opts: {
     ...base,
     title,
     ...opts.sendSetup,
-    documents: fills.map((f) => ({ templateId: f.template.id, name: f.template.name, formNumber: f.template.formNumber, revision: f.template.revision, accountId: f.accountId })),
+    documents: fills.map((f) => ({ templateId: f.template.id, name: f.template.name, formNumber: f.template.formNumber, revision: f.template.revision, accountId: f.accountId, itemId: f.itemId, ...(f.copy ? { copy: f.copy } : {}) })),
     values: { ...packet.values },
+    state: packet.state,
+    personBlocks: packet.personBlocks,
     prefillSnapshot: prefillSnapshot(fills),
     attachments,
     sharedWith: packet.sharedWith,
@@ -154,7 +160,7 @@ export async function saveDraft(opts: {
   const docs = await fillPacket(services, fills, 'fillable', true);
   const draftFiles: { name: string; url: string }[] = [];
   for (const [i, d] of docs.entries()) {
-    const name = `DRAFT ${fills[i].template.formNumber} ${title} – ${shortDraftId(saved.id)}.pdf`.replace(/[\\/:*?"<>|#%]/g, '-');
+    const name = `DRAFT ${fills[i].template.formNumber}${fills[i].copy ? ` (copy ${fills[i].copy})` : ''} ${title} – ${shortDraftId(saved.id)}.pdf`.replace(/[\\/:*?"<>|#%]/g, '-');
     draftFiles.push({ name, ...(await services.drafts.saveDraft(contactId, name, d.pdf)) });
   }
   return services.requests.save({ ...saved, draftFiles: [...(existing?.draftFiles ?? []).filter((f) => !draftFiles.some((x) => x.name === f.name)), ...draftFiles] });

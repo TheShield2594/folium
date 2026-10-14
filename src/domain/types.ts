@@ -84,6 +84,28 @@ export interface FieldMapping {
    */
   lockWhen?: string;
   /**
+   * For a checkbox (or one option of a set of boxes): ticked when the source's value is
+   * this word, e.g. `married` on `contact.familystatuscode`. The value stays the source's
+   * word, so ticking another box in the set changes it, and two can't both be ticked.
+   */
+  checkedWhen?: string;
+  /**
+   * For a radio group: the PDF option (export value) to select for each source value,
+   * e.g. `{ married: 'M', single: 'S' }`.
+   */
+  options?: Record<string, string>;
+  /**
+   * A field in a block about one person (beneficiary 2, a joint owner). Review can fill
+   * the whole block from any related person: `attr` is a contact column, `role` or
+   * `ev_sharepct`.
+   */
+  person?: { block: string; attr: string };
+  /**
+   * On a second or later copy of a form in one packet, advisor-entered values are kept
+   * per copy. Set this for the rare advisor value that must match on every copy.
+   */
+  shareAcrossCopies?: boolean;
+  /**
    * Overlay box for flat (scanned) or XFA PDFs that have no fillable field, in PDF
    * points from the page's top-left. Fillable PDFs take positions from their widgets.
    */
@@ -153,6 +175,10 @@ export interface FormTemplate {
   mapping: TemplateMapping;
   /** Account types this form applies to, for suggestions. */
   appliesTo?: string[];
+  /** USPS codes where this form may be used. Undefined or empty means every state. */
+  states?: string[];
+  /** Same form, different state version: templates sharing a variant group are alternatives. */
+  variantGroup?: string;
   keywords?: string[];
   description?: string;
   modifiedOn: string;
@@ -179,6 +205,7 @@ export interface Contact {
   address1_stateorprovince?: string;
   address1_postalcode?: string;
   familystatuscode?: 'single' | 'married' | 'divorced' | 'widowed';
+  gendercode?: 'male' | 'female';
   ev_clientid: string;
   ev_region?: string;
   /** Owning advisor (systemuser). */
@@ -227,7 +254,14 @@ export interface ClientRecord {
 // Packets & requests
 
 export interface PacketItem {
+  /** This instance of the form in the packet. Copies of one form have different ids. */
+  id: string;
   templateId: string;
+  /**
+   * 2 and up for an added copy of a form already in the packet ("Add another copy").
+   * A copy keeps its own advisor-entered values (see `fieldKey`).
+   */
+  copy?: number;
   /** Which account this form is about, if the form is account-specific. */
   accountId?: string;
   /** Set when a resumed draft's account is no longer active and Folium picked another. */
@@ -289,6 +323,10 @@ export interface RequestDocument {
   revision: string;
   /** The account the form is about, so a resumed draft reopens on the same one. */
   accountId?: string;
+  /** The packet item this was, so a resumed draft keeps each copy's own values. */
+  itemId?: string;
+  /** Set on an added copy of a form (2 and up). */
+  copy?: number;
 }
 
 export interface Attachment {
@@ -338,6 +376,10 @@ export interface SignatureRequest {
   uploadedToOnBase: boolean;
   uploadedBy?: string;
   uploadedOn?: string;
+  /** Who filled each person block ("Primary beneficiary 2" → Sam Miller, Spouse), so a resumed draft shows it. */
+  personBlocks?: Record<string, { contactId?: string; name: string; role: string }>;
+  /** The state the packet's forms must be approved in, when the advisor changed it from the client's. */
+  state?: string;
   /** Field values the advisor entered, keyed by canonical key, so a draft can be resumed. */
   values: Record<string, string>;
   /**
@@ -371,6 +413,11 @@ export interface UserProfile extends Advisor {
   defaultAuth?: VerificationMethod;
   defaultReminderDays?: number;
   emailSignature?: string;
+  /**
+   * USPS codes of the states this advisor is licensed to sell insurance in. Empty or
+   * missing means unknown, and nothing is checked.
+   */
+  licensedStates?: string[];
 }
 
 export interface UserGroup {
