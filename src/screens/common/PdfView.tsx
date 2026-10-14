@@ -108,7 +108,7 @@ export function PdfView({ template, fields = [], placements = [], width = 640, a
                   rectsFor(f)
                     .filter((r) => r.page === page)
                     .map((r, j) => {
-                      const tone = f.origin === 'signer' ? 'signer' : f.missing || f.formatError ? 'need' : f.origin === 'edited' || f.origin === 'advisor' ? 'edit' : f.value ? 'crm' : 'empty';
+                      const tone = f.locked ? 'locked' : f.origin === 'signer' ? 'signer' : f.missing || f.formatError ? 'need' : f.origin === 'edited' || f.origin === 'advisor' ? 'edit' : f.value ? 'crm' : 'empty';
                       const isCheck = f.mapping.format === 'checkbox';
                       const shown = f.origin === 'signer' ? '' : maskSensitive ? maskValue(f.display, f.mapping.format) : f.display;
                       return (
@@ -119,13 +119,14 @@ export function PdfView({ template, fields = [], placements = [], width = 640, a
                           style={{ left: r.x * s, top: r.y * s, width: Math.max(r.width * s, 10), height: Math.max(r.height * s, 10), fontSize: Math.max(8, Math.min(11, r.height * s * 0.62)) }}
                           onClick={(e) => {
                             e.stopPropagation();
-                            onFieldClick?.(f);
+                            if (!f.locked) onFieldClick?.(f);
                           }}
-                          tabIndex={onFieldClick ? 0 : -1}
-                          aria-label={`${f.label}: ${f.value ? shown || 'filled' : f.origin === 'signer' ? 'completed by signer' : 'empty'}`}
-                          title={`${f.label} · ${f.sourceLabel}`}
+                          tabIndex={onFieldClick && !f.locked ? 0 : -1}
+                          aria-disabled={f.locked || undefined}
+                          aria-label={`${f.label}: ${f.locked ? `locked ${f.lockReason ?? ''}`.trim() : f.value ? shown || 'filled' : f.origin === 'signer' ? 'completed by signer' : 'empty'}`}
+                          title={f.locked ? `${f.label} · Locked ${f.lockReason ?? ''}`.trim() : `${f.label} · ${f.sourceLabel}`}
                         >
-                          {showValues && (isCheck ? (/^(true|yes|y|x|on|1|checked)$/i.test(f.value) ? '✕' : '') : shown)}
+                          {showValues && !f.locked && (isCheck ? (/^(true|yes|y|x|on|1|checked)$/i.test(f.value) ? '✕' : '') : shown)}
                         </button>
                       );
                     }),

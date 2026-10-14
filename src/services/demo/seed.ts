@@ -147,6 +147,7 @@ export function specToTemplate(spec: FormSpec): FormTemplate {
               limits: field.limits,
               help: field.help,
               requiredWhen: field.requiredWhen,
+              lockWhen: field.lockWhen,
               rect: spec.pdfKind === 'flat' ? rectByName.get(field.name) : undefined,
             })),
       signers: spec.signers,

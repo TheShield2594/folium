@@ -21,6 +21,23 @@ export function FieldInput({ field, value, onChange, hideLabel }: { field: Field
   const [reveal, setReveal] = useState(false);
   const need = field.missing || !!field.formatError;
 
+  if (field.locked) {
+    return (
+      <div className="field">
+        {!hideLabel && (
+          <span className="row" style={{ gap: 6 }}>
+            <Icon name="lock" size={13} className="c3" />
+            {field.label}
+          </span>
+        )}
+        <TextInput id={id} aria-label={hideLabel ? field.label : undefined} value="" placeholder="Left blank" disabled aria-describedby={`${id}-why`} />
+        <span id={`${id}-why`} className="help">
+          Locked {field.lockReason ?? ''}. It prints blank{value ? '; what you entered comes back if that changes' : ''}.
+        </span>
+      </div>
+    );
+  }
+
   if (f === 'checkbox') {
     return (
       <label className="row" style={{ minHeight: 32, cursor: 'pointer' }}>

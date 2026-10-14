@@ -1,5 +1,5 @@
 import { formatValue, prettifyFieldName, validateFormat } from './format';
-import { describeSource, evaluateCondition, resolvePath, sourceKind, type ResolveScope } from './paths';
+import { ConditionError, conditionTerms, describeSource, evaluateCondition, explainCondition, parseCondition, resolvePath, sourceKind, type ResolveScope, type TermLabel } from './paths';
 import type { Account, FieldMapping, FormTemplate, TemplateMapping } from './types';
 
 export type FieldOrigin = 'crm' | 'rep' | 'firm' | 'computed' | 'static' | 'edited' | 'advisor' | 'signer' | 'missing';
@@ -24,6 +24,10 @@ export interface FieldState {
   required: boolean;
   missing: boolean;
   formatError?: string;
+  /** `lockWhen` holds: the field is read-only and prints blank. */
+  locked: boolean;
+  /** Why it's locked, as a sentence ("when Contingent beneficiary is checked"). */
+  lockReason?: string;
 }
 
 export interface FormFill {
@@ -88,9 +92,47 @@ export function migrateAccountValues(values: Record<string, string>, firstAccoun
 
 /** Mapping problems worth flagging in the template editor. */
 export function mappingWarnings(mapping: TemplateMapping): string[] {
-  return mapping.fields
-    .filter((m) => m.key && m.source.startsWith('account.'))
-    .map((m) => `${m.pdfField} reads ${m.source} but has a fixed key (${m.key}), so its value is shared by every form in a packet, whichever account each is about.`);
+  return [
+    ...mapping.fields
+      .filter((m) => m.key && m.source.startsWith('account.'))
+      .map((m) => `${m.pdfField} reads ${m.source} but has a fixed key (${m.key}), so its value is shared by every form in a packet, whichever account each is about.`),
+    ...validateMapping(mapping),
+  ];
+}
+
+/** The value key a mapped field answers to in conditions on its own form (account fields by their path). */
+const conditionKey = (m: FieldMapping) => m.key ?? (sourceKind(m.source) === 'advisor' || sourceKind(m.source) === 'signer' ? undefined : m.source);
+
+/** Names condition terms after the mapping's fields, for `explainCondition`. */
+export function termLabels(mapping: Pick<TemplateMapping, 'fields' | 'formNumber'>): TermLabel {
+  return (term) => {
+    const m = mapping.fields.find((f) => conditionKey(f) === term || fieldKey(f, mapping) === term);
+    return m ? { label: m.label ?? prettifyFieldName(m.pdfField), checkbox: m.format === 'checkbox' } : undefined;
+  };
+}
+
+/**
+ * Condition problems: ones that can't be parsed, and locks that depend on a field that
+ * can itself be locked. Locks are worked out in one pass, so a chain doesn't cascade.
+ */
+export function validateMapping(mapping: Pick<TemplateMapping, 'fields' | 'formNumber'>): string[] {
+  const out: string[] = [];
+  const lockable = new Set(mapping.fields.filter((m) => m.lockWhen?.trim()).flatMap((m) => [fieldKey(m, mapping), conditionKey(m)].filter(Boolean) as string[]));
+  for (const m of mapping.fields) {
+    for (const [what, cond] of [['Required when', m.requiredWhen], ['Locked when', m.lockWhen]] as const) {
+      if (!cond?.trim()) continue;
+      try {
+        parseCondition(cond);
+      } catch (e) {
+        out.push(`${m.pdfField}: “${what}” can’t be read (${e instanceof ConditionError ? e.message : 'invalid'}).`);
+      }
+    }
+    if (m.lockWhen?.trim()) {
+      const chained = conditionTerms(m.lockWhen).filter((t) => lockable.has(t));
+      if (chained.length) out.push(`${m.pdfField} is locked by ${chained.join(', ')}, which can be locked too. Locks don’t chain: base it on the field that starts the chain.`);
+    }
+  }
+  return out;
 }
 
 export function prefillForm(
@@ -100,22 +142,27 @@ export function prefillForm(
 ): FormFill {
   const accountId = formAccountId(scope);
   const condValues = valuesForAccount(values, accountId);
+  const labels = termLabels(template.mapping);
   const fields = template.mapping.fields.map((m): FieldState => {
     const key = fieldKey(m, template, accountId);
     const kind = sourceKind(m.source);
     const crmValue = kind === 'advisor' || kind === 'signer' ? undefined : resolvePath(m.source, scope);
     const edited = Object.prototype.hasOwnProperty.call(values, key) ? values[key] : undefined;
-    const value = edited ?? crmValue ?? '';
-    const required = m.required && evaluateCondition(m.requiredWhen, scope, condValues);
+    // Locks read the packet's values in one pass (they don't chain; validateMapping warns).
+    // A lock that can't be parsed doesn't lock: a typo must never blank a field.
+    const locked = !!m.lockWhen?.trim() && evaluateCondition(m.lockWhen, scope, condValues, false);
+    const value = locked ? '' : (edited ?? crmValue ?? '');
+    const required = !locked && (m.requiredWhen?.trim() ? evaluateCondition(m.requiredWhen, scope, condValues) : m.required);
 
     let origin: FieldOrigin;
     if (kind === 'signer') origin = 'signer';
+    else if (locked) origin = 'missing';
     else if (edited !== undefined && edited !== '' && crmValue !== undefined && edited !== crmValue) origin = 'edited';
     else if (edited !== undefined && edited !== '' && crmValue === undefined) origin = 'advisor';
     else if (value) origin = kind === 'advisor' ? 'advisor' : (kind as FieldOrigin);
     else origin = 'missing';
 
-    const missing = kind !== 'signer' && required && !value.trim();
+    const missing = kind !== 'signer' && !locked && required && !value.trim();
     return {
       templateId: template.id,
       mapping: m,
@@ -130,7 +177,9 @@ export function prefillForm(
       required,
       missing,
       // CRM values are checked too, so bad data already in D365 surfaces here.
-      formatError: validateFormat(value, m.format, m.limits, scope.today),
+      formatError: locked ? undefined : validateFormat(value, m.format, m.limits, scope.today),
+      locked,
+      lockReason: locked ? explainCondition(m.lockWhen, labels) : undefined,
     };
   });
 
@@ -178,7 +227,7 @@ export function inputsNeeded(fills: FormFill[]): { key: string; fields: FieldSta
   const byKey = new Map<string, FieldState[]>();
   for (const fill of fills) {
     for (const f of fill.fields) {
-      if (f.origin === 'signer') continue;
+      if (f.origin === 'signer' || f.locked) continue;
       if (!(f.missing || f.formatError || sourceKind(f.mapping.source) === 'advisor')) continue;
       const list = byKey.get(f.key) ?? [];
       list.push(f);

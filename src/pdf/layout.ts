@@ -14,6 +14,7 @@ export interface SpecField {
   source: string;
   required?: boolean;
   requiredWhen?: string;
+  lockWhen?: string;
   format?: FieldFormat;
   limits?: FieldLimits;
   key?: string;

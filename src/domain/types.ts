@@ -72,8 +72,17 @@ export interface FieldMapping {
   limits?: FieldLimits;
   /** Short guidance shown next to the input. */
   help?: string;
-  /** Only required when this condition holds (same grammar as signer conditions). */
+  /**
+   * Required when this condition holds (same grammar as signer conditions). Setting it
+   * makes the field conditionally required on its own, whatever `required` says.
+   */
   requiredWhen?: string;
+  /**
+   * Locked when this condition holds: read-only, not required and printed blank (and
+   * read-only in the editable PDF). What the advisor typed is kept, so unlocking
+   * restores it.
+   */
+  lockWhen?: string;
   /**
    * Overlay box for flat (scanned) or XFA PDFs that have no fillable field, in PDF
    * points from the page's top-left. Fillable PDFs take positions from their widgets.

@@ -27,6 +27,10 @@ function valueOf(fill: FormFill, pdfField: string): string | undefined {
   return fill.fields.find((f) => f.mapping.pdfField === pdfField)?.value;
 }
 
+function lockedOn(fill: FormFill, pdfField: string): boolean {
+  return !!fill.fields.find((f) => f.mapping.pdfField === pdfField)?.locked;
+}
+
 function keyOf(fill: FormFill, pdfField: string): string | undefined {
   return fill.fields.find((f) => f.mapping.pdfField === pdfField)?.key;
 }
@@ -51,7 +55,8 @@ function runTemplateCheck(check: Check, fill: FormFill, ctx: CheckContext, idx: 
     case 'requiredIf': {
       const applies = evaluateCondition(check.when, { ...ctx.scope, account: fill.account }, valuesForAccount(ctx.values, fill.account?.accountid ?? ctx.scope.client.accounts[0]?.accountid));
       const v = valueOf(fill, check.field);
-      const ok = !applies || !!v?.trim();
+      // A locked field prints blank by design, so it can't be required.
+      const ok = !applies || lockedOn(fill, check.field) || !!v?.trim();
       return {
         id,
         level: ok ? 'pass' : 'block',

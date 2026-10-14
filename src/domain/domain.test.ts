@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { CLIENTS, FIRM, TEMPLATES, USERS } from '../services/demo/seed';
 import { outputGate, runChecks, summarize, type CheckResult } from './checks';
 import { formatValue, resolveDateLimit, validateFormat } from './format';
-import { evaluateCondition, resolvePath } from './paths';
-import { fieldKey, inputsNeeded, mappingWarnings, migrateAccountValues, prefillForm, prefillPacket } from './prefill';
+import { buildCondition, conditionTerms, evaluateCondition, explainCondition, parseCondition, resolvePath } from './paths';
+import { fieldKey, inputsNeeded, mappingWarnings, migrateAccountValues, prefillForm, prefillPacket, termLabels, validateMapping } from './prefill';
 import { carryForward, diffRevision } from './revisions';
 import { assignSigners, rolesForPacket, validateSigners } from './signers';
 import { buildEnvelopeDefinition, placementsToTabs } from '../services/docusign/tabs';
@@ -34,6 +34,59 @@ describe('paths', () => {
     expect(evaluateCondition('connection[Joint owner].fullname', scope)).toBe(true);
     expect(evaluateCondition('contact.familystatuscode == single || contact.address1_city == goshen', scope)).toBe(true);
     expect(evaluateCondition(undefined, scope)).toBe(true);
+  });
+
+  it('keeps every existing form of condition working', () => {
+    expect(evaluateCondition('!connection[Nobody].fullname', scope)).toBe(true);
+    expect(evaluateCondition('!contact.fullname', scope)).toBe(false);
+    expect(evaluateCondition("contact.familystatuscode == 'married'", scope)).toBe(true);
+    expect(evaluateCondition('contact.familystatuscode == MARRIED && contact.address1_city == Goshen', scope)).toBe(true);
+    expect(evaluateCondition('contact.familystatuscode == married && contact.address1_city == Elkhart', scope)).toBe(false);
+    expect(evaluateCondition('account.ev_accounttype == Traditional IRA', scope)).toBe(true);
+    // Packet values win over the CRM, and answer by key.
+    expect(evaluateCondition('contact.familystatuscode == single', scope, { 'contact.familystatuscode': 'single' })).toBe(true);
+    expect(evaluateCondition('withholding.none', scope, { 'withholding.none': 'Yes' })).toBe(true);
+    expect(evaluateCondition('withholding.none', scope, { 'withholding.none': 'false' })).toBe(false);
+    expect(evaluateCondition('withholding.none', scope, { 'withholding.none': '0' })).toBe(false);
+  });
+
+  it('gives && precedence over || and honours parentheses', () => {
+    // true || (false && false) → true; (true || false) && false → false
+    expect(evaluateCondition('contact.address1_city == goshen || contact.fullname == x && contact.fullname == y', scope)).toBe(true);
+    expect(evaluateCondition('(contact.address1_city == goshen || contact.fullname == x) && contact.fullname == y', scope)).toBe(false);
+    expect(evaluateCondition('!(contact.familystatuscode == single || contact.familystatuscode == divorced)', scope)).toBe(true);
+    expect(evaluateCondition('((contact.familystatuscode == married))', scope)).toBe(true);
+  });
+
+  it('supports contains and in (...)', () => {
+    expect(evaluateCondition('contact.fullname contains miller', scope)).toBe(true);
+    expect(evaluateCondition('contact.fullname contains "A. M"', scope)).toBe(true);
+    expect(evaluateCondition('contact.fullname contains smith', scope)).toBe(false);
+    expect(evaluateCondition('contact.familystatuscode in (married, widowed)', scope)).toBe(true);
+    expect(evaluateCondition('contact.familystatuscode in (single,divorced)', scope)).toBe(false);
+    expect(evaluateCondition("account.ev_accounttype in ('Roth IRA', \"Traditional IRA\")", scope)).toBe(true);
+    // "in" is only an operator before a list.
+    expect(evaluateCondition('Opt in', scope, { 'Opt in': 'Yes' })).toBe(true);
+  });
+
+  it('reports what it cannot parse and falls back as told', () => {
+    for (const bad of ['(contact.fullname', 'contact.fullname ==', '&& x', 'x in (', 'x == "open']) expect(() => parseCondition(bad)).toThrow();
+    expect(evaluateCondition('(contact.fullname', scope)).toBe(true);
+    expect(evaluateCondition('(contact.fullname', scope, {}, false)).toBe(false);
+    expect(conditionTerms('(a == 1 || !b) && connection[Joint owner].fullname contains x')).toEqual(['a', 'b', 'connection[Joint owner].fullname']);
+  });
+
+  it('builds and explains conditions', () => {
+    expect(buildCondition('toa.all', 'checked')).toBe('toa.all');
+    expect(buildCondition('toa.all', 'unchecked')).toBe('!toa.all');
+    expect(buildCondition('contact.familystatuscode', 'in', 'married, widowed')).toBe('contact.familystatuscode in (married, widowed)');
+    expect(buildCondition('x', 'equals', 'a, b')).toBe('x == "a, b"');
+    expect(evaluateCondition(buildCondition('x', 'equals', 'a || b'), scope, { x: 'A || B' })).toBe(true);
+    const labels = (t: string) => (t === 'bene.contingent' ? { label: 'Contingent beneficiary', checkbox: true } : undefined);
+    expect(explainCondition('bene.contingent', labels)).toBe('when Contingent beneficiary is checked');
+    expect(explainCondition('!bene.contingent', labels)).toBe('when Contingent beneficiary is not checked');
+    expect(explainCondition('contact.familystatuscode in (married, widowed) && !x', labels)).toBe('when contact.familystatuscode is married or widowed and x is empty');
+    expect(explainCondition('a == 1 && (b == 2 || c contains z)')).toBe('when a is 1 and (b is 2 or c contains “z”)');
   });
 });
 
@@ -206,6 +259,55 @@ describe('prefill', () => {
       expect(mappingWarnings(a.mapping)).toEqual([]);
       const shared = { ...a.mapping, fields: [{ pdfField: 'AcctNo', source: 'account.ev_accountno', required: false, key: 'acct' }] };
       expect(mappingWarnings(shared)).toHaveLength(1);
+    });
+  });
+
+  describe('conditional locks and requirements', () => {
+    const px310 = tpl('tpl-px310-0826');
+    const fed = (f: ReturnType<typeof prefillForm>) => f.fields.find((x) => x.key === 'withholding.federal')!;
+
+    it('locks a field: blank, not required, not needed, and unlocking restores the value', () => {
+      const typed = { 'withholding.federal': '12' };
+      expect(fed(prefillForm(px310, scope, typed))).toMatchObject({ locked: false, value: '12', required: true });
+
+      const locked = prefillForm(px310, scope, { ...typed, 'withholding.none': 'Yes' });
+      expect(fed(locked)).toMatchObject({ locked: true, value: '', display: '', required: false, missing: false, formatError: undefined });
+      expect(fed(locked).lockReason).toBe('when Elect no federal withholding is checked');
+      expect(inputsNeeded([locked]).map((i) => i.key)).not.toContain('withholding.federal');
+      // A malformed value doesn't block while locked.
+      expect(fed(prefillForm(px310, scope, { 'withholding.federal': '140', 'withholding.none': 'Yes' })).formatError).toBeUndefined();
+
+      expect(fed(prefillForm(px310, scope, { ...typed, 'withholding.none': '' }))).toMatchObject({ locked: false, value: '12' });
+    });
+
+    it('locks across forms in a packet through shared keys', () => {
+      const fills = prefillPacket([{ template: px310 }, { template: tpl('tpl-px120-0526') }], scope, { 'withholding.none': 'Yes' });
+      expect(fills.flatMap((f) => f.fields.filter((x) => x.key === 'withholding.federal')).every((x) => x.locked)).toBe(true);
+    });
+
+    it('makes a field required on requiredWhen alone', () => {
+      const m = { ...px310.mapping, fields: px310.mapping.fields.map((f) => (f.key === 'withholding.state' ? { ...f, required: false, requiredWhen: 'contact.address1_stateorprovince == IN' } : f)) };
+      const state = (v: Record<string, string>) => prefillForm({ ...px310, mapping: m }, scope, v).fields.find((x) => x.key === 'withholding.state')!;
+      expect(state({})).toMatchObject({ required: true, missing: true });
+      expect(state({ 'contact.address1_stateorprovince': 'OH' })).toMatchObject({ required: false, missing: false });
+    });
+
+    it('ignores a lock it cannot parse, and warns about it and about chains', () => {
+      const broken = { ...px310.mapping, fields: px310.mapping.fields.map((f) => (f.key === 'withholding.federal' ? { ...f, lockWhen: '(withholding.none' } : f)) };
+      expect(fed(prefillForm({ ...px310, mapping: broken }, scope, { 'withholding.none': 'Yes' })).locked).toBe(false);
+      expect(validateMapping(broken)[0]).toMatch(/can’t be read/);
+
+      const chained = { ...px310.mapping, fields: px310.mapping.fields.map((f) => (f.key === 'withholding.state' ? { ...f, lockWhen: 'withholding.federal == 0' } : f)) };
+      expect(validateMapping(chained).some((w) => /Locks don’t chain/.test(w))).toBe(true);
+      expect(mappingWarnings(px310.mapping)).toEqual([]);
+      expect(termLabels(px310.mapping)('withholding.none')).toEqual({ label: 'Elect no federal withholding', checkbox: true });
+    });
+
+    it('does not hold a requiredIf check against a locked field', () => {
+      const m = { ...px310.mapping, checks: [{ type: 'requiredIf' as const, field: 'Withholding_Fed_Pct', when: 'contact.fullname' }] };
+      const values = { 'withholding.none': 'Yes' };
+      const results = runChecks([prefillForm({ ...px310, mapping: m }, scope, values)], { scope, values, latestFor: () => undefined });
+      expect(results.find((r) => r.id.endsWith(':check:0'))!.level).toBe('pass');
     });
   });
 
