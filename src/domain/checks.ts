@@ -1,6 +1,6 @@
 import { toNumber } from './format';
 import { evaluateCondition, type ResolveScope } from './paths';
-import type { FormFill } from './prefill';
+import { valuesForAccount, type FormFill } from './prefill';
 import type { Check, FormTemplate } from './types';
 
 export type CheckLevel = 'pass' | 'warn' | 'block';
@@ -48,7 +48,7 @@ function runTemplateCheck(check: Check, fill: FormFill, ctx: CheckContext, idx: 
       };
     }
     case 'requiredIf': {
-      const applies = evaluateCondition(check.when, ctx.scope, ctx.values);
+      const applies = evaluateCondition(check.when, { ...ctx.scope, account: fill.account }, valuesForAccount(ctx.values, fill.account?.accountid ?? ctx.scope.client.accounts[0]?.accountid));
       const v = valueOf(fill, check.field);
       const ok = !applies || !!v?.trim();
       return {

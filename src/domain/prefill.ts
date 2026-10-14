@@ -1,6 +1,6 @@
 import { formatValue, prettifyFieldName, validateFormat } from './format';
 import { describeSource, evaluateCondition, resolvePath, sourceKind, type ResolveScope } from './paths';
-import type { Account, FieldMapping, FormTemplate } from './types';
+import type { Account, FieldMapping, FormTemplate, TemplateMapping } from './types';
 
 export type FieldOrigin = 'crm' | 'rep' | 'firm' | 'computed' | 'static' | 'edited' | 'advisor' | 'signer' | 'missing';
 
@@ -35,13 +35,58 @@ export interface FormFill {
 
 /**
  * The canonical key for a field. Fields with the same key share one value across
- * every form in a packet — LaserApp's "enter once, use everywhere".
+ * every form in a packet — LaserApp's "enter once, use everywhere". Account fields
+ * are scoped to the account the form is about, so a correction on one account's
+ * form never leaks onto a form about another account.
  */
-export function fieldKey(m: FieldMapping, t: Pick<FormTemplate, 'formNumber'>): string {
+export function fieldKey(m: FieldMapping, t: Pick<FormTemplate, 'formNumber'>, accountId?: string): string {
   if (m.key) return m.key;
   const kind = sourceKind(m.source);
   if (kind === 'advisor' || kind === 'signer') return `${t.formNumber}:${m.pdfField}`;
+  if (accountId && m.source.startsWith('account.')) return accountKey(accountId, m.source.slice('account.'.length));
   return m.source;
+}
+
+export const accountKey = (accountId: string, attr: string) => `account[${accountId}].${attr}`;
+
+/** The account a form's `account.*` sources resolve against (see resolvePath). */
+export const formAccountId = (scope: Pick<ResolveScope, 'account' | 'client'>) => (scope.account ?? scope.client.accounts[0])?.accountid;
+
+/**
+ * Values as conditions on one form see them: overrides for this form's account also
+ * answer to the plain `account.<attr>` path, so `account.ev_accounttype == Roth IRA`
+ * keeps working.
+ */
+export function valuesForAccount(values: Record<string, string>, accountId: string | undefined): Record<string, string> {
+  if (!accountId) return values;
+  const prefix = `account[${accountId}].`;
+  const out = { ...values };
+  for (const [k, v] of Object.entries(values)) if (k.startsWith(prefix)) out[`account.${k.slice(prefix.length)}`] = v;
+  return out;
+}
+
+/**
+ * Drafts saved before account keys were scoped hold `account.<attr>` overrides. Apply
+ * them to the first form's account only, which is what the advisor most likely meant.
+ * Keys an admin set by hand (`sharedKeys`) are left as they are.
+ */
+export function migrateAccountValues(values: Record<string, string>, firstAccountId: string | undefined, sharedKeys: Set<string> = new Set()): Record<string, string> {
+  if (!firstAccountId) return values;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(values)) {
+    if (k.startsWith('account.') && !sharedKeys.has(k)) {
+      const scoped = accountKey(firstAccountId, k.slice('account.'.length));
+      if (!(scoped in values)) out[scoped] = v;
+    } else out[k] = v;
+  }
+  return out;
+}
+
+/** Mapping problems worth flagging in the template editor. */
+export function mappingWarnings(mapping: TemplateMapping): string[] {
+  return mapping.fields
+    .filter((m) => m.key && m.source.startsWith('account.'))
+    .map((m) => `${m.pdfField} reads ${m.source} but has a fixed key (${m.key}), so its value is shared by every form in a packet, whichever account each is about.`);
 }
 
 export function prefillForm(
@@ -49,13 +94,15 @@ export function prefillForm(
   scope: ResolveScope,
   values: Record<string, string>,
 ): FormFill {
+  const accountId = formAccountId(scope);
+  const condValues = valuesForAccount(values, accountId);
   const fields = template.mapping.fields.map((m): FieldState => {
-    const key = fieldKey(m, template);
+    const key = fieldKey(m, template, accountId);
     const kind = sourceKind(m.source);
     const crmValue = kind === 'advisor' || kind === 'signer' ? undefined : resolvePath(m.source, scope);
     const edited = Object.prototype.hasOwnProperty.call(values, key) ? values[key] : undefined;
     const value = edited ?? crmValue ?? '';
-    const required = m.required && evaluateCondition(m.requiredWhen, scope, values);
+    const required = m.required && evaluateCondition(m.requiredWhen, scope, condValues);
 
     let origin: FieldOrigin;
     if (kind === 'signer') origin = 'signer';

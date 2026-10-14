@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { create } from 'zustand';
 import type { ResolveScope } from '../domain/paths';
+import { migrateAccountValues } from '../domain/prefill';
 import type {
   Attachment,
   ClientRecord,
@@ -242,10 +243,20 @@ export const useApp = create<AppState>((set, get) => ({
     set({ packet: { ...emptyPacket(), title: saved.name, items: live.map((t) => ({ templateId: t.id, accountId: suggestAccount(t, client) })) } });
   },
   loadRequest(req) {
+    const { templates, client } = get();
+    const items = req.documents.map((d): PacketItem => {
+      const t = templates.find((x) => x.id === d.templateId);
+      return { templateId: d.templateId, accountId: t ? suggestAccount(t, client) : undefined };
+    });
+    // The first form that reads account data gets any pre-scoping `account.*` overrides.
+    const used = items.map((i) => ({ item: i, t: templates.find((t) => t.id === i.templateId) })).filter((x): x is { item: PacketItem; t: FormTemplate } => !!x.t);
+    const first = used.find((x) => x.t.mapping.fields.some((m) => m.source.startsWith('account.'))) ?? used[0];
+    const firstAccountId = first?.item.accountId ?? client?.accounts[0]?.accountid;
+    const sharedKeys = new Set(used.flatMap((x) => x.t.mapping.fields.map((m) => m.key).filter((k): k is string => !!k)));
     set({
       packet: {
-        items: req.documents.map((d) => ({ templateId: d.templateId })),
-        values: { ...req.values },
+        items,
+        values: migrateAccountValues(req.values, firstAccountId, sharedKeys),
         title: req.title,
         requestId: req.id,
         attachments: req.attachments,
