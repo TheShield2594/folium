@@ -70,6 +70,12 @@ export interface UsageLog {
   track(events: UsageEvent[]): void;
   /** Write what's waiting now (the queue also does this on its own). */
   flush(): Promise<void>;
+  /**
+   * Rows since `since` (ISO), oldest first, for Administration › Readiness. Admins and the
+   * reporting role only: everyone else has Create and no Read. `truncated` when there were
+   * more than Folium reads in one go (the Power BI report has the rest).
+   */
+  list(since: string): Promise<{ events: UsageEvent[]; truncated: boolean }>;
 }
 
 /** Where a form may be used (states, variant group) and which firm profile fills it. */

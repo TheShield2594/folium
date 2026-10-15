@@ -1,0 +1,156 @@
+/// ev_signaturerequest's promoted reporting columns (docs/DATAVERSE.md). The payload isn't read.
+table SignatureRequest
+
+	/// Status Sent or Viewed now.
+	measure 'Open envelopes' = CALCULATE ( COUNTROWS ( SignatureRequest ), SignatureRequest[Status] IN { "Sent", "Viewed" } )
+		formatString: #,0
+		displayFolder: E-signature
+
+	measure 'Expiring in 7 days' = CALCULATE ( COUNTROWS ( SignatureRequest ), SignatureRequest[Status] IN { "Sent", "Viewed" }, SignatureRequest[ev_expireson] >= NOW (), SignatureRequest[ev_expireson] < NOW () + 7 )
+		formatString: #,0
+		displayFolder: E-signature
+
+	/// Unsent drafts, not in-person packets.
+	measure 'Drafts' = CALCULATE ( COUNTROWS ( SignatureRequest ), SignatureRequest[Status] = "Drafted", SignatureRequest[ev_inperson] = FALSE () )
+		formatString: #,0
+		displayFolder: Drafts
+
+	/// Due for deletion by the retention flow (ev_expireson) within 7 days.
+	measure 'Drafts due this week' = CALCULATE ( [Drafts], SignatureRequest[ev_expireson] < NOW () + 7 )
+		formatString: #,0
+		displayFolder: Drafts
+
+	measure 'Drafts due this month' = CALCULATE ( [Drafts], SignatureRequest[ev_expireson] >= NOW () + 7, SignatureRequest[ev_expireson] < NOW () + 30 )
+		formatString: #,0
+		displayFolder: Drafts
+
+	/// Open envelopes (Sent or Viewed) by days since sent, split by AgeBucket.
+	measure 'Open envelopes by age' =
+			VAR lo = SELECTEDVALUE ( AgeBucket[FromDays], 0 )
+			VAR hi = SELECTEDVALUE ( AgeBucket[ToDays], 100000 )
+			RETURN
+				CALCULATE (
+					COUNTROWS ( SignatureRequest ),
+					SignatureRequest[Status] IN { "Sent", "Viewed" },
+					SignatureRequest[ev_senton] <= NOW () - lo,
+					SignatureRequest[ev_senton] > NOW () - hi - 1
+				)
+		formatString: #,0
+		displayFolder: E-signature
+
+	/// Unsent drafts by days since last saved, split by AgeBucket.
+	measure 'Drafts by age' =
+			VAR lo = SELECTEDVALUE ( AgeBucket[FromDays], 0 )
+			VAR hi = SELECTEDVALUE ( AgeBucket[ToDays], 100000 )
+			RETURN
+				CALCULATE (
+					[Drafts],
+					SignatureRequest[modifiedon] <= NOW () - lo,
+					SignatureRequest[modifiedon] > NOW () - hi - 1
+				)
+		formatString: #,0
+		displayFolder: Drafts
+
+	column ev_signaturerequestid
+		dataType: string
+		isHidden
+		summarizeBy: none
+		sourceColumn: ev_signaturerequestid
+
+	column ev_status
+		dataType: int64
+		isHidden
+		summarizeBy: none
+		sourceColumn: ev_status
+
+	column Status
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Status
+
+	column ev_senton
+		dataType: dateTime
+		formatString: General Date
+		summarizeBy: none
+		sourceColumn: ev_senton
+
+	column SentDate
+		dataType: dateTime
+		formatString: Short Date
+		isHidden
+		summarizeBy: none
+		sourceColumn: SentDate
+
+	column ev_signedon
+		dataType: dateTime
+		formatString: General Date
+		summarizeBy: none
+		sourceColumn: ev_signedon
+
+	column ev_viewedon
+		dataType: dateTime
+		formatString: General Date
+		summarizeBy: none
+		sourceColumn: ev_viewedon
+
+	column ev_expireson
+		dataType: dateTime
+		formatString: General Date
+		summarizeBy: none
+		sourceColumn: ev_expireson
+
+	column ev_inperson
+		dataType: boolean
+		summarizeBy: none
+		sourceColumn: ev_inperson
+
+	column ev_formcount
+		dataType: int64
+		summarizeBy: sum
+		sourceColumn: ev_formcount
+
+	column ev_owner
+		dataType: string
+		isHidden
+		summarizeBy: none
+		sourceColumn: ev_owner
+
+	column ev_preparedby
+		dataType: string
+		isHidden
+		summarizeBy: none
+		sourceColumn: ev_preparedby
+
+	column createdon
+		dataType: dateTime
+		formatString: General Date
+		summarizeBy: none
+		sourceColumn: createdon
+
+	column modifiedon
+		dataType: dateTime
+		formatString: General Date
+		summarizeBy: none
+		sourceColumn: modifiedon
+
+	partition SignatureRequest = m
+		mode: directQuery
+		source =
+				let
+					Source = Dataverse,
+					Rows = Source{[Schema = "dbo", Item = "ev_signaturerequest"]}[Data],
+					Kept = Table.SelectColumns(Rows, {"ev_signaturerequestid", "ev_status", "ev_senton", "ev_signedon", "ev_viewedon", "ev_expireson", "ev_inperson", "ev_formcount", "ev_owner", "ev_preparedby", "createdon", "modifiedon"}),
+					Typed = Table.TransformColumnTypes(Kept, {{"ev_signaturerequestid", type text}, {"ev_owner", type text}, {"ev_preparedby", type text}, {"ev_status", Int64.Type}, {"ev_formcount", Int64.Type}, {"ev_senton", type datetime}, {"ev_signedon", type datetime}, {"ev_viewedon", type datetime}, {"ev_expireson", type datetime}, {"createdon", type datetime}, {"modifiedon", type datetime}}),
+					WithStatus = Table.AddColumn(Typed, "Status", each
+						if [ev_status] = 100000000 then "Drafted"
+						else if [ev_status] = 100000001 then "Sent"
+						else if [ev_status] = 100000002 then "Viewed"
+						else if [ev_status] = 100000003 then "Signed"
+						else if [ev_status] = 100000004 then "Declined"
+						else if [ev_status] = 100000005 then "Voided"
+						else if [ev_status] = 100000006 then "Expired"
+						else "Unknown", type text),
+					WithSentDate = Table.AddColumn(WithStatus, "SentDate", each if [ev_senton] = null then null else DateTime.From(DateTime.Date([ev_senton])), type datetime)
+				in
+					WithSentDate
+

@@ -1,0 +1,29 @@
+/// Age buckets for open envelopes and drafts (docs/REPORTS.md pages 3 and 5). Not related to anything: the measures read the selected bucket.
+table AgeBucket
+
+	column Bucket
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Bucket
+		sortByColumn: FromDays
+
+	column FromDays
+		dataType: int64
+		isHidden
+		summarizeBy: none
+		sourceColumn: FromDays
+
+	column ToDays
+		dataType: int64
+		isHidden
+		summarizeBy: none
+		sourceColumn: ToDays
+
+	partition AgeBucket = m
+		mode: import
+		source =
+				#table(
+					type table [Bucket = text, FromDays = Int64.Type, ToDays = Int64.Type],
+					{ { "0–7 days", 0, 7 }, { "8–30 days", 8, 30 }, { "31–60 days", 31, 60 }, { "60+ days", 61, 100000 } }
+				)
+

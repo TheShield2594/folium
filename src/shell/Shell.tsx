@@ -149,6 +149,9 @@ export function Sidebar() {
             <NavItem to="/admin/settings" icon="lock">
               Settings
             </NavItem>
+            <NavItem to="/admin/readiness" icon="target">
+              Readiness
+            </NavItem>
             {reports && (
               <ExternalNavItem href={firm!.reportsUrl!} icon="chart">
                 Reports

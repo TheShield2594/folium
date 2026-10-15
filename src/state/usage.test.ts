@@ -86,7 +86,7 @@ describe('usage hook points (demo)', () => {
       calls++;
       return new Promise<void>(() => undefined);
     }, { batchSize: 1, flushOnPageHide: false });
-    const broken = { ...services, usage: down };
+    const broken = { ...services, usage: Object.assign(down, { list: services.usage.list }) };
     useApp.setState({ services: broken });
     const packet = { items, values: {}, title: 'Bene', attachments: [], sharedWith: [] };
     const saved = await saveDraft({ services: broken, packet, fills: fills(), contactId: 'c-jordan', me, owner: me, trackUsage: true });
@@ -98,7 +98,7 @@ describe('usage hook points (demo)', () => {
     expect(down.pending()).toBe(1);
     down.dispose();
 
-    const throwing = { ...services, usage: { track: () => { throw new Error('boom'); }, flush: async () => undefined } };
+    const throwing = { ...services, usage: { track: () => { throw new Error('boom'); }, flush: async () => undefined, list: async () => ({ events: [], truncated: false }) } };
     useApp.setState({ services: throwing });
     expect(() => track('pdf.print', [TEMPLATES[0]])).not.toThrow();
     expect(() => useApp.getState().addToPacket('tpl-px310-0826')).not.toThrow();

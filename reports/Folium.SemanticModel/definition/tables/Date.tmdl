@@ -1,0 +1,39 @@
+/// The shared date slicer. Marked as the date table.
+table Date
+	dataCategory: Time
+
+	column Date
+		dataType: dateTime
+		isKey
+		formatString: Short Date
+		summarizeBy: none
+		sourceColumn: [Date]
+
+	column Month
+		dataType: string
+		summarizeBy: none
+		sourceColumn: [Month]
+		sortByColumn: MonthStart
+
+	column MonthStart
+		dataType: dateTime
+		isHidden
+		formatString: Short Date
+		summarizeBy: none
+		sourceColumn: [MonthStart]
+
+	column Year
+		dataType: int64
+		summarizeBy: none
+		sourceColumn: [Year]
+
+	partition Date = calculated
+		mode: import
+		source =
+				ADDCOLUMNS (
+					CALENDAR ( DATE ( 2026, 1, 1 ), TODAY () + 30 ),
+					"Month", FORMAT ( [Date], "mmm yyyy" ),
+					"MonthStart", DATE ( YEAR ( [Date] ), MONTH ( [Date] ), 1 ),
+					"Year", YEAR ( [Date] )
+				)
+

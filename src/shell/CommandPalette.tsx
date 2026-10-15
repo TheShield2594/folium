@@ -44,6 +44,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
             { id: 'n-ppl', icon: 'people' as IconName, title: 'Users & groups', run: go('/admin/people') },
             { id: 'n-ann', icon: 'bell' as IconName, title: 'Announcements', run: go('/admin/announcements') },
             { id: 'n-firm', icon: 'building' as IconName, title: 'Firm profiles', run: go('/admin/firm') },
+            { id: 'n-ready', icon: 'target' as IconName, title: 'Readiness', run: go('/admin/readiness') },
           ]
         : []),
     ];

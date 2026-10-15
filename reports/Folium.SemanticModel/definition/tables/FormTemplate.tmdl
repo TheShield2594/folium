@@ -1,0 +1,29 @@
+table FormTemplate
+
+	column ev_formtemplateid
+		dataType: string
+		isHidden
+		summarizeBy: none
+		sourceColumn: ev_formtemplateid
+
+	column ev_name
+		dataType: string
+		summarizeBy: none
+		sourceColumn: ev_name
+
+	column ev_formnumber
+		dataType: string
+		summarizeBy: none
+		sourceColumn: ev_formnumber
+
+	partition FormTemplate = m
+		mode: directQuery
+		source =
+				let
+					Source = Dataverse,
+					Rows = Source{[Schema = "dbo", Item = "ev_formtemplate"]}[Data],
+					Kept = Table.SelectColumns(Rows, {"ev_formtemplateid", "ev_name", "ev_formnumber"}),
+					Typed = Table.TransformColumnTypes(Kept, {{"ev_formtemplateid", type text}})
+				in
+					Typed
+

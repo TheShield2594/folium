@@ -18,7 +18,11 @@ import { createUsageQueue } from '../usage';
 import { decodeChoices, encodeChoices } from './choices';
 import { CHOICES, DATAVERSE, ID_DOCUMENT_COLUMNS, SHAREPOINT, SIGNING_CONNECTIONS, CONNECTORS, type SigningConnection } from './config';
 import { dataSourcesInfo } from './dataSourcesInfo';
-import { feedbackRow, fromFeedbackRow, isDuplicateKeyError, requestRow, usageRow, type FeedbackRowIn } from './rows';
+import { feedbackRow, fromFeedbackRow, fromUsageRow, isDuplicateKeyError, requestRow, USAGE_COLUMNS, usageRow, type FeedbackRowIn, type UsageRowIn } from './rows';
+import type { UsageEvent } from '../../domain/usage';
+
+/** Most usage rows Administration › Readiness reads at once. */
+const USAGE_READ_CAP = 50_000;
 
 // Power Platform implementations. Dataverse tables go through the SDK's data client;
 // SharePoint and DocuSign go through connector operations. Every Dataverse row Folium
@@ -413,12 +417,36 @@ export function createPowerServices(): Services {
   // ---------------------------------------------------------------- Usage events
   // One row at a time, so a row that's already there (same `ev_dedupekey`, the table's
   // alternate key) is skipped without losing the rest of the batch.
-  const usage = createUsageQueue(async (events) => {
-    for (const e of events) {
-      const r = await client.createRecordAsync(DATAVERSE.usageEvent, usageRow(e));
-      if (!r.success && !isDuplicateKeyError(r.error)) unwrap(r, 'Record usage');
-    }
-  });
+  const usage = Object.assign(
+    createUsageQueue(async (events) => {
+      for (const e of events) {
+        const r = await client.createRecordAsync(DATAVERSE.usageEvent, usageRow(e));
+        if (!r.success && !isDuplicateKeyError(r.error)) unwrap(r, 'Record usage');
+      }
+    }),
+    {
+      // Page by skip token up to USAGE_READ_CAP rows; the Power BI report covers more.
+      async list(since: string) {
+        const events: UsageEvent[] = [];
+        let skipToken: string | undefined;
+        do {
+          const r = await client.retrieveMultipleRecordsAsync<UsageRowIn>(DATAVERSE.usageEvent, {
+            filter: `ev_occurredon ge ${new Date(since).toISOString()}`,
+            select: USAGE_COLUMNS,
+            orderBy: ['ev_occurredon asc'],
+            maxPageSize: 5000,
+            ...(skipToken ? { skipToken } : {}),
+          });
+          for (const row of unwrap(r, 'Load usage')) {
+            const e = fromUsageRow(row);
+            if (e) events.push(e);
+          }
+          skipToken = r.skipToken;
+        } while (skipToken && events.length < USAGE_READ_CAP);
+        return { events: events.slice(0, USAGE_READ_CAP), truncated: !!skipToken };
+      },
+    },
+  );
 
   // ---------------------------------------------------------------- Drafts
   const drafts: DraftStore = {

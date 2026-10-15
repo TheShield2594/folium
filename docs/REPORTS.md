@@ -2,7 +2,7 @@
 
 Folium's reports are a **Power BI report on Dataverse**, not charts inside the app. Power BI gives date slicers, drill-down, export to CSV and Excel, subscriptions and row-level security without Folium code. Admins and people with the reporting role open it from the sidebar's **Reports** link, which goes to the URL in Administration › Firm profile › Reports.
 
-Status: the data (`ev_usageevent`, the promoted `ev_signaturerequest` columns), the Reports link and the reference metric definitions are in Folium. The report itself is built in Power BI Desktop from this document and checked in as a `.pbip` project under `reports/` once it exists. Its numbers are checked against the same definitions in `src/domain/reports.ts` (see [Checking the numbers](#checking-the-numbers)).
+Status: the data (`ev_usageevent`, the promoted `ev_signaturerequest` columns), the Reports link and the reference metric definitions are in Folium. The report is a Power BI Project in [`reports/`](../reports/README.md): the semantic model (tables, relationships and every measure below, in TMDL) and the five pages, named but without visuals. It hasn't been opened in Power BI Desktop yet; the visuals are built there, then saved back. Until it's published, Administration › Readiness shows the pilot's numbers and forms by use from the same definitions ([READINESS.md](READINESS.md)). Its numbers are checked against the same definitions in `src/domain/reports.ts` (see [Checking the numbers](#checking-the-numbers)).
 
 ## Data
 
@@ -21,7 +21,7 @@ Every page shares one **date slicer** (on `Date`), synced across pages. Every ta
 
 ## Measures
 
-The definitions match `src/domain/reports.ts`. The DAX is a starting point, not tested in Power BI yet: check each measure against the sample in [Checking the numbers](#checking-the-numbers). `EventType` is the name column mapped from `ev_eventtype`.
+The definitions match `src/domain/reports.ts`, and the model in `reports/Folium.SemanticModel` has them all (time to sign included, as a nearest-rank measure). The DAX is a starting point, not tested in Power BI yet: check each measure against the sample in [Checking the numbers](#checking-the-numbers). `EventType` is the name column mapped from `ev_eventtype`.
 
 ```dax
 Form uses = CALCULATE ( COUNTROWS ( ev_usageevent ), ev_usageevent[EventType] = "form.added" )

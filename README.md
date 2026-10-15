@@ -34,7 +34,8 @@ Demo mode needs nothing else: sample clients, a template library of generated Ac
 - **Contact & accounts** — fix the client's Dynamics 365 record in place.
 - **Settings** — your own profile (from your Microsoft profile, with Folium overrides), sending defaults, appearance.
 - **Administration** — template library with revision diff and carry-over, signature tab placement, check rules, test with a real contact, publish on an effective date; form feedback (requests for new forms and advisors' problem reports, straight to the field in the editor); users (status and last sign-in, bulk changes, CSV import and export), groups (role, region, default firm profile and e-signature connection), firm profiles (one per Everence entity, picked by each form’s issuer), announcements across the top of Folium, and e-signature connections with the DocuSign account (each person sends from their own DocuSign login; each request remembers the connection that sent it).
-- **Reports** — form use, e-signature steps and blocked sends are recorded per form and revision (`ev_usageevent`) for a Power BI report, opened from the sidebar by Admins and the reporting role.
+- **Reports** — form use, e-signature steps and blocked sends are recorded per form and revision (`ev_usageevent`) for a Power BI report, opened from the sidebar by Admins and the reporting role. The report's Power BI project is in `reports/`.
+- **Readiness** — Administration › Readiness checks what Folium can of the switch from Laser App (top companies' forms Live, users and groups, firm and advisor data, DocuSign, policy) and shows the pilot's numbers and forms ranked by use.
 - **Roles** — User, Assistant (works on behalf of the Users in their groups, like LaserApp Anywhere) and Admin.
 
 See [docs/PARITY.md](docs/PARITY.md) for the feature-by-feature comparison with LaserApp Anywhere.
@@ -49,4 +50,5 @@ Built to Apple's Human Interface Guidelines — source-list sidebar, translucent
 - [Deploying to Power Platform](docs/DEPLOY.md)
 - [Dataverse schema](docs/DATAVERSE.md)
 - [Reports](docs/REPORTS.md)
+- [Replacement readiness](docs/READINESS.md)
 - [DocuSign custom connector](connectors/folium-docusign.swagger.json)
