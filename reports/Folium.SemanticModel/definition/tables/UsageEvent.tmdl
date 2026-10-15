@@ -29,19 +29,19 @@ table UsageEvent
 		displayFolder: People
 
 	measure 'Active people (7 days)' =
-			VAR last = MAX ( 'Date'[Date] )
+			VAR last = MIN ( MAX ( 'Date'[Date] ), TODAY () )
 			RETURN CALCULATE ( DISTINCTCOUNT ( UsageEvent[ev_user] ), DATESINPERIOD ( 'Date'[Date], last, -7, DAY ) )
 		formatString: #,0
 		displayFolder: People
 
 	measure 'Active people (30 days)' =
-			VAR last = MAX ( 'Date'[Date] )
+			VAR last = MIN ( MAX ( 'Date'[Date] ), TODAY () )
 			RETURN CALCULATE ( DISTINCTCOUNT ( UsageEvent[ev_user] ), DATESINPERIOD ( 'Date'[Date], last, -30, DAY ) )
 		formatString: #,0
 		displayFolder: People
 
 	measure 'Active people (90 days)' =
-			VAR last = MAX ( 'Date'[Date] )
+			VAR last = MIN ( MAX ( 'Date'[Date] ), TODAY () )
 			RETURN CALCULATE ( DISTINCTCOUNT ( UsageEvent[ev_user] ), DATESINPERIOD ( 'Date'[Date], last, -90, DAY ) )
 		formatString: #,0
 		displayFolder: People

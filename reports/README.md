@@ -25,6 +25,8 @@ The Power BI report described in [docs/REPORTS.md](../docs/REPORTS.md), saved as
 
 Data comes through Dataverse's TDS endpoint (`CommonDataService.Database`), so DirectQuery with single sign-on lets Dataverse security (#1) decide what each person sees. Set the `DataverseUrl` parameter to the environment (for example `everence.crm.dynamics.com`); turn on the TDS endpoint in the Power Platform admin center if it's off.
 
+**Row-level security.** `BlockingCheck` is imported, so single sign-on doesn't secure it. The `Viewer` role keeps only the checks on usage rows the viewer can read through DirectQuery. In the service, add the reporting group to `Viewer` (Semantic model › Security) and give them Viewer access to the workspace; Admins, Members and Contributors aren't filtered by roles. Check with two managers who see different groups before publishing.
+
 Relationships follow REPORTS.md: `UsageEvent` to `User` (who did it; `ev_actingfor` inactive, for `USERELATIONSHIP`), to `SignatureRequest`, `FormTemplate` and `Date`; `SignatureRequest[SentDate]` and `[ev_owner]` inactive to `Date` and `User`. Option values are mapped in Power Query; if Folium's option values change, change them here too.
 
 ### Measures

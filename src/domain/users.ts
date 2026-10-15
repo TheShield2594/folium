@@ -159,7 +159,8 @@ export function parseCsv(text: string): string[][] {
   return rows;
 }
 
-const quote = (v: string) => (/[",\r\n]/.test(v) || /^[=+\-@]/.test(v) ? `"${(/^[=+\-@]/.test(v) ? `'${v}` : v).replace(/"/g, '""')}"` : v);
+const FORMULA = /^[=+\-@\t\r]/;
+const quote = (v: string) => (/[",\r\n]/.test(v) || FORMULA.test(v) ? `"${(FORMULA.test(v) ? `'${v}` : v).replace(/"/g, '""')}"` : v);
 
 /** CSV text Excel opens directly (with a BOM so names with accents survive). Cells that look like formulas are defused. */
 export function toCsv(rows: string[][]): string {

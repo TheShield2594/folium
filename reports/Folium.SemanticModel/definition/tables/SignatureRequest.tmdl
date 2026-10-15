@@ -16,7 +16,7 @@ table SignatureRequest
 		displayFolder: Drafts
 
 	/// Due for deletion by the retention flow (ev_expireson) within 7 days.
-	measure 'Drafts due this week' = CALCULATE ( [Drafts], SignatureRequest[ev_expireson] < NOW () + 7 )
+	measure 'Drafts due this week' = CALCULATE ( [Drafts], NOT ISBLANK ( SignatureRequest[ev_expireson] ), SignatureRequest[ev_expireson] >= NOW (), SignatureRequest[ev_expireson] < NOW () + 7 )
 		formatString: #,0
 		displayFolder: Drafts
 

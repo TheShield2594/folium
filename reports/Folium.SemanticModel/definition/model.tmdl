@@ -11,3 +11,5 @@ ref table FormTemplate
 ref table User
 ref table Date
 ref table AgeBucket
+
+ref role Viewer

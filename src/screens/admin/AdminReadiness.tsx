@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import type { FormFeedback } from '../../domain/feedback';
 import {
@@ -54,10 +54,14 @@ function Readiness() {
   const [usage, setUsage] = useState<{ events: UsageEvent[]; truncated: boolean } | null>();
   const [feedback, setFeedback] = useState<FormFeedback[] | null>();
 
+  // Only the latest load writes state: a slow 12-month read mustn't land after a 30-day one.
+  const latest = useRef(0);
   async function load(window: Window) {
+    const mine = ++latest.current;
     setUsage(undefined);
     const since = new Date(Date.now() - Number(window) * 86_400_000).toISOString();
     const [u, f] = await Promise.allSettled([services.usage.list(since), services.feedback.list()]);
+    if (mine !== latest.current) return;
     // Either can fail (no Read on the table yet): the list still shows, marked "Check by hand".
     setUsage(u.status === 'fulfilled' ? u.value : null);
     setFeedback(f.status === 'fulfilled' ? f.value : null);

@@ -443,7 +443,7 @@ export function createPowerServices(): Services {
           }
           skipToken = r.skipToken;
         } while (skipToken && events.length < USAGE_READ_CAP);
-        return { events: events.slice(0, USAGE_READ_CAP), truncated: !!skipToken };
+        return { events: events.slice(0, USAGE_READ_CAP), truncated: !!skipToken || events.length > USAGE_READ_CAP };
       },
     },
   );
