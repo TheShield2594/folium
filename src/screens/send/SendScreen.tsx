@@ -53,6 +53,9 @@ export function SendScreen() {
   const connections = useMemo(() => services.signing.list(), [services]);
   const [picked, setPicked] = useState<string>();
   const packetFirm = view?.fills.find((f) => f.firm?.signingProviderId)?.firm ?? view?.fills[0]?.firm;
+  // Entities in the packet whose profiles name different connections: the first form's
+  // wins, and the sender is told, since one envelope can only go through one.
+  const firmConnections = [...new Map((view?.fills ?? []).filter((f) => f.firm?.signingProviderId).map((f) => [f.firm!.signingProviderId!, f.firm!.name])).entries()];
   const auto = useMemo(() => providerFor(owner, groups, packetFirm, signingSettings, connections.map((c) => c.id)), [owner, groups, packetFirm, signingSettings, connections]);
   const chosen = signingSettings.userChoice && picked && services.signing.has(picked) ? picked : (existing?.provider && existing.status === 'Drafted' && signingSettings.userChoice && services.signing.has(existing.provider) ? existing.provider : auto.id);
   const providerId = packet.send?.provider ?? chosen;
@@ -553,6 +556,11 @@ export function SendScreen() {
                   connections.length > 1 && <p className="t-footnote c3">Sends with {provider.label}.</p>
                 )}
                 {auto.warning && <p className="t-footnote c-warn">{auto.warning}</p>}
+                {firmConnections.length > 1 && (
+                  <p className="t-footnote c-warn">
+                    These forms come from entities that send with different connections ({firmConnections.map(([id, name]) => `${name}: ${services.signing.get(id).label}`).join('; ')}). One envelope goes through one connection: this one sends with {provider.label}. Send the other entity’s forms separately if they must use theirs.
+                  </p>
+                )}
                 <div className="stack t-callout">
                   <div className="row"><span className="grow">Forms</span><strong className="tabular">{view.templates.length}</strong></div>
                   <div className="row"><span className="grow">Signers</span><strong className="tabular">{ordered.length}</strong></div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { blankFirm, firmProblems, setDefaultFirm, templateIssuers, templatesUsing } from '../../domain/firms';
 import { isReportUrl } from '../../domain/reports';
@@ -54,7 +54,24 @@ export function AdminFirm() {
   const [selected, setSelected] = useState<string | undefined>(firms.find((f) => f.isDefault)?.id ?? firms[0]?.id);
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState<FirmProfile>();
-  useEffect(() => setDraft(firms), [firms]);
+  // A reload (after removing a profile, say) keeps edits not yet saved: a profile edited
+  // here stays as edited, one added here stays, one removed elsewhere goes. After this
+  // screen saves, what was saved comes back as it now is.
+  const serverFirms = useRef(firms);
+  const justSaved = useRef(false);
+  useEffect(() => {
+    const before = serverFirms.current;
+    serverFirms.current = firms;
+    const saved = justSaved.current;
+    justSaved.current = false;
+    setDraft((current) => {
+      if (saved) return firms;
+      const edited = (x: FirmProfile) => JSON.stringify(x) !== JSON.stringify(before.find((b) => b.id === x.id));
+      const kept = firms.map((server) => current.find((x) => x.id === server.id && before.some((b) => b.id === x.id) && edited(x)) ?? server);
+      const added = current.filter((x) => !before.some((b) => b.id === x.id) && !firms.some((f) => f.id === x.id));
+      return [...kept, ...added];
+    });
+  }, [firms]);
 
   const saved = (id: string) => firms.find((x) => x.id === id);
   const changed = draft.filter((f) => JSON.stringify(f) !== JSON.stringify(saved(f.id)));
@@ -76,9 +93,11 @@ export function AdminFirm() {
     try {
       // The default last: saving it takes the default from any other profile.
       for (const x of [...changed].sort((a, b) => Number(!!a.isDefault) - Number(!!b.isDefault))) await services.directory.saveFirm(x);
+      justSaved.current = true;
       await reloadDirectory();
       toast.ok(changed.length === 1 ? `${changed[0].name} saved` : `${changed.length} firm profiles saved`);
     } catch (e) {
+      justSaved.current = false;
       toast.error(e instanceof Error ? e.message : 'Could not save the firm profiles');
     } finally {
       setBusy(false);
