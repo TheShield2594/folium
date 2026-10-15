@@ -1,5 +1,6 @@
 import type { FeedbackKind, FeedbackStatus } from '../../domain/feedback';
 import type { IdAttr } from '../../domain/idDocuments';
+import { DOCUSIGN_MAIN, type ProviderCapabilities } from '../../domain/signing';
 import type { SignatureStatus } from '../../domain/types';
 import type { UsageEventType } from '../../domain/usage';
 
@@ -23,7 +24,7 @@ export const DATAVERSE = {
   /** Folium role/group/defaults per systemuser (one row per user). */
   profile: 'ev_foliumprofiles',
   group: 'ev_foliumgroups',
-  /** Firm settings: one row per `ev_name` ("Firm", "Policy"). */
+  /** Firm settings, by `ev_name`: "Policy", "DocuSign", "Signing", one "Firm: …" per firm profile, one "Announcement" each. */
   settings: 'ev_foliumsettings',
 } as const;
 
@@ -43,6 +44,30 @@ export const SHAREPOINT = {
   /** Subfolder of the contact's folder for documents attached to drafts. */
   attachmentsFolder: 'Folium attachments',
 } as const;
+
+export interface SigningConnection {
+  /** Stored on each request (`ev_provider`). Never change it once requests use it. */
+  id: string;
+  label: string;
+  /** The custom connector's data source name (`pac code add-data-source`). */
+  connector: string;
+  capabilities: ProviderCapabilities;
+}
+
+/**
+ * E-signature connections, in order; the first is the fallback default. Administration ›
+ * Settings › E-signature picks the default, and groups and firm profiles can name another.
+ * Another DocuSign account is another connection of the custom connector, added as its
+ * own data source; another provider needs its own adapter (DEPLOY.md, "Adding a provider").
+ */
+export const SIGNING_CONNECTIONS: SigningConnection[] = [
+  {
+    id: DOCUSIGN_MAIN,
+    label: 'DocuSign',
+    connector: CONNECTORS.docuSign,
+    capabilities: { verification: ['email', 'sms', 'phone', 'kba'], accessCode: true, inSession: true, correctRecipient: true },
+  },
+];
 
 // The DocuSign account ID, identity-verification workflow IDs and consent link are set
 // in Administration › Settings › DocuSign (the "DocuSign" `ev_foliumsetting` row), so

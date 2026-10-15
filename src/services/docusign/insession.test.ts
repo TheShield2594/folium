@@ -71,7 +71,7 @@ describe('in-session signing', () => {
 
   it('lets a cancelled session be reopened with a fresh link (demo)', async () => {
     const { createDemoServices, demoSignInSession } = await import('../demo');
-    const { signing } = createDemoServices();
+    const signing = createDemoServices().signing.get('docusign:main');
     const { envelopeId } = await signing.create(send([{ ...jordan, inSession: true }, { ...sam, order: 2 }]));
     await signing.release(envelopeId);
     const first = await signing.signingUrl(envelopeId, 'Owner', 'https://app/#/signing-return?envelope=x');

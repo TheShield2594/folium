@@ -35,8 +35,11 @@ vi.mock('@microsoft/power-apps/data', () => ({
     retrieveMultipleRecordsAsync: async (table: string, opts: { filter?: string }) => {
       queries.push({ table, filter: opts?.filter });
       if (table === 'ev_foliumsettings') {
-        const name = /ev_name eq '([^']+)'/.exec(opts?.filter ?? '')?.[1];
-        return ok(Object.values(settingRows).filter((r) => !name || r.ev_name === name));
+        const f = opts?.filter ?? '';
+        const names = [...f.matchAll(/ev_name eq '([^']+)'/g)].map((m) => m[1]);
+        const prefixes = [...f.matchAll(/startswith\(ev_name,'([^']+)'\)/g)].map((m) => m[1]);
+        const match = (n: string) => (!names.length && !prefixes.length) || names.includes(n) || prefixes.some((p) => n.startsWith(p));
+        return ok(Object.values(settingRows).filter((r) => match(String(r.ev_name))));
       }
       if (table === 'ev_foliumprofiles') return ok(Object.values(profileRows));
       if (table === 'ev_foliumgroups') return ok([]);
@@ -66,8 +69,11 @@ vi.mock('@microsoft/power-apps/data', () => ({
       settingRows[id] = { ...data, ev_foliumsettingid: id };
       return ok({ ev_foliumsettingid: id });
     },
-    deleteRecordAsync: async () => {
-      throw new Error('Folium never hard-deletes');
+    // Setting rows (a firm profile, an announcement) are deleted; everything else is soft-deleted.
+    deleteRecordAsync: async (table: string, id: string) => {
+      if (table !== 'ev_foliumsettings') throw new Error('Folium never hard-deletes');
+      delete settingRows[id];
+      return ok({});
     },
     updateRecordAsync: async (table: string, id: string, data: Record<string, unknown>) => {
       updates.push({ table, id, data });
@@ -195,14 +201,73 @@ describe('firm policy row', () => {
     await directory.saveFirm(FIRM);
     const policy = { sharing: 'off' as const, repDataVisibility: 'groupMembers' as const, pdfDownload: 'signedOnly' as const, draftRetentionDays: 30, lockMessage: true };
     await directory.savePolicy(policy);
-    expect(Object.values(settingRows).map((r) => r.ev_name).sort()).toEqual(['Firm', 'Policy']);
+    expect(Object.values(settingRows).map((r) => r.ev_name).sort()).toEqual([`Firm: ${FIRM.name}`, 'Policy']);
     expect(await directory.getPolicy()).toEqual(policy);
     // The firm profile still reads its own row.
-    expect((await directory.getFirm()).name).toBe(FIRM.name);
+    expect((await directory.listFirms()).map((f) => f.name)).toEqual([FIRM.name]);
     // Saving again updates the same row.
     await directory.savePolicy({ ...policy, sharing: 'anyone' });
     expect(Object.keys(settingRows)).toHaveLength(2);
     expect((await directory.getPolicy()).sharing).toBe('anyone');
+  });
+});
+
+describe('firm profiles', () => {
+  beforeEach(() => {
+    for (const k of Object.keys(settingRows)) delete settingRows[k];
+  });
+  const trust = { ...FIRM, id: 'firm-trust', isDefault: false, name: 'Everence Trust Company', legalName: 'Everence Trust Company', issuers: ['Everence Trust Company'] };
+
+  it('loads the single row from before profiles as the default', async () => {
+    const { name, legalName } = FIRM;
+    settingRows['set-old'] = { ev_foliumsettingid: 'set-old', ev_name: 'Firm', ev_payload: JSON.stringify({ name, legalName, disclosure: 'Old' }) };
+    const firms = await createPowerServices().directory.listFirms();
+    expect(firms).toHaveLength(1);
+    expect(firms[0]).toMatchObject({ id: 'firm-default', isDefault: true, issuers: [], name, disclosure: 'Old' });
+  });
+
+  it('round-trips several profiles, one row each, with one default', async () => {
+    const { name, legalName } = FIRM;
+    settingRows['set-old'] = { ev_foliumsettingid: 'set-old', ev_name: 'Firm', ev_payload: JSON.stringify({ name, legalName }) };
+    const { directory } = createPowerServices();
+    const [legacy] = await directory.listFirms();
+    // Saving the old row keeps it (now named for the profile) and its id.
+    await directory.saveFirm({ ...legacy, phone: '800-000-0000' });
+    await directory.saveFirm(trust);
+    expect(Object.values(settingRows).map((r) => r.ev_name).sort()).toEqual([`Firm: ${FIRM.name}`, 'Firm: Everence Trust Company']);
+    expect(settingRows['set-old'].ev_name).toBe(`Firm: ${FIRM.name}`);
+    let firms = await directory.listFirms();
+    expect(firms.map((f) => [f.id, f.isDefault, f.phone])).toEqual([
+      ['firm-default', true, '800-000-0000'],
+      ['firm-trust', false, FIRM.phone],
+    ]);
+    // A new default takes it from the old one.
+    await directory.saveFirm({ ...trust, isDefault: true });
+    firms = await directory.listFirms();
+    expect(firms.filter((f) => f.isDefault).map((f) => f.id)).toEqual(['firm-trust']);
+    await expect(directory.removeFirm('firm-trust')).rejects.toThrow(/default/);
+    await directory.removeFirm('firm-default');
+    expect((await directory.listFirms()).map((f) => f.id)).toEqual(['firm-trust']);
+  });
+});
+
+describe('announcements', () => {
+  beforeEach(() => {
+    for (const k of Object.keys(settingRows)) delete settingRows[k];
+  });
+  const a = { id: 'new-1', message: '  DocuSign is down until noon.  ', severity: 'critical' as const, startsOn: '2026-10-15T08:00:00.000Z', dismissible: true, createdBy: 'Dana', createdOn: '2026-10-15T07:00:00.000Z' };
+
+  it('stores each as an Announcement row, cleaned, and refuses one that is too long', async () => {
+    const { directory } = createPowerServices();
+    const saved = await directory.saveAnnouncement(a);
+    expect(saved.id).toMatch(/^set-/);
+    expect(saved).toMatchObject({ message: 'DocuSign is down until noon.', dismissible: false });
+    expect(Object.values(settingRows).map((r) => r.ev_name)).toEqual(['Announcement']);
+    await directory.saveAnnouncement({ ...saved, message: 'Back up.' });
+    expect(await directory.listAnnouncements()).toEqual([{ ...saved, message: 'Back up.' }]);
+    await expect(directory.saveAnnouncement({ ...a, message: 'x'.repeat(1001) })).rejects.toThrow(/1,000/);
+    await directory.removeAnnouncement(saved.id);
+    expect(await directory.listAnnouncements()).toEqual([]);
   });
 });
 
@@ -285,13 +350,14 @@ describe('DocuSign setup', () => {
   });
 
   it('won’t call DocuSign until an administrator names the account', async () => {
-    const { signing } = createPowerServices();
+    const signing = createPowerServices().signing.get('docusign:main');
     await expect(signing.release('env-1')).rejects.toThrow(/Administration › Settings/);
     expect(docuSignCalls).toHaveLength(0);
   });
 
   it('saves the setup in its own row and sends every call to that account', async () => {
-    const { directory, signing } = createPowerServices();
+    const { directory, signing: registry } = createPowerServices();
+    const signing = registry.get('DocuSign');
     await expect(signing.release('env-1')).rejects.toThrow();
     await directory.saveDocuSign({ environment: 'demo', accountId: ACCOUNT, idv: { sms: ACCOUNT } });
     expect(Object.values(settingRows).map((r) => r.ev_name)).toEqual(['DocuSign']);
@@ -303,7 +369,7 @@ describe('DocuSign setup', () => {
   });
 
   it('tests settings before they’re saved', async () => {
-    const { signing } = createPowerServices();
+    const signing = createPowerServices().signing.get('docusign:main');
     const a = await signing.checkConnection({ environment: 'demo', accountId: ACCOUNT, idv: {} });
     expect(a).toEqual({ accountId: ACCOUNT, accountName: 'Everence Financial' });
     expect(docuSignCalls).toEqual([{ operationName: 'GetAccount', parameters: { accountId: ACCOUNT } }]);

@@ -1,3 +1,4 @@
+import type { Announcement } from '../../domain/announcements';
 import type { DirectoryUser } from '../../domain/advisor';
 import type { FormFeedback } from '../../domain/feedback';
 import type { Advisor, ClientRecord, Contact, FirmProfile, FormTemplate, SavedPacket, SignatureRequest, UserGroup, UserProfile } from '../../domain/types';
@@ -43,6 +44,9 @@ export const GROUPS: UserGroup[] = [
 ];
 
 export const FIRM: FirmProfile = {
+  id: 'firm-default',
+  isDefault: true,
+  issuers: ['Everence Financial'],
   name: 'Everence Financial',
   legalName: 'Everence Financial Advisors, Inc.',
   address1: '1110 N. Main St.',
@@ -55,6 +59,45 @@ export const FIRM: FirmProfile = {
   crd: '[CRD #]',
   disclosure: 'Securities offered through [BROKER-DEALER NAME], member FINRA/SIPC.',
 };
+
+/** Demo firm profiles: the default, plus two entities with their own forms. Names and numbers are placeholders. */
+export const FIRMS: FirmProfile[] = [
+  FIRM,
+  {
+    id: 'firm-trust',
+    issuers: ['Everence Trust Company', 'Everence Foundation'],
+    name: 'Everence Trust Company',
+    legalName: 'Everence Trust Company',
+    address1: '1110 N. Main St.',
+    suite: 'PO Box 483',
+    city: 'Goshen',
+    state: 'IN',
+    zip: '46527',
+    phone: '800-348-7468',
+    phoneExt: '2100',
+    email: 'trust@everence.com',
+    website: 'everence.com/trust',
+    brokerDealer: '',
+    crd: '',
+    firmNumber: '[TRUST CO. #]',
+    disclosure: 'Trust services are provided by Everence Trust Company. Not FDIC insured. May lose value.',
+  },
+  {
+    id: 'firm-praxis',
+    issuers: ['Praxis Mutual Funds'],
+    name: 'Praxis Mutual Funds',
+    legalName: 'Praxis Mutual Funds (Everence Capital Management, Inc.)',
+    address1: '1110 N. Main St.',
+    city: 'Goshen',
+    state: 'IN',
+    zip: '46528',
+    phone: '800-977-2947',
+    website: 'praxismutualfunds.com',
+    brokerDealer: '[DISTRIBUTOR NAME]',
+    crd: '',
+    disclosure: 'Praxis Mutual Funds are distributed by [DISTRIBUTOR NAME], member FINRA.',
+  },
+];
 
 const c = (x: Partial<Contact> & Pick<Contact, 'contactid' | 'firstname' | 'lastname' | 'ev_clientid'>): Contact => ({
   fullname: [x.firstname, x.middlename, x.lastname].filter(Boolean).join(' '),
@@ -484,5 +527,42 @@ export function seedFeedback(): FormFeedback[] {
       fixedInTemplateId: 'tpl-ev1004-0125',
     },
     { id: 'fb-4', kind: 'request', name: 'Praxis HSA enrollment', requestedBy: 'Morgan Beachy', createdOn: daysAgo(70, 14, 0), status: 'new' },
+  ];
+}
+
+/** Demo announcements: one live for everyone, one scheduled, one past. Times are relative to now. */
+export function seedAnnouncements(now = Date.now()): Announcement[] {
+  const at = (days: number) => new Date(now + days * 86_400_000).toISOString();
+  return [
+    {
+      id: 'ann-ev1120',
+      message: 'Beneficiary designation EV-1120 Rev 03/2026 is now the only accepted revision. Drafts on the old revision show “Out of date”: open them and choose Update. Details: https://everence.sharepoint.com/sites/Marketing/forms-news',
+      severity: 'info',
+      startsOn: at(-2),
+      endsOn: at(12),
+      dismissible: true,
+      createdBy: 'Dana Yoder',
+      createdOn: at(-3),
+    },
+    {
+      id: 'ann-maintenance',
+      message: 'DocuSign maintenance Saturday 6–8 a.m. ET: sending and status checks may fail during the window.',
+      severity: 'warn',
+      startsOn: at(3),
+      endsOn: at(3.2),
+      dismissible: true,
+      createdBy: 'Dana Yoder',
+      createdOn: at(-1),
+    },
+    {
+      id: 'ann-onbase',
+      message: 'OnBase uploads are back to normal.',
+      severity: 'info',
+      startsOn: at(-30),
+      endsOn: at(-28),
+      dismissible: true,
+      createdBy: 'Dana Yoder',
+      createdOn: at(-30),
+    },
   ];
 }

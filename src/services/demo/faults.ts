@@ -1,3 +1,4 @@
+import { mapSigningRegistry, wrapProvider } from '../registry';
 import type { Services } from '../types';
 import { createUsageQueue, type UsageQueue } from '../usage';
 import { demoUsageWriter } from './index';
@@ -54,35 +55,40 @@ export function injectFaults(services: Services, plan: FaultPlan, now: () => num
   const out = { ...services } as unknown as Record<string, unknown>;
 
   if (plan.mode === 'send' || plan.mode === 'release') {
+    // Once across every connection: the first envelope's reply is lost, wherever it goes.
     let spent = false;
-    const signing = { ...services.signing };
     const step = plan.mode === 'send' ? 'create' : 'release';
-    const real = services.signing[step].bind(services.signing) as (...a: unknown[]) => Promise<unknown>;
-    (signing as Record<string, unknown>)[step] = async (...args: unknown[]) => {
-      const result = await real(...args);
-      if (spent) return result;
-      spent = true;
-      // DocuSign did the work; the reply never arrived.
-      throw new TypeError('Failed to fetch');
-    };
-    out.signing = signing;
+    out.signing = mapSigningRegistry(services.signing, (p) =>
+      wrapProvider(p, (name, call) =>
+        name !== step
+          ? call
+          : async (...args) => {
+              const result = await call(...args);
+              if (spent) return result;
+              spent = true;
+              // DocuSign did the work; the reply never arrived.
+              throw new TypeError('Failed to fetch');
+            },
+      ),
+    );
     return out as unknown as Services;
   }
 
-  for (const area of ['directory', 'crm', 'templates', 'drafts', 'requests', 'packets', 'signing', 'feedback'] as const) {
+  const failing =
+    (call: (...a: unknown[]) => Promise<unknown>) =>
+    async (...args: unknown[]) => {
+      if (active()) {
+        if (plan.mode === 'slow') await new Promise(() => undefined);
+        throw failureFor(plan.mode);
+      }
+      return call(...args);
+    };
+  out.signing = mapSigningRegistry(services.signing, (p) => wrapProvider(p, (_name, call) => failing(call)));
+  for (const area of ['directory', 'crm', 'templates', 'drafts', 'requests', 'packets', 'feedback'] as const) {
     const target = services[area] as unknown as Record<string, unknown>;
     const wrapped: Record<string, unknown> = {};
     for (const [name, fn] of Object.entries(target)) {
-      wrapped[name] =
-        typeof fn !== 'function'
-          ? fn
-          : async (...args: unknown[]) => {
-              if (active()) {
-                if (plan.mode === 'slow') await new Promise(() => undefined);
-                throw failureFor(plan.mode);
-              }
-              return (fn as (...a: unknown[]) => Promise<unknown>).apply(target, args);
-            };
+      wrapped[name] = typeof fn !== 'function' ? fn : failing((...args) => (fn as (...a: unknown[]) => Promise<unknown>).apply(target, args));
     }
     out[area] = wrapped;
   }

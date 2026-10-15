@@ -236,7 +236,7 @@ describe('unsaved-work guards', () => {
       attachments: [],
       audit: [],
     });
-    expect(useApp.getState().packet.send).toEqual({ phase: 'created', envelopeId: 'env-9', at: '2026-10-14T10:00:00Z' });
+    expect(useApp.getState().packet.send).toEqual({ phase: 'created', envelopeId: 'env-9', provider: 'DocuSign', at: '2026-10-14T10:00:00Z' });
     expect(useApp.getState().packet.dirty).toBe(false);
   });
 });

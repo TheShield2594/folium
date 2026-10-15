@@ -3,7 +3,10 @@ import { create } from 'zustand';
 import { upgradeAuditDetail, upgradePacketItems, type UpgradeReport } from '../domain/drafts';
 import type { ResolveScope } from '../domain/paths';
 import { actableUsers, DEFAULT_POLICY } from '../domain/policy';
+import { ANNOUNCEMENT_REFRESH_MS, type Announcement } from '../domain/announcements';
 import { withDocuSignDefaults, type DocuSignSetup } from '../domain/docusign';
+import { defaultFirm, firmGroup } from '../domain/firms';
+import type { SigningSettings } from '../domain/signing';
 import { carryVariantValues, copyScope, migrateAccountValues, seedCopyValues, type PersonPick } from '../domain/prefill';
 import { currentTemplates, latestLive } from '../domain/revisions';
 import { normalizeState, pickVariant } from '../domain/states';
@@ -75,6 +78,8 @@ export interface Packet {
 export interface SendState {
   phase: 'created' | 'sent' | 'unknown';
   envelopeId?: string;
+  /** The e-signature connection holding the envelope, so finishing goes to the same one. */
+  provider?: string;
   at: string;
 }
 
@@ -94,7 +99,16 @@ interface AppState {
   me?: UserProfile;
   users: UserProfile[];
   groups: UserGroup[];
+  /** Firm profiles, one per legal entity (domain/firms). */
+  firms: FirmProfile[];
+  /** The default firm profile: it fills forms no other profile claims and holds the firm-wide settings. */
   firm?: FirmProfile;
+  /** Which e-signature connection is the default, and whether people choose (Administration › Settings). */
+  signingSettings: SigningSettings;
+  /** Every announcement; the Shell shows the live ones meant for this person (`activeAnnouncements`). */
+  announcements: Announcement[];
+  /** Announcements this person hid, by id (kept on this device). */
+  dismissed: string[];
   /** Firm-wide rules (sharing, rep data, downloads, retention). Defaults until boot loads them. */
   policy: FirmPolicy;
   /** The firm's DocuSign account and verification workflows (Administration › Settings). */
@@ -126,6 +140,9 @@ interface AppState {
 
   boot(services: Services, contactId?: string): Promise<void>;
   reloadDirectory(): Promise<void>;
+  /** Read announcements again. Without `force`, only when the last read is 15 minutes old. */
+  refreshAnnouncements(force?: boolean): Promise<void>;
+  dismissAnnouncement(id: string): void;
   setActingFor(userId: string): void;
   /** Resolves false when the advisor chose to keep their unsaved packet instead. */
   openContact(contactId: string): Promise<boolean>;
@@ -231,11 +248,19 @@ export function normalizeItems(items: (Omit<PacketItem, 'id'> & { id?: string })
 
 /** Counts contact picks, so a slow load for an earlier pick never lands over a later one. */
 let openSeq = 0;
+/** When announcements were last read, for the 15-minute refresh on focus. */
+let announcementsReadAt = 0;
+/** Where a person's dismissed announcements are kept: a convenience, so losing it only shows them again. */
+const dismissKey = (userId: string) => `folium.dismissed.${userId}`;
 
 export const useApp = create<AppState>((set, get) => ({
   ready: false,
   policy: DEFAULT_POLICY,
   docuSign: withDocuSignDefaults(undefined),
+  signingSettings: {},
+  firms: [],
+  announcements: [],
+  dismissed: [],
   users: [],
   groups: [],
   templates: [],
@@ -253,18 +278,37 @@ export const useApp = create<AppState>((set, get) => ({
     applyTheme(get().theme);
     set({ services });
     try {
-      const [me, users, groups, firm, policy, docuSign, templates, packets] = await Promise.all([
+      const [me, users, groups, firms, policy, docuSign, signingSettings, announcements, templates, packets] = await Promise.all([
         services.directory.currentUser(),
         services.directory.listUsers(),
         services.directory.listGroups(),
-        services.directory.getFirm(),
+        services.directory.listFirms(),
         services.directory.getPolicy(),
-        // Only sending needs it: a failed read leaves DocuSign "not set up" instead of stopping Folium.
+        // Only sending needs these: a failed read leaves DocuSign "not set up" instead of stopping Folium.
         services.directory.getDocuSign().catch(() => withDocuSignDefaults(undefined)),
+        services.directory.getSigning().catch((): SigningSettings => ({})),
+        // Announcements are a nicety: none is better than no Folium.
+        services.directory.listAnnouncements().catch((): Announcement[] => []),
         services.templates.list(),
         services.packets.list(),
       ]);
-      set({ me, users, groups, firm, policy, docuSign, templates, packets, actingForId: actingForFor(me, users, groups, policy), ready: true });
+      announcementsReadAt = Date.now();
+      set({
+        me,
+        users,
+        groups,
+        firms,
+        firm: defaultFirm(firms),
+        policy,
+        docuSign,
+        signingSettings,
+        announcements,
+        dismissed: readLocal<string[]>(dismissKey(me.systemuserid), []),
+        templates,
+        packets,
+        actingForId: actingForFor(me, users, groups, policy),
+        ready: true,
+      });
       const journal = readJournal(me.systemuserid);
       if (journal && worthKeeping(journal.packet)) set({ pendingRestore: journal });
       const start = contactId ?? readLocal<string | undefined>('folium.lastContact', undefined);
@@ -285,17 +329,37 @@ export const useApp = create<AppState>((set, get) => ({
 
   async reloadDirectory() {
     const s = get().services!;
-    const [me, users, groups, firm, policy, docuSign] = await Promise.all([
+    const [me, users, groups, firms, policy, docuSign, signingSettings] = await Promise.all([
       s.directory.currentUser(),
       s.directory.listUsers(),
       s.directory.listGroups(),
-      s.directory.getFirm(),
+      s.directory.listFirms(),
       s.directory.getPolicy(),
       s.directory.getDocuSign().catch(() => withDocuSignDefaults(undefined)),
+      s.directory.getSigning().catch(() => get().signingSettings),
     ]);
     // A policy change can take away someone the user was working as.
     const keep = actableUsers(me, users, groups, policy).some((u) => u.systemuserid === get().actingForId);
-    set({ me, users, groups, firm, policy, docuSign, ...(keep ? {} : { actingForId: actingForFor(me, users, groups, policy) }) });
+    set({ me, users, groups, firms, firm: defaultFirm(firms), policy, docuSign, signingSettings, ...(keep ? {} : { actingForId: actingForFor(me, users, groups, policy) }) });
+  },
+
+  async refreshAnnouncements(force) {
+    const s = get().services;
+    if (!s || (!force && Date.now() - announcementsReadAt < ANNOUNCEMENT_REFRESH_MS)) return;
+    announcementsReadAt = Date.now();
+    try {
+      set({ announcements: await s.directory.listAnnouncements() });
+    } catch {
+      // Keep what's on screen; the next focus tries again.
+      announcementsReadAt = 0;
+    }
+  },
+  dismissAnnouncement(id) {
+    const { me, dismissed, announcements } = get();
+    // Only ids that still exist, so the list doesn't grow forever.
+    const next = [...new Set([...dismissed.filter((d) => announcements.some((a) => a.id === d)), id])];
+    if (me) writeLocal(dismissKey(me.systemuserid), next);
+    set({ dismissed: next });
   },
 
   setActingFor(userId) {
@@ -504,7 +568,7 @@ export const useApp = create<AppState>((set, get) => ({
         personBlocks: req.personBlocks,
         snapshot: req.prefillSnapshot,
         // A send that stopped after DocuSign created the envelope picks up where it left off.
-        send: req.status === 'Drafted' && req.envelopeId && req.envelopePhase === 'created' ? { phase: 'created', envelopeId: req.envelopeId, at: req.audit.at(-1)?.at ?? req.createdOn } : undefined,
+        send: req.status === 'Drafted' && req.envelopeId && req.envelopePhase === 'created' ? { phase: 'created', envelopeId: req.envelopeId, provider: req.provider, at: req.audit.at(-1)?.at ?? req.createdOn } : undefined,
         dirty: false,
       },
     });
@@ -637,11 +701,17 @@ export function useActingFor(): UserProfile | undefined {
   return useApp((s) => s.users.find((u) => u.systemuserid === s.actingForId) ?? s.me);
 }
 
+/**
+ * What forms prefill from. `firm` is the default profile; each form resolves its own
+ * from `firms` (`firmFor`), with the advisor's group default in between.
+ */
 export function useScope(): Omit<ResolveScope, 'account'> | undefined {
   const client = useApp((s) => s.client);
   const firm = useApp((s) => s.firm);
+  const firms = useApp((s) => s.firms);
+  const groups = useApp((s) => s.groups);
   const advisor = useActingFor();
-  return useMemo(() => (client && advisor ? { client, advisor, firm } : undefined), [client, advisor, firm]);
+  return useMemo(() => (client && advisor ? { client, advisor, firm, firms, firmGroup: firmGroup(advisor, groups) } : undefined), [client, advisor, firm, firms, groups]);
 }
 
 /** Templates this user's groups can see. Admins see everything. */

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { FoliumAppIcon } from '../../brand/FoliumMark';
 import { withRepAudit } from '../../domain/advisor';
 import { consentUrl, docuSignReady, DOCUSIGN_ENVIRONMENTS } from '../../domain/docusign';
+import { DOCUSIGN_MAIN } from '../../domain/signing';
 import type { UserProfile, VerificationMethod } from '../../domain/types';
 import { useServices } from '../../services';
 import { classifyError, isConsentRequired } from '../../services/errors';
@@ -239,7 +240,7 @@ function DocuSignConnection() {
   async function test() {
     setCheck({ busy: true });
     try {
-      const a = await services.signing.checkConnection();
+      const a = await services.signing.get(DOCUSIGN_MAIN).checkConnection();
       setCheck({ ok: `You’re signed in to DocuSign and can send from ${a.accountName}.` });
     } catch (e) {
       if (isConsentRequired(e)) setCheck({ consent: true, error: 'DocuSign needs your permission for Folium first.' });

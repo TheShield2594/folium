@@ -5,6 +5,8 @@ import { fillSubject, fillTokens, listForms, SUBJECT_MAX } from '../../domain/fo
 import { relatedPeople } from '../../domain/prefill';
 import { canDownload, sharingAllowed } from '../../domain/policy';
 import { consentUrl, methodSetUp } from '../../domain/docusign';
+import { envelopeDisclosure } from '../../domain/firms';
+import { DEFAULT_EXPIRY_DAYS, defaultVerification, providerAttachmentLimits, providerFor, VERIFICATION_LABEL, verificationChoices } from '../../domain/signing';
 import { expiresOnFrom, retentionDays } from '../../domain/requests';
 import { accessCodeWarnings, assignSigners, envelopeSigners, generateAccessCode, recordedSigners, roleLabel, rolesForPacket, validateSigners } from '../../domain/signers';
 import type { SignatureRequest, SignerAssignment, VerificationMethod } from '../../domain/types';
@@ -21,7 +23,7 @@ import { ShareSheet } from '../common/ShareSheet';
 import { Steps } from '../common/Steps';
 import { usePacketView } from '../common/usePacket';
 
-const AUTH_LABEL: Record<VerificationMethod, string> = { email: 'Email only', sms: 'SMS code', phone: 'Phone call', kba: 'ID questions (KBA)' };
+const AUTH_LABEL = VERIFICATION_LABEL;
 
 export function SendScreen() {
   const client = useApp((s) => s.client);
@@ -33,6 +35,8 @@ export function SendScreen() {
   const firm = useApp((s) => s.firm);
   const policy = useApp((s) => s.policy);
   const docuSign = useApp((s) => s.docuSign);
+  const groups = useApp((s) => s.groups);
+  const signingSettings = useApp((s) => s.signingSettings);
   const requests = useApp((s) => s.requests);
   const refreshRequests = useApp((s) => s.refreshRequests);
   const markUsed = useApp((s) => s.markUsed);
@@ -43,6 +47,23 @@ export function SendScreen() {
   const navigate = useNavigate();
 
   const existing = packet.requestId ? requests.find((r) => r.id === packet.requestId) : undefined;
+  // Which e-signature connection sends: the forms' firm profile, the advisor's group or the
+  // firm default; people may pick another when the firm allows. An envelope already created
+  // stays with the connection that holds it.
+  const connections = useMemo(() => services.signing.list(), [services]);
+  const [picked, setPicked] = useState<string>();
+  const packetFirm = view?.fills.find((f) => f.firm?.signingProviderId)?.firm ?? view?.fills[0]?.firm;
+  // Entities in the packet whose profiles name different connections: the first form's
+  // wins, and the sender is told, since one envelope can only go through one.
+  const firmConnections = [...new Map((view?.fills ?? []).filter((f) => f.firm?.signingProviderId).map((f) => [f.firm!.signingProviderId!, f.firm!.name])).entries()];
+  const auto = useMemo(() => providerFor(owner, groups, packetFirm, signingSettings, connections.map((c) => c.id)), [owner, groups, packetFirm, signingSettings, connections]);
+  const chosen = signingSettings.userChoice && picked && services.signing.has(picked) ? picked : (existing?.provider && existing.status === 'Drafted' && signingSettings.userChoice && services.signing.has(existing.provider) ? existing.provider : auto.id);
+  const providerId = packet.send?.provider ?? chosen;
+  const provider = services.signing.get(providerId);
+  const caps = provider.capabilities;
+  /** A method this connection offers and, for DocuSign, has a verification workflow for. */
+  const methodOk = (m: VerificationMethod) => caps.verification.includes(m) && (provider.kind !== 'docusign' || methodSetUp(docuSign, m));
+  const expiryChoices = caps.expiryDays ?? DEFAULT_EXPIRY_DAYS;
   const needs = useMemo(() => (view && scope ? rolesForPacket(view.templates, scope) : []), [view, scope]);
   const people = useMemo(() => (scope ? relatedPeople(scope.client) : []), [scope]);
   const [signers, setSigners] = useState<SignerAssignment[]>([]);
@@ -88,7 +109,7 @@ export function SendScreen() {
   // Seed signers and message once the packet is known, restoring what a draft saved.
   useEffect(() => {
     if (!scope || !view || signers.length) return;
-    const assigned = assignSigners(needs, scope, owner?.defaultAuth ?? 'sms');
+    const assigned = assignSigners(needs, scope, defaultVerification(caps, owner?.defaultAuth));
     const ctx = { client: scope.client.contact, advisor: owner ?? {}, firm, forms: view.templates.map((t) => t.name) };
     const sending = firm?.sending;
     const firmMessage = sending?.messageTemplate
@@ -106,13 +127,21 @@ export function SendScreen() {
       setCcMe(existing.ccs.length > 0);
       if (existing.reminderDays !== undefined) setReminder(String(existing.reminderDays));
       if (existing.expiresInDays) setExpires(String(existing.expiresInDays));
+      if (existing.provider && existing.status === 'Drafted') setPicked(existing.provider);
       return;
     }
     setSigners(assigned);
     setAnyOrder(defaultAnyOrder);
     setSubject(sending?.subjectTemplate ? fillSubject(sending.subjectTemplate, ctx) : `Forms to sign: ${listForms(view.templates.map((t) => t.name.toLowerCase()))}`.slice(0, SUBJECT_MAX));
     setMessage(firmMessage);
-  }, [scope, view, needs, owner, existing, signers.length, firm, defaultAnyOrder, messageLocked]);
+  }, [scope, view, needs, owner, existing, signers.length, firm, defaultAnyOrder, messageLocked, caps]);
+
+  // A connection with fewer expiry choices: move to the nearest it offers.
+  useEffect(() => {
+    if (expiryChoices.includes(Number(expires))) return;
+    const nearest = [...expiryChoices].sort((a, b) => Math.abs(a - Number(expires)) - Math.abs(b - Number(expires)))[0];
+    if (nearest) setExpires(String(nearest));
+  }, [expiryChoices, expires]);
 
   if (!client) return <NoClient />;
   if (!view || !packet.items.length) {
@@ -134,7 +163,13 @@ export function SendScreen() {
   // Wet signing needs the same clean bill as DocuSign: no PDF and no request while checks are open.
   const inPersonGate = outputGate(view.checks, 'flatten');
   const tabCount = view.templates.reduce((n, t) => n + t.mapping.placements.filter((p) => ordered.some((s) => s.role === p.role)).length, 0);
-  const limits = attachmentLimits(policy);
+  const limits = providerAttachmentLimits(attachmentLimits(policy), caps);
+  const disclosure = envelopeDisclosure(firm, view.fills.map((f) => f.firm));
+  // Set on this envelope but not something this connection does (after switching connection).
+  const unsupported = [
+    ...(!caps.accessCode && Object.values(codes).some(Boolean) ? [`${provider.label} doesn’t take access codes: remove them`] : []),
+    ...(!caps.inSession ? ordered.filter((s) => s.inSession).map((s) => `${provider.label} can’t sign in session: send ${roleLabel(s.role)} by email`) : []),
+  ];
   const attachmentChecks = checkAttachments(packet.attachments, limits);
   const attachedMB = attachmentsMB(packet.attachments);
   const envelopeMB = formBytes === undefined ? undefined : formBytes / MB + attachedMB;
@@ -144,7 +179,8 @@ export function SendScreen() {
     ...view.checks.filter((c) => c.level === 'block').map((c) => ({ id: stableCheckId(c.id), templateId: c.templateId })),
     ...attachmentChecks.map((c) => ({ id: c.id, templateId: undefined })),
     ...(problems.length ? [{ id: 'signers', templateId: undefined }] : []),
-    ...(ordered.some((s) => !methodSetUp(docuSign, s.auth)) ? [{ id: 'auth:notSetUp', templateId: undefined }] : []),
+    ...(ordered.some((s) => !methodOk(s.auth)) ? [{ id: 'auth:notSetUp', templateId: undefined }] : []),
+    ...(unsupported.length ? [{ id: 'provider:unsupported', templateId: undefined }] : []),
     ...(!subject.trim() ? [{ id: 'subject', templateId: undefined }] : []),
     ...(unreachable.length ? [{ id: 'attachments:unreachable', templateId: undefined }] : []),
   ];
@@ -152,7 +188,10 @@ export function SendScreen() {
     ...(sum.blocking ? [`${sum.blocking} pre-send ${sum.blocking === 1 ? 'check needs' : 'checks need'} attention`] : []),
     ...attachmentChecks.map((c) => `${c.title}. ${c.detail}`),
     ...problems.map((p) => p.message),
-    ...ordered.filter((s) => !methodSetUp(docuSign, s.auth)).map((s) => `${AUTH_LABEL[s.auth]} isn’t set up in DocuSign: choose another way to verify ${roleLabel(s.role)}`),
+    ...ordered
+      .filter((s) => !methodOk(s.auth))
+      .map((s) => `${AUTH_LABEL[s.auth]} ${caps.verification.includes(s.auth) ? `isn’t set up in ${provider.label}` : `isn’t offered by ${provider.label}`}: choose another way to verify ${roleLabel(s.role)}`),
+    ...unsupported,
     ...(!subject.trim() ? ['Add an email subject'] : []),
     ...unreachable.map((a) => `Re-attach ${a.name}`),
   ];
@@ -206,12 +245,12 @@ export function SendScreen() {
     }
     let envelopeId: string;
     try {
-      ({ envelopeId } = await services.signing.create({
+      ({ envelopeId } = await provider.create({
         documents: docs.map((d) => ({ name: d.fileName, pdf: d.pdf, placements: d.placements })),
         signers: envelopeSigners(ordered, codes),
         ccs: ccList(),
         subject,
-        message: firm?.disclosure ? `${message}\n\n${firm.disclosure}` : message,
+        message: disclosure ? `${message}\n\n${disclosure}` : message,
         reminderDays: reminder === '0' ? undefined : Number(reminder),
         expiresInDays: Number(expires),
         attachments,
@@ -221,15 +260,15 @@ export function SendScreen() {
       // A lost reply may still have created a (draft) envelope. Don't invite a second one.
       if (kind === 'timeout' || kind === 'offline' || kind === 'server') setSend({ phase: 'unknown', at: new Date().toISOString() });
       else if (isConsentRequired(e)) consentToast();
-      else toast.error(e instanceof Error ? e.message : 'DocuSign didn’t accept the envelope');
+      else toast.error(e instanceof Error ? e.message : `${provider.label} didn’t accept the envelope`);
       setBusy(undefined);
       return;
     }
-    setSend({ phase: 'created', envelopeId, at: new Date().toISOString() });
+    setSend({ phase: 'created', envelopeId, provider: provider.id, at: new Date().toISOString() });
     try {
       const row = await saveDraft({ services, packet, fills: view.fills, contactId, me, owner, existing: await currentRow(), sendSetup: sendSetup(), retentionDays: retentionDays(policy) });
       // Mid-send: retention never deletes it (DocuSign holds the envelope), so no draft expiry.
-      const marked = await services.requests.save({ ...row, envelopeId, envelopePhase: 'created', expiresOn: undefined, audit: [...row.audit, audit(me, 'Envelope created in DocuSign', 'Not sent yet')] });
+      const marked = await services.requests.save({ ...row, provider: provider.id, envelopeId, envelopePhase: 'created', expiresOn: undefined, audit: [...row.audit, audit(me, `Envelope created in ${provider.label}`, 'Not sent yet')] });
       savedDraft.current = marked;
       setPacket({ requestId: marked.id, formsUpdated: undefined, dirty: false });
     } catch {
@@ -242,20 +281,20 @@ export function SendScreen() {
   async function finishSend(envelopeId: string, resuming: boolean) {
     setBusy('send');
     try {
-      await releaseEnvelope(services.signing, envelopeId, resuming);
+      await releaseEnvelope(provider, envelopeId, resuming);
     } catch (e) {
-      toast.error(`DocuSign has the envelope but didn’t confirm sending it${e instanceof Error ? ` (${e.message})` : ''}. Use “Finish sending”: it checks first, so it won’t send twice.`);
+      toast.error(`${provider.label} has the envelope but didn’t confirm sending it${e instanceof Error ? ` (${e.message})` : ''}. Use “Finish sending”: it checks first, so it won’t send twice.`);
       setBusy(undefined);
       return;
     }
-    setSend({ phase: 'sent', envelopeId, at: new Date().toISOString() });
+    setSend({ phase: 'sent', envelopeId, provider: provider.id, at: new Date().toISOString() });
     await recordSent(envelopeId);
   }
 
   /** What a draft keeps of this screen, so it reopens set up the same way. */
   function sendSetup(): SendSetup {
     // 0 = never remind; the sent record stores that as no reminder.
-    return { signers: ordered, ccs: ccList(), subject, message, anyOrder, reminderDays: Number(reminder), expiresInDays: Number(expires) };
+    return { signers: ordered, ccs: ccList(), subject, message, anyOrder, reminderDays: Number(reminder), expiresInDays: Number(expires), provider: provider.id };
   }
 
   function consentToast() {
@@ -281,6 +320,7 @@ export function SendScreen() {
       const sent: SignatureRequest = {
         ...draft,
         status: 'Sent',
+        provider: provider.id,
         envelopeId,
         envelopePhase: undefined,
         sentOn,
@@ -293,7 +333,7 @@ export function SendScreen() {
         anyOrder,
         reminderDays: reminder === '0' ? undefined : Number(reminder),
         expiresInDays: Number(expires),
-        audit: [...draft.audit, audit(me, 'Sent with DocuSign', `${ordered.length} signer${ordered.length > 1 ? 's' : ''} · ${tabCount} tabs${me.systemuserid !== owner.systemuserid ? ` · for ${owner.fullname}` : ''}`)],
+        audit: [...draft.audit, audit(me, `Sent with ${provider.label}`, `${ordered.length} signer${ordered.length > 1 ? 's' : ''} · ${tabCount} tabs${me.systemuserid !== owner.systemuserid ? ` · for ${owner.fullname}` : ''}`)],
       };
       const recorded = await services.requests.save(sent);
       track('request.sent', view.fills.map((f) => f.template), {
@@ -304,10 +344,10 @@ export function SendScreen() {
       clearPacket();
       await refreshRequests();
       const now = ordered.filter((s) => s.inSession);
-      toast.ok(now.length ? `Sent. Use “Sign now” on the request to open DocuSign for ${now.map((s) => s.name.split(' ')[0]).join(' and ')}.` : `Sent to ${ordered.map((s) => s.name.split(' ')[0]).join(' and ')}`);
+      toast.ok(now.length ? `Sent. Use “Sign now” on the request to open ${provider.label} for ${now.map((s) => s.name.split(' ')[0]).join(' and ')}.` : `Sent to ${ordered.map((s) => s.name.split(' ')[0]).join(' and ')}`);
       navigate('/requests');
     } catch (e) {
-      toast.error(`DocuSign sent the envelope, but Folium couldn’t record it${e instanceof Error ? ` (${e.message})` : ''}. Don’t send again — use “Record it again”.`);
+      toast.error(`${provider.label} sent the envelope, but Folium couldn’t record it${e instanceof Error ? ` (${e.message})` : ''}. Don’t send again — use “Record it again”.`);
     } finally {
       setBusy(undefined);
     }
@@ -409,10 +449,10 @@ export function SendScreen() {
                       </div>
                       <Field label="Verify with" htmlFor={`auth-${i}`}>
                         <Select id={`auth-${i}`} value={s.auth} onChange={(e) => update(i, { auth: e.target.value as VerificationMethod })}>
-                          {(['email', 'sms', 'phone', 'kba'] as const).map((a) => (
-                            <option key={a} value={a} disabled={!methodSetUp(docuSign, a) && a !== s.auth}>
+                          {verificationChoices(caps, s.auth).map((a) => (
+                            <option key={a} value={a} disabled={!methodOk(a) && a !== s.auth}>
                               {AUTH_LABEL[a]}
-                              {methodSetUp(docuSign, a) ? '' : ' (not set up)'}
+                              {methodOk(a) ? '' : caps.verification.includes(a) ? ' (not set up)' : ' (not offered)'}
                             </option>
                           ))}
                         </Select>
@@ -422,11 +462,13 @@ export function SendScreen() {
                         items={[
                           { label: 'Sign earlier', icon: 'chevronUp', onSelect: () => move(i, -1), disabled: i === 0 || anyOrder },
                           { label: 'Sign later', icon: 'chevronDown', onSelect: () => move(i, 1), disabled: i === ordered.length - 1 || anyOrder },
-                          { separator: true, label: '' },
-                          { label: codes[s.role] ? 'Change access code…' : 'Access code…', icon: 'lock', onSelect: () => setCodeFor(s.role) },
-                          s.inSession
-                            ? { label: 'Send by email instead', icon: 'envelope', onSelect: () => update(i, { inSession: undefined }) }
-                            : { label: 'Sign now, with me (in session)', icon: 'signature', onSelect: () => update(i, { inSession: true }) },
+                          ...(caps.accessCode || codes[s.role] || caps.inSession || s.inSession ? [{ separator: true, label: '' }] : []),
+                          ...(caps.accessCode || codes[s.role] ? [{ label: codes[s.role] ? 'Change access code…' : 'Access code…', icon: 'lock' as const, onSelect: () => setCodeFor(s.role) }] : []),
+                          ...(s.inSession
+                            ? [{ label: 'Send by email instead', icon: 'envelope' as const, onSelect: () => update(i, { inSession: undefined }) }]
+                            : caps.inSession
+                              ? [{ label: 'Sign now, with me (in session)', icon: 'signature' as const, onSelect: () => update(i, { inSession: true }) }]
+                              : []),
                         ]}
                       />
                       {bad.length > 0 && (
@@ -457,7 +499,7 @@ export function SendScreen() {
               </section>
 
               <div className="list">
-                <SwitchRow label="Signers can sign in any order" detail="Otherwise DocuSign routes the envelope in the order above." checked={anyOrder} onChange={setAnyOrder} />
+                <SwitchRow label="Signers can sign in any order" detail={`Otherwise ${provider.label} routes the envelope in the order above.`} checked={anyOrder} onChange={setAnyOrder} />
                 <SwitchRow label="Send me a copy when it’s complete" checked={ccMe} onChange={setCcMe} />
               </div>
 
@@ -469,7 +511,7 @@ export function SendScreen() {
                 <Field
                   label="Note"
                   htmlFor="note"
-                  help={[messageLocked ? 'Set by your firm.' : '', firm?.disclosure ? `Folium adds the firm disclosure: “${firm.disclosure}”` : ''].filter(Boolean).join(' ') || undefined}
+                  help={[messageLocked ? 'Set by your firm.' : '', disclosure ? `Folium adds the firm disclosure: “${disclosure.replace(/\n\n/g, ' ')}”` : ''].filter(Boolean).join(' ') || undefined}
                 >
                   <TextArea id="note" rows={7} value={message} readOnly={messageLocked} aria-readonly={messageLocked || undefined} onChange={(e) => setMessage(e.target.value)} />
                 </Field>
@@ -485,9 +527,11 @@ export function SendScreen() {
                   </Field>
                   <Field label="Expires after" htmlFor="exp">
                     <Select id="exp" value={expires} onChange={(e) => setExpires(e.target.value)}>
-                      <option value="30">30 days</option>
-                      <option value="60">60 days</option>
-                      <option value="120">120 days</option>
+                      {expiryChoices.map((d) => (
+                        <option key={d} value={d}>
+                          {d} days
+                        </option>
+                      ))}
                     </Select>
                   </Field>
                 </div>
@@ -497,6 +541,26 @@ export function SendScreen() {
             <aside className="stack-4 sticky">
               <section className="card card-pad stack-4" aria-labelledby="ready-h">
                 <h2 id="ready-h" className="t-title3">{blockers.length ? 'Almost ready' : 'Ready to send'}</h2>
+                {signingSettings.userChoice && connections.length > 1 && !sendState ? (
+                  <Field label="Send with" htmlFor="provider" help={auto.id === provider.id ? 'Your firm’s choice for these forms.' : undefined}>
+                    <Select id="provider" value={provider.id} onChange={(e) => setPicked(e.target.value)}>
+                      {connections.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.label}
+                          {c.id === auto.id ? ' (usual)' : ''}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                ) : (
+                  connections.length > 1 && <p className="t-footnote c3">Sends with {provider.label}.</p>
+                )}
+                {auto.warning && <p className="t-footnote c-warn">{auto.warning}</p>}
+                {firmConnections.length > 1 && (
+                  <p className="t-footnote c-warn">
+                    These forms come from entities that send with different connections ({firmConnections.map(([id, name]) => `${name}: ${services.signing.get(id).label}`).join('; ')}). One envelope goes through one connection: this one sends with {provider.label}. Send the other entity’s forms separately if they must use theirs.
+                  </p>
+                )}
                 <div className="stack t-callout">
                   <div className="row"><span className="grow">Forms</span><strong className="tabular">{view.templates.length}</strong></div>
                   <div className="row"><span className="grow">Signers</span><strong className="tabular">{ordered.length}</strong></div>
@@ -562,7 +626,7 @@ export function SendScreen() {
                 ) : (
                   // aria-disabled rather than disabled, so pressing it while blocked can say why (and be counted).
                   <Button variant="filled" size="lg" block icon="send" busy={busy === 'send'} aria-disabled={blockers.length > 0 || undefined} onClick={blockers.length ? blockedSend : send}>
-                    Send with DocuSign
+                    Send with {provider.label}
                   </Button>
                 )}
                 {sum.blocking > 0 && (
@@ -579,7 +643,7 @@ export function SendScreen() {
               <section className="banner info" style={{ alignItems: 'flex-start' }}>
                 <Icon name="info" size={18} />
                 <span className="t-footnote">
-                  <strong>What happens next.</strong> DocuSign emails {ordered.length > 1 ? 'each signer' : client.contact.firstname}. Status shows on {client.contact.firstname}’s Forms tab. When it’s signed, download the completed PDF and upload it to OnBase as you do today, then tick it off in Folium.
+                  <strong>What happens next.</strong> {provider.label} emails {ordered.length > 1 ? 'each signer' : client.contact.firstname}. Status shows on {client.contact.firstname}’s Forms tab. When it’s signed, download the completed PDF and upload it to OnBase as you do today, then tick it off in Folium.
                 </span>
               </section>
             </aside>

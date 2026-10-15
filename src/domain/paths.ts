@@ -1,13 +1,21 @@
 import { repComputed } from './advisor';
 import { parseIdSource, resolveIdSource } from './idDocuments';
-import type { Account, Advisor, ClientRecord, Contact, FirmProfile } from './types';
+import type { Account, Advisor, ClientRecord, Contact, FirmProfile, UserGroup } from './types';
 
 /** What a field source resolves against. `account` is the account the form is about. */
 export interface ResolveScope {
   client: ClientRecord;
   account?: Account;
   advisor: Advisor;
+  /**
+   * The profile `firm.*` reads. With `firms`, `prefillForm` sets it per form (`firmFor`)
+   * and this is only the fallback when there are no profiles.
+   */
   firm?: FirmProfile;
+  /** Every firm profile, so each form fills from its issuer's. */
+  firms?: FirmProfile[];
+  /** The advisor's group that names a default profile, for forms no profile claims. */
+  firmGroup?: Pick<UserGroup, 'defaultFirmId'>;
   today?: Date;
 }
 

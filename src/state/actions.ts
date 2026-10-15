@@ -1,6 +1,7 @@
 import { defaultDraftTitle, shortDraftId } from '../domain/drafts';
 import { formLabel } from '../domain/checks';
 import { DEFAULT_RETENTION_DAYS, draftExpiry, isRetainable } from '../domain/requests';
+import { DOCUSIGN_MAIN } from '../domain/signing';
 import { prefillSnapshot, type FormFill } from '../domain/prefill';
 import type { Attachment, AuditEvent, SignatureRequest, UserProfile } from '../domain/types';
 import { fillPdf, mergePdfs } from '../pdf/fill';
@@ -45,7 +46,7 @@ export async function packetAsOnePdf(services: Services, fills: FormFill[], mode
 }
 
 /**
- * Step 2 of a send: release the envelope DocuSign holds as a draft. When resuming after
+ * Step 2 of a send: release the envelope the provider holds as a draft. When resuming after
  * a lost reply, ask DocuSign first, so an envelope that already went out never goes twice.
  * If the status can't be read, release anyway: releasing a sent envelope doesn't resend it.
  */
@@ -61,7 +62,7 @@ export function audit(actor: UserProfile | undefined, action: string, detail?: s
 }
 
 /** Signer and email setup from the Send screen, kept with a draft. */
-export type SendSetup = Partial<Pick<SignatureRequest, 'signers' | 'ccs' | 'subject' | 'message' | 'anyOrder' | 'reminderDays' | 'expiresInDays'>>;
+export type SendSetup = Partial<Pick<SignatureRequest, 'signers' | 'ccs' | 'subject' | 'message' | 'anyOrder' | 'reminderDays' | 'expiresInDays' | 'provider'>>;
 
 /** Attachments whose bytes Folium can't reach (not attached this session, not stored with a draft). */
 export function unreachableAttachments(services: Services, attachments: Attachment[]): Attachment[] {
@@ -128,7 +129,7 @@ export async function saveDraft(opts: {
     preparedBy: me.fullname,
     sentBy: '',
     createdOn: new Date().toISOString(),
-    provider: 'DocuSign',
+    provider: DOCUSIGN_MAIN,
     status: 'Drafted',
     documents: [],
     signers: [],

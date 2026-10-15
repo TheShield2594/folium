@@ -84,8 +84,16 @@ Moving to production: import (or update) the connector with the production host 
 
 - **Return URL.** DocuSign sends an in-session signer back to Folium's `#/signing-return` route with `event=…`; that URL is built from where the app runs, so check it once the hosting decision (#3) is made.
 - **Size limits.** Folium caps supporting documents at 10 per envelope and 30 MB in total by default (Administration › Settings › Envelopes), and shows the envelope's size on the Send screen. The bytes are base64-encoded into one `CreateEnvelope` request, about a third larger than the files. Before relying on 30 MB, confirm DocuSign's per-document and per-envelope limits and the custom connector's request size limit for Everence's plan, and lower the firm limit if either is smaller.
-- **One DocuSign account.** If Everence ever needs a second account (Laser App lets a user pick between two), add a second account to the DocuSign setting and choose it by group behind the same `SigningProvider`. Ask whether anyone needs one before building it.
+- **Connections.** Each e-signature provider and account is a connection with an id (`docusign:main`), listed in `SIGNING_CONNECTIONS` (`src/services/power/config.ts`). Administration › Settings › E-signature picks the default and whether people may choose on the Send screen; a group (Users & groups) or a firm profile can name another. Every request stores the id that sent it (`ev_provider`), so changing the default never strands envelopes already out. See §4e to add one.
 - **Access codes** need no setup. Folium sends the code with the envelope and saves only that one was set (`accessCodeSet`), never the code.
+
+### 4e. Adding a provider or account
+
+Ask first what a second DocuSign account is for (an entity, testing, a legacy account), and whether advisors choose it or it follows the group or entity.
+
+- **Another DocuSign account.** Add the custom connector again as its own data source (`pac code add-data-source -a <connector> -c <connection>`) and add an entry to `SIGNING_CONNECTIONS` with a new, permanent id (e.g. `docusign:trust`), a label and the data source name. Today every DocuSign connection reads the one "DocuSign" setting (account ID and verification workflows); a second account with its own account ID needs that setting keyed by connection first.
+- **Another provider** (Adobe Acrobat Sign, OneSpan Sign). Check whether its Power Platform connector can create an agreement from PDF bytes with fields placed by page and x/y; if not, write a custom connector as for DocuSign. Then write an adapter implementing `SigningProvider` (`src/services/types.ts`): a placements-to-fields converter beside `services/docusign/tabs.ts`, a status mapping into `SignatureStatus` (like `mapDocuSignStatus`), `capabilities` saying which verification methods, access codes, in-session signing, signer correction, expiry choices and attachment size it supports (the Send and Requests screens offer only those), and `checkConnection` for Test connection. Register it in `createPowerServices` and give it a status flow like §5.
+- Credentials stay in the Power Platform connections, managed by IT: nobody types an account ID or password into Folium beyond the DocuSign account ID in Settings.
 
 This answers spike 2: envelopes are created from Folium's own PDF bytes with tabs placed by page + x/y, so the standard DocuSign connector isn't needed.
 
@@ -138,6 +146,17 @@ Requests and problem reports land in Administration › Form feedback without an
 2. **Tell the advisor.** Trigger: *When a row is modified* on `ev_formrequest`, filtered to `ev_status` changing to Fixed in revision or Won't fix (`FEEDBACK_STATUS_OPTIONS`). Email or Teams-message the `ev_requester` with the form, the new status and the reply (`resolution` in `ev_payload`).
 
 Folium also tells the advisor in the app: the next time they open Folium after a report is closed, and under Settings › Forms you reported.
+
+## 5e. Announcements to Teams (optional)
+
+Administration › Announcements shows a message across the top of Folium, to everyone or to some groups, from a start time to an optional end. People see a new one when they open Folium or come back to its window (at most every 15 minutes). An admin can also tick **Also post to Teams**, for people who don't have Folium open. That needs one flow, off until it's built:
+
+- Trigger: *When a row is added or modified* on `ev_foliumsetting`, with the filter `ev_name eq 'Announcement'`.
+- Parse `ev_payload` as JSON; continue only when `postToTeams` is true and, on a modification, it wasn't posted before (keep the posted row IDs in a SharePoint list, or post only on *added*).
+- If `startsOn` is in the future, *Delay until* `startsOn`.
+- *Post message in a chat or channel* to the chosen Teams channel: the severity (Critical / Warning / Information) and the message as plain text.
+
+Non-admins need read access to `ev_foliumsetting` and no write access (§ Security in DATAVERSE.md).
 
 ## 6. Put it on the Contact form
 

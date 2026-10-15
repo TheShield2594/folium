@@ -16,7 +16,9 @@ import type {
   VerificationMethod,
 } from '../domain/types';
 import type { DirectoryUser } from '../domain/advisor';
+import type { Announcement } from '../domain/announcements';
 import type { DocuSignSetup } from '../domain/docusign';
+import type { ProviderCapabilities, SigningSettings } from '../domain/signing';
 import type { FormFeedback } from '../domain/feedback';
 import type { UsageEvent } from '../domain/usage';
 
@@ -70,7 +72,8 @@ export interface UsageLog {
   flush(): Promise<void>;
 }
 
-export type TemplateDetails = Pick<FormTemplate, 'states' | 'variantGroup'>;
+/** Where a form may be used (states, variant group) and which firm profile fills it. */
+export type TemplateDetails = Pick<FormTemplate, 'states' | 'variantGroup' | 'firmId'>;
 
 export interface IncomingFile {
   itemId: string;
@@ -151,14 +154,22 @@ export interface SendRequest {
 }
 
 /**
- * Provider-neutral e-signature interface (see brief). Only DocuSign is implemented in v1.
+ * Provider-neutral e-signature interface (see brief). One instance is one connection:
+ * a provider and an account (`docusign:main`). Screens read `capabilities` and offer
+ * only what the provider supports.
  *
  * Sending is two steps so it's safe to resume: `create` makes the envelope as a
- * DocuSign draft (nothing reaches the signers), then `release` sends it. If `release`
- * times out, `getStatus` says whether it went out (status other than `Drafted`).
+ * draft (nothing reaches the signers), then `release` sends it. If `release` times
+ * out, `getStatus` says whether it went out (status other than `Drafted`).
  */
 export interface SigningProvider {
-  readonly name: string;
+  /** The connection id stored on requests (`SignatureRequest.provider`). */
+  readonly id: string;
+  /** What people see: "DocuSign", "DocuSign (Trust account)". */
+  readonly label: string;
+  /** `docusign` connections read the DocuSign setup (account, verification workflows). */
+  readonly kind: 'docusign' | 'other';
+  readonly capabilities: ProviderCapabilities;
   create(req: SendRequest): Promise<{ envelopeId: string }>;
   release(envelopeId: string): Promise<void>;
   getStatus(envelopeId: string): Promise<EnvelopeStatus>;
@@ -175,10 +186,24 @@ export interface SigningProvider {
    */
   signingUrl(envelopeId: string, role: string, returnUrl: string): Promise<string>;
   /**
-   * Whether the signed-in person's DocuSign connection reaches the firm's account:
-   * the account's name when it does. Pass `setup` to try settings before they're saved.
+   * Test connection: whether the signed-in person's connection reaches the account, and
+   * the account's name when it does. Throws with the reason when it doesn't. A DocuSign
+   * connection takes `setup` to try settings before they're saved.
    */
   checkConnection(setup?: DocuSignSetup): Promise<DocuSignAccount>;
+}
+
+/** Every e-signature connection Folium has, by id. */
+export interface SigningRegistry {
+  /** In the order they're registered; the first is the fallback default. */
+  list(): SigningProvider[];
+  /**
+   * The connection with this id. A legacy `DocuSign` id is the main DocuSign connection;
+   * an unknown id gets the first registered, with a console warning, so an old request
+   * still opens.
+   */
+  get(id: string | undefined): SigningProvider;
+  has(id: string): boolean;
 }
 
 export interface DocuSignAccount {
@@ -186,7 +211,7 @@ export interface DocuSignAccount {
   accountName: string;
 }
 
-/** Folium users, groups and the firm profile (Admin-managed; users edit their own profile). */
+/** Folium users, groups, firm profiles and settings (Admin-managed; users edit their own profile). */
 export interface DirectoryService {
   /**
    * The signed-in person: their profile over their directory details (see
@@ -207,14 +232,29 @@ export interface DirectoryService {
   listGroups(): Promise<UserGroup[]>;
   saveGroup(g: UserGroup): Promise<UserGroup>;
   removeGroup(id: string): Promise<void>;
-  getFirm(): Promise<FirmProfile>;
+  /**
+   * Every firm profile (domain/firms), made whole by `normalizeFirms`: exactly one is the
+   * default, and the single profile from before profiles loads as it.
+   */
+  listFirms(): Promise<FirmProfile[]>;
+  /** Saves one profile. Saving one as the default takes the default from the others. */
   saveFirm(f: FirmProfile): Promise<FirmProfile>;
+  /** Removes a profile that isn't the default. */
+  removeFirm(id: string): Promise<void>;
   /** Firm-wide rules, with defaults filled in when nothing is saved yet. */
   getPolicy(): Promise<FirmPolicy>;
   savePolicy(p: FirmPolicy): Promise<FirmPolicy>;
   /** The firm's DocuSign account and verification workflows, with defaults when nothing is saved. */
   getDocuSign(): Promise<DocuSignSetup>;
   saveDocuSign(s: DocuSignSetup): Promise<DocuSignSetup>;
+  /** Which e-signature connection is the default and whether people may choose. */
+  getSigning(): Promise<SigningSettings>;
+  saveSigning(s: SigningSettings): Promise<SigningSettings>;
+  /** Every announcement, past and scheduled too (Administration › Announcements filters them). */
+  listAnnouncements(): Promise<Announcement[]>;
+  /** Refuses a blank message or one over 1,000 characters (`cleanAnnouncement`). */
+  saveAnnouncement(a: Announcement): Promise<Announcement>;
+  removeAnnouncement(id: string): Promise<void>;
 }
 
 export interface Services {
@@ -225,7 +265,8 @@ export interface Services {
   drafts: DraftStore;
   requests: RequestStore;
   packets: PacketStore;
-  signing: SigningProvider;
+  /** E-signature connections. A request's actions use `signing.get(request.provider)`. */
+  signing: SigningRegistry;
   feedback: FeedbackStore;
   /** Not guarded like the others: a failure here is dropped, not reported. */
   usage: UsageLog;

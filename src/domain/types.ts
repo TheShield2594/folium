@@ -164,8 +164,10 @@ export interface FormTemplate {
   name: string;
   formNumber: string;
   source: FormSource;
-  /** Carrier or fund family, for `Carrier` forms. */
+  /** The entity, carrier or fund family that issues the form ("Everence Trust Company"). Matches firm profiles. */
   issuer?: string;
+  /** Firm profile its `firm.*` fields fill from, when its issuer doesn't settle it (see `firmFor`). */
+  firmId?: string;
   category: FormCategory;
   revision: string;
   effectiveDate: string; // ISO date
@@ -382,7 +384,11 @@ export interface SignatureRequest {
   sentBy: string;
   sentOn?: string;
   createdOn: string;
-  provider: 'DocuSign';
+  /**
+   * The e-signature connection that sent it (`docusign:main`), so Requests keeps using it
+   * after the default changes. Rows from before connections say `DocuSign`.
+   */
+  provider: string;
   envelopeId?: string;
   /** `created` while the envelope is a DocuSign draft that Folium hasn't released yet. */
   envelopePhase?: 'created';
@@ -492,22 +498,49 @@ export interface UserGroup {
   /** Restrict the forms this group sees. Empty means the whole library. */
   sources?: FormSource[];
   categories?: FormCategory[];
+  /** Firm profile for forms whose issuer no profile claims (see `firmFor`). */
+  defaultFirmId?: string;
+  /** E-signature connection this group sends with, over the firm's default (see `providerFor`). */
+  signingProviderId?: string;
 }
 
-/** Firm-wide data available to every form as `firm.*`. */
+/**
+ * One legal entity's data (the trust company, Praxis…), available to its forms as
+ * `firm.*` (see domain/firms). One profile is the default; the settings below the
+ * disclosure are firm-wide and live on the default profile only.
+ */
 export interface FirmProfile {
+  id: string;
+  /** Fills forms no other profile claims, and holds the firm-wide settings. Exactly one profile has it. */
+  isDefault?: boolean;
+  /** Template issuers this profile covers ("Everence Trust Company"). An issuer is on one profile at most. */
+  issuers: string[];
   name: string;
   legalName: string;
   address1: string;
+  /** Suite or PO box. */
+  suite?: string;
   city: string;
   state: string;
   zip: string;
   phone: string;
+  phoneExt?: string;
+  fax?: string;
+  email?: string;
   website: string;
   brokerDealer: string;
   crd: string;
-  /** Default email message footer for envelopes. */
+  /** Firm, broker-dealer or IMO number as forms print it. */
+  firmNumber?: string;
+  branchNumber?: string;
+  /** Office of Supervisory Jurisdiction name. */
+  osjName?: string;
+  /** Registered investment adviser name. */
+  riaName?: string;
+  /** Email message footer for envelopes with this entity's forms (see `envelopeDisclosure`). */
   disclosure: string;
+  /** E-signature connection for packets of this entity's forms, over a group's and the firm's default. */
+  signingProviderId?: string;
   /** Refuse the editable PDF too while checks are open (Laser App's stricter behaviour). */
   blockFillableWhenIncomplete?: boolean;
   /** Save the open packet as a draft when an advisor leaves unsaved work idle. Off unless turned on. */
