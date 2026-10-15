@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { DEFAULT_ATTACHMENT_LIMITS } from '../../domain/checks';
 import { consentUrl, DEFAULT_REDIRECT_URL, docuSignProblems, DOCUSIGN_ENVIRONMENTS, withDocuSignDefaults, type DocuSignEnvironment, type DocuSignSetup } from '../../domain/docusign';
+import { DOCUSIGN_MAIN, VERIFICATION_LABEL, type SigningSettings } from '../../domain/signing';
 import { DEFAULT_USAGE_RETENTION_MONTHS, usageRetentionMonths } from '../../domain/policy';
 import { RETENTION_OPTIONS, retentionDays } from '../../domain/requests';
 import { dormantDays } from '../../domain/users';
@@ -37,17 +38,21 @@ const clampLimit = (raw: string, max: number) => {
 export function AdminSettings() {
   const policy = useApp((s) => s.policy);
   const docuSign = useApp((s) => s.docuSign);
+  const signingSettings = useApp((s) => s.signingSettings);
   const reloadDirectory = useApp((s) => s.reloadDirectory);
   const services = useServices();
   const [p, setP] = useState<FirmPolicy>(policy);
   const [d, setD] = useState<DocuSignSetup>(docuSign);
+  const [sg, setSg] = useState<SigningSettings>(signingSettings);
   const [busy, setBusy] = useState(false);
   useEffect(() => setP(policy), [policy]);
   useEffect(() => setD(docuSign), [docuSign]);
+  useEffect(() => setSg(signingSettings), [signingSettings]);
   const policyDirty = JSON.stringify(p) !== JSON.stringify(policy);
   const docuSignDirty = JSON.stringify(withDocuSignDefaults(d)) !== JSON.stringify(withDocuSignDefaults(docuSign));
+  const signingDirty = JSON.stringify(sg) !== JSON.stringify(signingSettings);
   const problems = docuSignProblems(d);
-  const dirty = policyDirty || docuSignDirty;
+  const dirty = policyDirty || docuSignDirty || signingDirty;
   const set = (patch: Partial<FirmPolicy>) => setP({ ...p, ...patch });
   const keep = retentionDays(p);
 
@@ -60,6 +65,7 @@ export function AdminSettings() {
     try {
       if (policyDirty) await services.directory.savePolicy(p);
       if (docuSignDirty) await services.directory.saveDocuSign(withDocuSignDefaults(d));
+      if (signingDirty) await services.directory.saveSigning(sg);
       await reloadDirectory();
       toast.ok('Settings saved');
     } catch (e) {
@@ -185,12 +191,105 @@ export function AdminSettings() {
             />
           </div>
 
+          <SigningCard value={sg} onChange={setSg} docuSign={d} />
+
           <DocuSignCard value={d} onChange={setD} problems={problems} />
 
           <p className="t-footnote c3">Folium never collects device location: nothing in the forms workflow needs it.</p>
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * E-signature connections: which is the default, whether people may choose, and a
+ * connection test for each. Groups and firm profiles can name another connection.
+ */
+function SigningCard({ value: sg, onChange, docuSign }: { value: SigningSettings; onChange: (s: SigningSettings) => void; docuSign: DocuSignSetup }) {
+  const services = useServices();
+  const connections = services.signing.list();
+  const [checks, setChecks] = useState<Record<string, { busy?: boolean; ok?: string; error?: string }>>({});
+  const defaultId = sg.defaultProviderId && services.signing.has(sg.defaultProviderId) ? sg.defaultProviderId : connections[0].id;
+
+  async function test(id: string) {
+    const p = services.signing.get(id);
+    setChecks((c) => ({ ...c, [id]: { busy: true } }));
+    try {
+      // A DocuSign connection is tested with the settings below, saved or not.
+      const a = await p.checkConnection(p.kind === 'docusign' ? docuSign : undefined);
+      setChecks((c) => ({ ...c, [id]: { ok: `Connected to ${a.accountName}.` } }));
+    } catch (e) {
+      setChecks((c) => ({ ...c, [id]: { error: e instanceof Error ? e.message : `${p.label} didn’t answer.` } }));
+    }
+  }
+
+  return (
+    <section className="card card-pad stack-4" aria-labelledby="esig-h">
+      <h2 id="esig-h" className="t-title3">E-signature</h2>
+      <p className="t-footnote c3">
+        Each connection is one provider and account, set up by IT as a Power Platform connection: nobody types credentials into Folium. Every request remembers the connection that sent it, so changing the default never affects envelopes already out. A group or firm profile can name another connection (Users &amp; groups, Firm profiles).
+      </p>
+      <div className="list">
+        {connections.map((c) => {
+          const check = checks[c.id] ?? {};
+          const ready = c.kind !== 'docusign' || !!docuSign.accountId;
+          return (
+            <div key={c.id} className="list-row" style={{ alignItems: 'flex-start', flexWrap: 'wrap' }}>
+              <div className="grow stack" style={{ gap: 4, minWidth: 220 }}>
+                <div className="row wrap" style={{ gap: 6 }}>
+                  <strong>{c.label}</strong>
+                  <span className="mono t-footnote c3">{c.id}</span>
+                  {c.id === defaultId && <Badge tone="accent">Default</Badge>}
+                  {!ready && <Badge tone="warn">Not set up</Badge>}
+                </div>
+                <span className="t-footnote c3">
+                  {c.capabilities.verification.map((m) => VERIFICATION_LABEL[m]).join(', ')}
+                  {c.capabilities.accessCode ? ' · access codes' : ''}
+                  {c.capabilities.inSession ? ' · signing in session' : ''}
+                  {c.capabilities.correctRecipient ? ' · correct a signer' : ''}
+                  {c.capabilities.maxAttachmentsMb ? ` · up to ${c.capabilities.maxAttachmentsMb} MB of documents` : ''}
+                </span>
+                {check.ok && (
+                  <span className="t-footnote c-accent" role="status">
+                    {check.ok}
+                  </span>
+                )}
+                {check.error && (
+                  <span className="t-footnote c-danger" role="alert">
+                    {check.error}
+                  </span>
+                )}
+              </div>
+              <Button size="sm" variant="gray" busy={check.busy} disabled={!ready} onClick={() => test(c.id)}>
+                Test connection
+              </Button>
+            </div>
+          );
+        })}
+      </div>
+      {connections.length > 1 && (
+        <>
+          <Field label="Default connection" htmlFor="esig-default">
+            <Select id="esig-default" value={defaultId} onChange={(e) => onChange({ ...sg, defaultProviderId: e.target.value })}>
+              {connections.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <div className="list">
+            <SwitchRow
+              label="People can choose the connection on the Send screen"
+              detail="Off: the firm profile, group or default decides. On: that’s where the choice starts, and the sender can pick another."
+              checked={!!sg.userChoice}
+              onChange={(v) => onChange({ ...sg, userChoice: v || undefined })}
+            />
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -216,7 +315,7 @@ function DocuSignCard({ value: d, onChange, problems }: { value: DocuSignSetup; 
   async function test() {
     setCheck({ busy: true });
     try {
-      const a = await services.signing.checkConnection(d);
+      const a = await services.signing.get(DOCUSIGN_MAIN).checkConnection(d);
       setCheck({ ok: `Connected to ${a.accountName}. Your DocuSign sign-in can send from this account.` });
     } catch (e) {
       setCheck({ error: e instanceof Error ? e.message : 'DocuSign didn’t answer.' });

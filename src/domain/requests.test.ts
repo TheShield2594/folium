@@ -67,7 +67,7 @@ describe('expiryInfo', () => {
 describe('demo DocuSign', () => {
   it('reports an envelope past its expiry as Expired, keeping who had signed', async () => {
     const { createDemoServices } = await import('../services/demo');
-    const st = await createDemoServices().signing.getStatus('5c9e0d3a-81b2-4e6f-a7d4-0b3f2c1e9a55');
+    const st = await createDemoServices().signing.get('docusign:main').getStatus('5c9e0d3a-81b2-4e6f-a7d4-0b3f2c1e9a55');
     expect(st.status).toBe('Expired');
     expect(st.voidedReason).toMatch(/expired/i);
     expect(st.recipients.find((r) => r.role === 'Owner')?.status).toBe('completed');

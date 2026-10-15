@@ -9,7 +9,7 @@ Use Everence's publisher prefix if it isn't `ev_`, and change `src/services/powe
 | ev_name | Text | Form name |
 | ev_formnumber | Text (indexed) | e.g. `EV-1120` |
 | ev_status | Choice | Draft · Needs mapping · Live · Retired |
-| ev_payload | Multiline | `FormTemplate` JSON incl. mapping (fields, signers, placements, checks), revision, effective date, SharePoint item ID, supersedes |
+| ev_payload | Multiline | `FormTemplate` JSON incl. mapping (fields, signers, placements, checks), revision, effective date, SharePoint item ID, supersedes, `issuer` (matched to firm profiles), `firmId` (the firm profile an Admin chose when the issuer doesn't settle it) |
 
 ## ev_signaturerequest — one row per packet
 
@@ -19,7 +19,7 @@ Use Everence's publisher prefix if it isn't `ev_`, and change `src/services/powe
 | ev_contact | Lookup → contact | |
 | ev_status | Choice | Drafted · Sent · Viewed · Signed · Declined · Voided · Expired. Option values 100000000 upward in this order; `SIGNATURE_STATUS_OPTIONS` in `config.ts` must match. |
 | ev_expireson | Date/time (indexed) | On a sent request, when the envelope lapses: set on send, then from DocuSign's `expireDateTime`. On an unsent draft, when draft retention deletes it: the last save plus the firm's retention period (`draftRetentionDays`). Empty for drafts the clean-up never deletes (printed to sign in person, or mid-send with an `ev_envelopeid`). For "expiring this week" views, the reminder flows and the draft clean-up flow (DEPLOY.md §5a). |
-| ev_provider | Text | `DocuSign` |
+| ev_provider | Text | The e-signature connection that sent it, e.g. `docusign:main` (`SIGNING_CONNECTIONS` in `config.ts`). Rows from before connections say `DocuSign` and are read as `docusign:main`. Requests always act through this connection, whatever the default is now. |
 | ev_envelopeid | Text (indexed) | For Connect updates |
 | ev_senton / ev_signedon | Date/time | |
 | ev_uploadedtoonbase | Yes/No | Manual in v1 |
@@ -50,13 +50,15 @@ If Everence keeps driver's licence, passport, green card or citizenship columns 
 
 ## ev_foliumgroup
 
-`ev_name`, `ev_region`, `ev_payload` (`UserGroup`: members, source/category limits).
+`ev_name`, `ev_region`, `ev_payload` (`UserGroup`: members, source/category limits, `defaultFirmId` (the firm profile for forms whose issuer no profile lists), `signingProviderId` (the group's e-signature connection)).
 
-## ev_foliumsetting — one row per kind of setting
+## ev_foliumsetting — firm settings, firm profiles and announcements
 
-Folium finds each row by `ev_name`; changing them needs no release, and Dataverse auditing on the table records who changed what.
+Folium finds each row by `ev_name` (filtered, never "the first row"); changing them needs no release, and Dataverse auditing on the table records who changed what.
 
-- `ev_name` = "Firm", `ev_payload` (`FirmProfile`): firm data for `firm.*` fields, the envelope disclosure, Send screen defaults (`sending`: `defaultAnyOrder`, `subjectTemplate`, `messageTemplate`), `blockFillableWhenIncomplete`, `idleAutoSave`, `reportsUrl` (the Power BI report the sidebar's Reports link opens). Administration › Firm profile. (#26 turns this into one row per Everence entity.)
+- `ev_name` = "Firm: <profile name>", one row per Everence entity, `ev_payload` (`FirmProfile`): `id`, `issuers` (the template issuers it covers), `isDefault` (exactly one), name, legal name, address with suite, phone and extension, fax, email, website, broker-dealer, CRD, firm/BD/IMO number, branch number, OSJ and RIA names, the envelope `disclosure` and an optional `signingProviderId`. A form's `firm.*` fields fill from its template's `firmId`, else the profile listing its issuer, else the advisor's group's `defaultFirmId`, else the default profile (`firmFor` in `domain/firms.ts`). The default profile also holds the firm-wide settings: Send screen defaults (`sending`: `defaultAnyOrder`, `subjectTemplate`, `messageTemplate`), `blockFillableWhenIncomplete`, `idleAutoSave`, `reportsUrl` (the Power BI report the sidebar's Reports link opens). Administration › Firm profiles. The single row named "Firm" from before profiles reads as the default profile, with no issuers, and is renamed the first time it's saved.
+- `ev_name` = "Announcement", one row per announcement, `ev_payload` (`Announcement`): `message` (plain text, at most 1,000 characters), `severity` (`info` · `warn` · `critical`), `startsOn`, `endsOn` (empty: until removed), `groupIds` (empty: everyone), `dismissible` (never for critical), `postToTeams`, who created and last changed it. Administration › Announcements. Rows stay after they end, as a record of what people were told; Remove deletes the row.
+- `ev_name` = "Signing", `ev_payload` (`SigningSettings`): `defaultProviderId` (the e-signature connection used unless a firm profile or group names another) and `userChoice` (people may pick another on the Send screen). Administration › Settings › E-signature. A missing row means the first connection, with no choice.
 - `ev_name` = "Policy", `ev_payload` (`FirmPolicy`): firm-wide rules shared by every firm profile: `sharing` (`off` · `groups` · `anyone`, default `groups`), `repDataVisibility` (`assistants` · `groupMembers`, default `assistants`), `pdfDownload` (`all` · `signedOnly` · `none`, default `all`), `draftRetentionDays` (90 default, 60, 30, 10, 7 or 0), `lockMessage`, `maxAttachments`, `maxAttachmentsMB`, `usageRetentionMonths` (36 default; drives the `ev_usageevent` bulk-delete job, DEPLOY.md §5c). Administration › Settings. A missing row means every default.
 - `ev_name` = "DocuSign", `ev_payload` (`DocuSignSetup`): `environment` (`demo` · `production`), `accountId` (API Account ID), `integrationKey` (client ID, for the consent link only), `redirectUrl`, `idv` (`sms`, `phone`, `kba` workflow IDs). Administration › Settings › DocuSign. No secrets: the client secret stays in the custom connector. A missing row means DocuSign isn't set up and nothing can be sent.
 
@@ -114,4 +116,4 @@ Create the alternate key on `ev_dedupekey` before Folium writes to the table. Se
 
 ## Security (to do before production)
 
-See the "Enforce Folium roles, groups and sharing with Dataverse security" issue. In short: owner teams per Folium group, row ownership on `ev_signaturerequest` by the advising User, sharing via `GrantAccess` for `sharedWith`, and field security on `ev_ssn`. For reporting: Create-only on `ev_usageevent` for everyone, and a Folium Reporting role (organisation-wide Read on `ev_usageevent`, `ev_signaturerequest`'s promoted columns, `ev_formtemplate`, `ev_foliumprofile` and `ev_foliumgroup`) for managers; manager scoping by group comes from the same owner teams.
+See the "Enforce Folium roles, groups and sharing with Dataverse security" issue. In short: owner teams per Folium group, row ownership on `ev_signaturerequest` by the advising User, sharing via `GrantAccess` for `sharedWith`, and field security on `ev_ssn`. For reporting: Create-only on `ev_usageevent` for everyone; read on `ev_foliumsetting` for everyone (announcements, firm profiles, settings) and create, write and delete for Admins only, and a Folium Reporting role (organisation-wide Read on `ev_usageevent`, `ev_signaturerequest`'s promoted columns, `ev_formtemplate`, `ev_foliumprofile` and `ev_foliumgroup`) for managers; manager scoping by group comes from the same owner teams.

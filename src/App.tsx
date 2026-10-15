@@ -3,6 +3,7 @@ import { createHashRouter, Navigate, Outlet, RouterProvider } from 'react-router
 import { FoliumAppIcon } from './brand/FoliumMark';
 import { isActiveUser } from './domain/users';
 import { AdminFeedback } from './screens/admin/AdminFeedback';
+import { AdminAnnouncements } from './screens/admin/AdminAnnouncements';
 import { AdminFirm } from './screens/admin/AdminFirm';
 import { AdminSettings } from './screens/admin/AdminSettings';
 import { AdminPeople } from './screens/admin/AdminPeople';
@@ -100,6 +101,7 @@ const router = createHashRouter([
       { path: '/admin/templates/:id', element: <TemplateEditor /> },
       { path: '/admin/people', element: <AdminPeople /> },
       { path: '/admin/feedback', element: <AdminFeedback /> },
+      { path: '/admin/announcements', element: <AdminAnnouncements /> },
       { path: '/admin/firm', element: <AdminFirm /> },
       { path: '/admin/settings', element: <AdminSettings /> },
       { path: '*', element: <Navigate to="/" replace /> },

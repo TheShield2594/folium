@@ -195,7 +195,7 @@ export const SPECS: FormSpec[] = [
     keywords: ['SWP', 'systematic', 'monthly withdrawal', 'income', 'periodic'],
     description: 'Set up recurring withdrawals from a Praxis fund account.',
     sections: [
-      { title: 'Section 1 · Account owner', fields: [...owner(), ...account('Praxis account number')] },
+      { title: 'Section 1 · Account owner', fields: [...owner(), ...account('Praxis account number'), { name: 'Fund_Company', label: 'Fund company', span: 12, source: 'firm.legalName' }] },
       {
         title: 'Section 2 · Withdrawal',
         fields: [
@@ -317,7 +317,7 @@ export const SPECS: FormSpec[] = [
           { name: 'Transfer_InKind', label: 'Transfer in kind', span: 4, source: 'advisor', type: 'checkbox', format: 'checkbox', key: 'toa.inkind' },
         ],
       },
-      { title: 'Section 3 · Advisor', fields: rep },
+      { title: 'Section 3 · Advisor', fields: [...rep, { name: 'Receiving_Firm', label: 'Receiving firm', span: 8, source: 'firm.legalName' }, { name: 'Receiving_Firm_Phone', label: 'Firm phone', span: 4, source: 'firm.phone', format: 'phone' }] },
       { title: 'Section 4 · Signatures', note: 'A medallion guarantee may be required by the delivering firm for amounts over $250,000.', signatures: [ownerSig, { role: 'Advisor', label: 'Advisor' }] },
     ],
     signers: [{ role: 'Owner' }, { role: 'Advisor' }],

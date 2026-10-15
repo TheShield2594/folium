@@ -4,7 +4,8 @@ import { createDemoServices, resetDemo } from './demo';
 import { failureFor, injectFaults } from './demo/faults';
 import { classifyError, connectionProblem, FoliumError, repeatsBanner, resetConnection, withRetry, withTimeout } from './errors';
 import { guardServices } from './guard';
-import type { SendRequest, Services } from './types';
+import { mapSigningRegistry } from './registry';
+import type { SendRequest, Services, SigningProvider } from './types';
 
 const noWait = { wait: async () => undefined, waitOnline: async () => undefined };
 
@@ -124,7 +125,22 @@ describe('guarded services', () => {
     const base = createDemoServices();
     const calls: Record<string, number> = {};
     const out = { ...base } as unknown as Record<string, Record<string, unknown>>;
-    for (const area of ['crm', 'requests', 'signing'] as const) {
+    const counted = (area: string, target: Record<string, unknown>) =>
+      Object.fromEntries(
+        Object.entries(target).map(([name, fn]) => [
+          name,
+          typeof fn === 'function'
+            ? async (...args: unknown[]) => {
+                const op = `${area}.${name}`;
+                calls[op] = (calls[op] ?? 0) + 1;
+                if (calls[op] <= okAfter) throw err;
+                return (fn as (...a: unknown[]) => Promise<unknown>).apply(target, args);
+              }
+            : fn,
+        ]),
+      );
+    (out as unknown as Services).signing = mapSigningRegistry(base.signing, (p) => counted('signing', p as unknown as Record<string, unknown>) as unknown as SigningProvider);
+    for (const area of ['crm', 'requests'] as const) {
       const target = base[area] as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
       out[area] = Object.fromEntries(
         Object.entries(target).map(([name, fn]) => [
@@ -153,8 +169,8 @@ describe('guarded services', () => {
     const { services, calls } = flaky(new TypeError('Failed to fetch'));
     const req = { id: 'x', contactId: 'c-jordan' } as never;
     await expect(services.requests.save(req)).rejects.toMatchObject({ kind: 'offline' });
-    await expect(services.signing.create({} as SendRequest)).rejects.toMatchObject({ kind: 'offline' });
-    await expect(services.signing.release('e')).rejects.toBeInstanceOf(FoliumError);
+    await expect(services.signing.get('docusign:main').create({} as SendRequest)).rejects.toMatchObject({ kind: 'offline' });
+    await expect(services.signing.get('docusign:main').release('e')).rejects.toBeInstanceOf(FoliumError);
     expect(calls['requests.save']).toBe(1);
     expect(calls['signing.create']).toBe(1);
     expect(calls['signing.release']).toBe(1);
@@ -187,7 +203,7 @@ describe('two-step send', () => {
   const req: SendRequest = { documents: [], signers: [{ role: 'Owner', name: 'Jordan', email: 'j@example.com', order: 1, auth: 'email' }], subject: 's', message: 'm' };
 
   it('creates the envelope as a draft and sends it on release', async () => {
-    const { signing } = createDemoServices();
+    const signing = createDemoServices().signing.get('docusign:main');
     const { envelopeId } = await signing.create(req);
     expect((await signing.getStatus(envelopeId)).status).toBe('Drafted');
     expect(await releaseEnvelope(signing, envelopeId, false)).toBe('released');
@@ -196,8 +212,8 @@ describe('two-step send', () => {
 
   it('resumes after a lost reply without sending twice', async () => {
     const base = createDemoServices();
-    const release = vi.spyOn(base.signing, 'release');
-    const { signing } = injectFaults(base, { mode: 'release', afterMs: 0 });
+    const release = vi.spyOn(base.signing.get('docusign:main'), 'release');
+    const signing = injectFaults(base, { mode: 'release', afterMs: 0 }).signing.get('docusign:main');
     const { envelopeId } = await signing.create(req);
     // DocuSign sent it, but the reply never came back.
     await expect(signing.release(envelopeId)).rejects.toThrow('Failed to fetch');
@@ -208,7 +224,7 @@ describe('two-step send', () => {
   });
 
   it('resumes a release that never happened', async () => {
-    const { signing } = createDemoServices();
+    const signing = createDemoServices().signing.get('docusign:main');
     const { envelopeId } = await signing.create(req);
     expect(await releaseEnvelope(signing, envelopeId, true)).toBe('released');
     expect((await signing.getStatus(envelopeId)).status).toBe('Sent');

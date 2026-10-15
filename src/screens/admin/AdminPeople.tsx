@@ -710,6 +710,8 @@ function GroupSheet({ group, users, onClose, onSave, onDelete }: { group?: UserG
   const [busy, setBusy] = useState(false);
   const set = (p: Partial<UserGroup>) => setG({ ...g, ...p });
   const toggle = <T,>(list: T[] | undefined, v: T, on: boolean) => (on ? [...(list ?? []), v] : (list ?? []).filter((x) => x !== v));
+  const firms = useApp((s) => s.firms);
+  const connections = useServices().signing.list();
 
   return (
     <Sheet
@@ -785,6 +787,30 @@ function GroupSheet({ group, users, onClose, onSave, onDelete }: { group?: UserG
                 </span>
               ))}
             </div>
+            {firms.length > 1 && (
+              <Field label="Firm profile for other forms" htmlFor="g-firm" help="For forms whose issuer no firm profile lists, such as carrier forms. A profile that lists the issuer, or one set on the template, still wins.">
+                <Select id="g-firm" value={g.defaultFirmId ?? ''} onChange={(e) => set({ defaultFirmId: e.target.value || undefined })}>
+                  <option value="">The default profile</option>
+                  {firms.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )}
+            {connections.length > 1 && (
+              <Field label="E-signature" htmlFor="g-sign" help="Over the firm’s default. A firm profile that names one still wins for its forms.">
+                <Select id="g-sign" value={g.signingProviderId ?? ''} onChange={(e) => set({ signingProviderId: e.target.value || undefined })}>
+                  <option value="">The firm’s default</option>
+                  {connections.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )}
           </div>
         </div>
       </div>

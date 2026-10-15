@@ -1,6 +1,7 @@
 import { formatValue, prettifyFieldName, validateFormat } from './format';
 import { ConditionError, conditionTerms, describeSource, evaluateCondition, explainCondition, parseCondition, resolvePath, sourceKind, type ResolveScope, type TermLabel } from './paths';
-import type { Account, ClientRecord, Contact, FieldMapping, FormTemplate, TemplateMapping } from './types';
+import { firmFor, firmKey } from './firms';
+import type { Account, ClientRecord, Contact, FieldMapping, FirmProfile, FormTemplate, TemplateMapping } from './types';
 
 export type FieldOrigin = 'crm' | 'rep' | 'firm' | 'computed' | 'static' | 'edited' | 'advisor' | 'signer' | 'missing';
 
@@ -19,6 +20,8 @@ export interface FieldState {
   origin: FieldOrigin;
   /** Where the value came from, for the provenance list. */
   sourceLabel: string;
+  /** For a `firm.*` field: the profile it filled from. */
+  firm?: { id: string; name: string };
   /** What the CRM had, when the advisor overrode it. */
   crmValue?: string;
   /** What the CRM has for this field, whatever the advisor did to it (empty for advisor/signer fields). */
@@ -41,6 +44,8 @@ export interface FormFill {
   account?: Account;
   /** The account `account.*` fields resolved against, including the first-account fallback. */
   accountId?: string;
+  /** The firm profile `firm.*` fields fill from (see `firmFor`). */
+  firm?: FirmProfile;
   fields: FieldState[];
   filledCount: number;
   requiredCount: number;
@@ -195,19 +200,35 @@ export function validateMapping(mapping: Pick<TemplateMapping, 'fields' | 'formN
   return out;
 }
 
+/**
+ * The firm profile a form fills `firm.*` from: its own (`firmFor`) when the scope has
+ * profiles, else the scope's one firm.
+ */
+export function formFirm(template: Pick<FormTemplate, 'firmId' | 'issuer' | 'source'>, scope: Pick<ResolveScope, 'firm' | 'firms' | 'firmGroup'>): FirmProfile | undefined {
+  return scope.firms?.length ? firmFor(template, scope.firms, scope.firmGroup) : scope.firm;
+}
+
 export function prefillForm(
   template: FormTemplate,
-  scope: ResolveScope,
+  formScope: ResolveScope,
   values: Record<string, string>,
   item?: { id?: string; copy?: number },
 ): FormFill {
+  // Each form fills `firm.*` from its own entity's profile: one packet can hold a trust
+  // form and a Praxis form.
+  const firm = formFirm(template, formScope);
+  const scope: ResolveScope = { ...formScope, firm };
+  // A profile other than the default keeps its `firm.*` values apart, so a correction to
+  // one entity's phone never lands on another entity's form. The default's keys are
+  // unchanged from before profiles, so drafts keep their values.
+  const firmScoped = firm && !firm.isDefault && (formScope.firms?.length ?? 0) > 1 ? firm.id : undefined;
   const accountId = formAccountId(scope);
   const copyId = copyScope(item);
   const condValues = valuesForAccount(values, accountId, copyId);
   const labels = termLabels(template.mapping);
   const fields = template.mapping.fields.map((m): FieldState => {
-    const key = fieldKey(m, template, accountId, copyId);
     const kind = sourceKind(m.source);
+    const key = kind === 'firm' && firmScoped && !m.key ? firmKey(firmScoped, m.source.slice('firm.'.length)) : fieldKey(m, template, accountId, copyId);
     const crmValue = kind === 'advisor' || kind === 'signer' ? undefined : resolvePath(m.source, scope);
     const edited = Object.prototype.hasOwnProperty.call(values, key) ? values[key] : undefined;
     // Locks read the packet's values in one pass (they don't chain; validateMapping warns).
@@ -237,7 +258,8 @@ export function prefillForm(
       value,
       display: choiceDisplay(m, value) ?? (m.format === 'checkbox' ? value : formatValue(value, m.format, m.limits)),
       origin,
-      sourceLabel: describeSource(m.source),
+      sourceLabel: kind === 'firm' && firm?.name ? `Firm profile: ${firm.name}` : describeSource(m.source),
+      firm: kind === 'firm' && firm ? { id: firm.id, name: firm.name } : undefined,
       crmValue: origin === 'edited' ? crmValue : undefined,
       crmBaseline: crmValue ?? '',
       required,
@@ -256,6 +278,7 @@ export function prefillForm(
     copy: item?.copy && item.copy > 1 ? item.copy : undefined,
     account: scope.account,
     accountId: template.mapping.fields.some((m) => m.source.startsWith('account.')) ? accountId : scope.account?.accountid,
+    firm,
     fields,
     filledCount: relevant.filter((f) => f.value.trim()).length,
     requiredCount: relevant.filter((f) => f.required).length,

@@ -9,6 +9,7 @@ import { Icon, type IconName } from '../ui/Icon';
 import { CommandPalette } from './CommandPalette';
 import { ContactPicker } from './ContactPicker';
 import { FeedbackNotices } from '../screens/common/MyFeedback';
+import { AnnouncementBanners } from './Announcements';
 import { ConnectionBanner, IdleAutoSave, RestoreBanner } from './Recovery';
 
 function NavItem({ to, icon, children, count, alert, end }: { to: string; icon: IconName; children: ReactNode; count?: number; alert?: boolean; end?: boolean }) {
@@ -139,8 +140,11 @@ export function Sidebar() {
             <NavItem to="/admin/feedback" icon="flag">
               Form feedback
             </NavItem>
+            <NavItem to="/admin/announcements" icon="bell">
+              Announcements
+            </NavItem>
             <NavItem to="/admin/firm" icon="building">
-              Firm profile
+              Firm profiles
             </NavItem>
             <NavItem to="/admin/settings" icon="lock">
               Settings
@@ -227,6 +231,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <Sidebar />
       <div className="scrim" onClick={() => setSidebar(false)} aria-hidden="true" />
       <div className="main">
+        <AnnouncementBanners />
         <ConnectionBanner />
         <RestoreBanner />
         <IdleAutoSave />

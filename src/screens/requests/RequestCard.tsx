@@ -66,6 +66,8 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
   const [busy, setBusy] = useState<string>();
   const [sheet, setSheet] = useState<'void' | 'correct'>();
   const r = req;
+  // The connection that sent it, whatever the default is now.
+  const provider = services.signing.get(r.provider);
 
   const info = statusInfo(r);
   const signed = r.signers.filter((s) => s.status === 'signed').length;
@@ -93,7 +95,7 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
 
   const download = () =>
     withBusy('dl', async () => {
-      const { pdf, certificate } = await services.signing.downloadCompleted(r.envelopeId!);
+      const { pdf, certificate } = await provider.downloadCompleted(r.envelopeId!);
       const base = `${clientName ?? 'Client'} - ${r.title} (signed)`;
       downloadBytes(pdf, `${base}.pdf`);
       downloadBytes(certificate, `${base} - certificate.pdf`);
@@ -116,7 +118,7 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
 
   const refresh = (quiet?: boolean) =>
     withBusy('status', async () => {
-      const { next, changed, message } = applyEnvelopeStatus(r, await services.signing.getStatus(r.envelopeId!));
+      const { next, changed, message } = applyEnvelopeStatus(r, await provider.getStatus(r.envelopeId!));
       if (changed) {
         await save(next, message);
         trackStatus(r, next);
@@ -137,7 +139,7 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
 
   const resend = () =>
     withBusy('resend', async () => {
-      await services.signing.resend(r.envelopeId!);
+      await provider.resend(r.envelopeId!);
       await save({ ...r, lastReminderOn: new Date().toISOString(), audit: [...r.audit, audit(me, 'Resent')] }, 'Resent to signers who haven’t signed');
     });
 
@@ -175,6 +177,7 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
             {r.envelopeId && (
               <>
                 {' · '}
+                {services.signing.list().length > 1 && `${provider.label} `}
                 <span className="mono" title={r.envelopeId}>
                   {r.envelopeId.slice(0, 8)}
                 </span>
@@ -254,9 +257,11 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
           <Button variant="bordered" icon="send" busy={busy === 'resend'} onClick={resend}>
             Resend
           </Button>
-          <Button variant="bordered" icon="pencil" onClick={() => setSheet('correct')}>
-            Correct signer
-          </Button>
+          {provider.capabilities.correctRecipient && (
+            <Button variant="bordered" icon="pencil" onClick={() => setSheet('correct')}>
+              Correct signer
+            </Button>
+          )}
           <Button variant="danger" icon="xCircle" onClick={() => setSheet('void')}>
             Void
           </Button>
@@ -357,7 +362,7 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
           onClose={() => setSheet(undefined)}
           onVoid={(reason) =>
             withBusy('void', async () => {
-              await services.signing.void(r.envelopeId!, reason);
+              await provider.void(r.envelopeId!, reason);
               await save({ ...r, status: 'Voided', voidedReason: reason, audit: [...r.audit, audit(me, 'Voided', reason)] }, 'Envelope voided');
               track('request.voided', requestForms(r, templates), { requestId: r.id });
               setSheet(undefined);
@@ -371,7 +376,7 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
           onClose={() => setSheet(undefined)}
           onSave={(role, change) =>
             withBusy('correct', async () => {
-              await services.signing.correctRecipient(r.envelopeId!, role, change);
+              await provider.correctRecipient(r.envelopeId!, role, change);
               await save(
                 {
                   ...r,

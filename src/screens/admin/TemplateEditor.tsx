@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { isOpen, type FormFeedback } from '../../domain/feedback';
 import { prettifyFieldName } from '../../domain/format';
 import { parseIdSource } from '../../domain/idDocuments';
+import { firmFor, firmReason, templateIssuer } from '../../domain/firms';
 import { mappingWarnings, prefillForm } from '../../domain/prefill';
 import { carryForward, diffRevision, type FieldChange } from '../../domain/revisions';
 import { roleLabel } from '../../domain/signers';
@@ -668,6 +669,7 @@ function TestTab({ template }: { template: FormTemplate }) {
   const services = useServices();
   const advisor = useActingFor();
   const firm = useApp((s) => s.firm);
+  const firms = useApp((s) => s.firms);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [cid, setCid] = useState('');
   const [client, setClient] = useState<ClientRecord>();
@@ -685,8 +687,8 @@ function TestTab({ template }: { template: FormTemplate }) {
   const fill = useMemo(() => {
     if (!client || !advisor) return undefined;
     const account = client.accounts.find((a) => template.appliesTo?.includes(a.ev_accounttype)) ?? client.accounts[0];
-    return prefillForm(template, { client, advisor, firm, account }, {});
-  }, [client, advisor, firm, template]);
+    return prefillForm(template, { client, advisor, firm, firms, account }, {});
+  }, [client, advisor, firm, firms, template]);
   const conditional = fill?.fields.filter((f) => f.mapping.requiredWhen?.trim() || f.mapping.lockWhen?.trim()) ?? [];
 
   return (
@@ -936,8 +938,13 @@ function DetailsTab({ template, templates, onSaved }: { template: FormTemplate; 
   const services = useServices();
   const [states, setStates] = useState<string[]>(template.states ?? []);
   const [group, setGroup] = useState(template.variantGroup ?? '');
+  const firms = useApp((s) => s.firms);
+  const [firmId, setFirmId] = useState(template.firmId && firms.some((f) => f.id === template.firmId) ? template.firmId : '');
   const [busy, setBusy] = useState(false);
-  const dirty = JSON.stringify(states) !== JSON.stringify(template.states ?? []) || group.trim() !== (template.variantGroup ?? '');
+  const dirty = JSON.stringify(states) !== JSON.stringify(template.states ?? []) || group.trim() !== (template.variantGroup ?? '') || firmId !== (template.firmId ?? '');
+  const byIssuer = firmFor({ ...template, firmId: undefined }, firms);
+  const filling = firmFor({ ...template, firmId: firmId || undefined }, firms);
+  const usesFirm = template.mapping.fields.some((m) => m.source.startsWith('firm.'));
   const fromTitle = parseStatesFromTitle(template.name);
   const groupsInUse = [...new Set(templates.map((t) => t.variantGroup).filter((g): g is string => !!g))].sort();
   const others = group.trim() ? templates.filter((t) => t.variantGroup === group.trim() && t.formNumber !== template.formNumber && t.status !== 'Retired') : [];
@@ -945,7 +952,7 @@ function DetailsTab({ template, templates, onSaved }: { template: FormTemplate; 
   async function save() {
     setBusy(true);
     try {
-      await services.templates.saveDetails(template.id, { states, variantGroup: group.trim() || undefined });
+      await services.templates.saveDetails(template.id, { states, variantGroup: group.trim() || undefined, firmId: firmId || undefined });
       await onSaved();
       toast.ok('Saved. Advisors see the change now.');
     } catch (e) {
@@ -995,6 +1002,29 @@ function DetailsTab({ template, templates, onSaved }: { template: FormTemplate; 
         )}
         {group.trim() && !others.length && <p className="t-footnote c3">No other form is in this group yet.</p>}
       </div>
+      {firms.length > 0 && (
+        <div className="stack">
+          <h2 className="t-headline">Firm data from: {filling?.name || 'the default profile'}</h2>
+          <p className="t-footnote c3">
+            {firmReason({ ...template, firmId: firmId || undefined }, firms) === 'issuer'
+              ? `Its issuer, ${templateIssuer(template)}, is on that profile.`
+              : firmReason({ ...template, firmId: firmId || undefined }, firms) === 'override'
+                ? 'Set here, whatever its issuer.'
+                : `No profile lists its issuer (${templateIssuer(template)}), so it uses a group’s default or the default profile.`}{' '}
+            {usesFirm ? 'Its firm.* fields fill from that profile.' : 'This form has no firm.* fields yet.'}
+          </p>
+          <Field label="Firm profile" htmlFor="d-firm">
+            <Select id="d-firm" value={firmId} onChange={(e) => setFirmId(e.target.value)}>
+              <option value="">From its issuer{byIssuer ? ` (${byIssuer.name})` : ''}</option>
+              {firms.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+      )}
       <div className="row" style={{ justifyContent: 'flex-end' }}>
         <Button variant="filled" disabled={!dirty} busy={busy} onClick={save}>
           Save

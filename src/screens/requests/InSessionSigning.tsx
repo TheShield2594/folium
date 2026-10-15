@@ -33,7 +33,7 @@ export function SignNowButtons({ req }: { req: SignatureRequest }) {
     const tab = window.open('about:blank', '_blank');
     setBusy(role);
     try {
-      const url = await services.signing.signingUrl(req.envelopeId!, role, signingReturnUrl(location.href, req.envelopeId!, role));
+      const url = await services.signing.get(req.provider).signingUrl(req.envelopeId!, role, signingReturnUrl(location.href, req.envelopeId!, role));
       if (tab) {
         tab.opener = null;
         tab.location.href = url;
@@ -84,7 +84,7 @@ export function SigningReturn() {
         if (!r) throw new Error('Folium couldn’t find the request for that envelope.');
         const signer = r.signers.find((s) => s.role === role);
         const msg = signingEventMessage(event, signer?.name ?? roleLabel(role));
-        const { next } = applyEnvelopeStatus(r, await services.signing.getStatus(envelopeId));
+        const { next } = applyEnvelopeStatus(r, await services.signing.get(r.provider).getStatus(envelopeId));
         await services.requests.save({ ...next, audit: [...next.audit, audit(me, msg.audit, `${signer?.name ?? roleLabel(role)}, with ${me.fullname} present`)] });
         trackStatus(r, next);
         await refreshRequests();

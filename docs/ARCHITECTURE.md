@@ -16,12 +16,12 @@ Contact form (D365) ──► Folium (Power Apps code app: React + TypeScript + 
 ## Data flow for one packet
 
 1. **Pick.** The store holds `packet.items` (template + account). `currentTemplates()` only offers the Live revision whose effective date has arrived, filtered by the user's groups.
-2. **Prefill.** `prefillPacket()` resolves each field's `source` (`contact.*`, `account.*`, `connection[Role].*`, `rep.*`, `firm.*`, `computed.*`) against the client record. Advisor entries live in `packet.values`, keyed by the field's canonical key, so one value fills every form that shares it.
+2. **Prefill.** `prefillPacket()` resolves each field's `source` (`contact.*`, `account.*`, `connection[Role].*`, `rep.*`, `firm.*`, `computed.*`) against the client record. `firm.*` reads the firm profile for each form's issuer (`firmFor`), so a trust form and a Praxis form in one packet each get their own entity. Advisor entries live in `packet.values`, keyed by the field's canonical key, so one value fills every form that shares it.
 3. **Check.** `runChecks()` returns pass/warn/block results: current revisions, required fields, formats, template rules (`sumEquals`, `oneOf`, `requiredIf`, `pattern`), and flat-PDF warnings.
 4. **Review.** `PdfView` renders the blank template with pdf.js and overlays values and highlights in HTML, so typing is instant. Field rectangles come from the PDF's own widgets (`inspectPdf`) or, for scanned PDFs, from overlay rects in the mapping.
 5. **Output.** `fillPacket()` fills with pdf-lib: editable (fillable download, drafts) or flattened (e-signature, in-person).
-6. **Send.** `rolesForPacket()` + `assignSigners()` build signers from template roles and CRM connections. `buildEnvelopeDefinition()` turns neutral placements (page + x/y in points from the top-left) into DocuSign tabs. The request is saved as an `ev_signaturerequest` row.
-7. **Track.** Status comes from DocuSign Connect (Power Automate updates the row) or Check status (polling). Signed requests wait for the "Uploaded to OnBase" tick.
+6. **Send.** `providerFor()` picks the e-signature connection (firm profile, group, firm default) from `services.signing`, a registry of connections; its `capabilities` decide what the Send screen offers. `rolesForPacket()` + `assignSigners()` build signers from template roles and CRM connections. `buildEnvelopeDefinition()` turns neutral placements (page + x/y in points from the top-left) into DocuSign tabs. The request is saved as an `ev_signaturerequest` row.
+7. **Track.** Every request action goes through `services.signing.get(request.provider)`, the connection that sent it. Status comes from DocuSign Connect (Power Automate updates the row) or Check status (polling). Signed requests wait for the "Uploaded to OnBase" tick.
 
 ## Why these choices
 

@@ -2,7 +2,10 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import type { ClientRecord, FirmPolicy, FirmProfile, FormTemplate, SavedPacket, SignatureRequest, UserGroup, UserProfile } from '../../domain/types';
 import { mergeAdvisor, profileToSave } from '../../domain/advisor';
 import { withPolicyDefaults } from '../../domain/policy';
+import { cleanAnnouncement, type Announcement } from '../../domain/announcements';
 import { docuSignReady, withDocuSignDefaults, type DocuSignSetup } from '../../domain/docusign';
+import { normalizeFirms } from '../../domain/firms';
+import { DOCUSIGN_MAIN, type ProviderCapabilities, type SigningSettings } from '../../domain/signing';
 import { needsSeenStamp } from '../../domain/users';
 import { mapDocuSignStatus } from '../../domain/requests';
 import { formRequest, type FormFeedback } from '../../domain/feedback';
@@ -22,7 +25,8 @@ import type {
   SigningProvider,
   TemplateLibrary,
 } from '../types';
-import { CLIENTS, DIRECTORY, FIRM, GROUPS, seedFeedback, seedPackets, seedRequests, TEMPLATES, USERS } from './seed';
+import { createSigningRegistry } from '../registry';
+import { CLIENTS, DIRECTORY, FIRMS, GROUPS, seedAnnouncements, seedFeedback, seedPackets, seedRequests, TEMPLATES, USERS } from './seed';
 import { SPECS } from './specs';
 import { createUsageQueue } from '../usage';
 import { seedUsage } from './usageSeed';
@@ -48,7 +52,14 @@ interface DemoState {
   usage?: UsageEvent[];
   users: UserProfile[];
   groups: UserGroup[];
-  firm: FirmProfile;
+  /** Before firm profiles: the one firm. Read once into `firms`. */
+  firm?: Partial<FirmProfile>;
+  /** Firm profiles (`ev_foliumsetting` rows named "Firm: …"). */
+  firms?: FirmProfile[];
+  /** Missing in demo data saved before announcements: the seeded ones apply. */
+  announcements?: Announcement[];
+  /** Missing in demo data saved before connections: DocuSign is the default. */
+  signing?: SigningSettings;
   clients: Record<string, ClientRecord>;
   currentUserId: string;
   /** Simulated DocuSign envelopes: created (a draft) and, once released, when they went out. */
@@ -76,7 +87,8 @@ function load(): DemoState {
     feedback: seedFeedback(),
     users: structuredClone(USERS),
     groups: structuredClone(GROUPS),
-    firm: { ...FIRM },
+    firms: structuredClone(FIRMS),
+    announcements: seedAnnouncements(),
     clients: structuredClone(CLIENTS),
     currentUserId: USERS[0].systemuserid,
   };
@@ -109,6 +121,9 @@ export function setDemoUser(id: string) {
   state.currentUserId = id;
   persist();
 }
+
+/** Firm profiles, reading demo data saved before profiles (one `firm`) as the default. */
+const firms = (): FirmProfile[] => (state.firms ??= normalizeFirms(state.firm ? [state.firm] : clone(FIRMS)));
 
 const me = () => state.users.find((u) => u.systemuserid === state.currentUserId) ?? state.users[0];
 
@@ -178,13 +193,47 @@ const directory: DirectoryService = {
     for (const u of state.users) u.groupIds = u.groupIds.filter((x) => x !== id);
     persist();
   },
-  async getFirm() {
-    return clone(state.firm);
+  async listFirms() {
+    return normalizeFirms(clone(firms()));
   },
   async saveFirm(f) {
-    state.firm = clone(f);
+    const list = firms().map((x) => (f.isDefault ? { ...x, isDefault: false } : x));
+    const i = list.findIndex((x) => x.id === f.id);
+    if (i >= 0) list[i] = clone(f);
+    else list.push(clone(f));
+    state.firms = normalizeFirms(list);
     persist();
-    return clone(f);
+    return clone(state.firms.find((x) => x.id === f.id)!);
+  },
+  async removeFirm(id) {
+    const f = firms().find((x) => x.id === id);
+    if (f?.isDefault) throw new Error('The default firm profile can’t be removed. Make another profile the default first.');
+    state.firms = firms().filter((x) => x.id !== id);
+    persist();
+  },
+  async getSigning() {
+    return clone(state.signing ?? {});
+  },
+  async saveSigning(s) {
+    state.signing = clone(s);
+    persist();
+    return clone(s);
+  },
+  async listAnnouncements() {
+    return clone((state.announcements ??= seedAnnouncements()));
+  },
+  async saveAnnouncement(a) {
+    const clean = cleanAnnouncement(a);
+    const list = (state.announcements ??= seedAnnouncements());
+    const i = list.findIndex((x) => x.id === clean.id);
+    if (i >= 0) list[i] = clone(clean);
+    else list.unshift(clone(clean));
+    persist();
+    return clone(clean);
+  },
+  async removeAnnouncement(id) {
+    state.announcements = (state.announcements ?? []).filter((a) => a.id !== id);
+    persist();
   },
   async getPolicy() {
     return withPolicyDefaults(clone(state.policy));
@@ -292,6 +341,7 @@ const templates: TemplateLibrary = {
     if (!t) throw new Error('Template not found');
     t.states = details.states?.length ? [...details.states] : undefined;
     t.variantGroup = details.variantGroup?.trim() || undefined;
+    if ('firmId' in details) t.firmId = details.firmId || undefined;
     t.modifiedOn = new Date().toISOString();
     t.modifiedBy = me().fullname;
     persist();
@@ -547,14 +597,18 @@ const DEMO_DOCUSIGN: DocuSignSetup = {
   idv: { sms: '11111111-2222-4333-8444-555555555555', phone: '22222222-3333-4444-8555-666666666666', kba: '33333333-4444-4555-8666-777777777777' },
 };
 
-const signing: SigningProvider = {
-  name: 'DocuSign (demo)',
-  async checkConnection(setup) {
-    await wait(400);
-    const s = setup ?? (await directory.getDocuSign());
-    if (!docuSignReady(s)) throw new Error('No DocuSign account is set up. An administrator adds it in Administration › Settings.');
-    return { accountId: s.accountId!, accountName: 'Everence Financial (demo sandbox)' };
-  },
+const DOCUSIGN_CAPABILITIES: ProviderCapabilities = { verification: ['email', 'sms', 'phone', 'kba'], accessCode: true, inSession: true, correctRecipient: true };
+
+/**
+ * Simulated providers. Both run the same pretend envelopes; the second stands in for
+ * another e-signature platform with fewer features, so switching connections can be
+ * tried without a tenant.
+ */
+function demoProvider(meta: Pick<SigningProvider, 'id' | 'label' | 'kind' | 'capabilities'>, checkConnection: SigningProvider['checkConnection']): SigningProvider {
+  return { ...meta, checkConnection, ...envelopeOps };
+}
+
+const envelopeOps: Omit<SigningProvider, 'id' | 'label' | 'kind' | 'capabilities' | 'checkConnection'> = {
   async create(req) {
     await wait(500);
     const id = crypto.randomUUID();
@@ -655,6 +709,22 @@ const signing: SigningProvider = {
     return `${location.origin}${location.pathname}${location.search}#/demo-signing?${q}`;
   },
 };
+
+const signing = createSigningRegistry([
+  demoProvider({ id: DOCUSIGN_MAIN, label: 'DocuSign', kind: 'docusign', capabilities: DOCUSIGN_CAPABILITIES }, async (setup) => {
+    await wait(400);
+    const s = setup ?? (await directory.getDocuSign());
+    if (!docuSignReady(s)) throw new Error('No DocuSign account is set up. An administrator adds it in Administration › Settings.');
+    return { accountId: s.accountId!, accountName: 'Everence Financial (demo sandbox)' };
+  }),
+  demoProvider(
+    { id: 'demo:altsign', label: 'Second provider (demo)', kind: 'other', capabilities: { verification: ['email', 'sms'], accessCode: false, inSession: false, correctRecipient: false, maxAttachmentsMb: 10, expiryDays: [30, 60] } },
+    async () => {
+      await wait(400);
+      return { accountId: 'demo-altsign', accountName: 'Everence (second provider, demo)' };
+    },
+  ),
+]);
 
 /** Signing happens in another tab: pick up what it saved. */
 function syncSignedInSession(envelopeId: string) {
