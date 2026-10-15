@@ -1,0 +1,34 @@
+/// The checks named on send.blocked rows (ev_detail's blockingChecks), one row each. Import mode: JSON can't be parsed in DirectQuery. Refresh daily.
+table BlockingCheck
+
+	/// How often a check blocked a send (per form row).
+	measure 'Times blocking' = COUNTROWS ( BlockingCheck )
+		formatString: #,0
+
+	column ev_usageeventid
+		dataType: string
+		isHidden
+		summarizeBy: none
+		sourceColumn: ev_usageeventid
+
+	column CheckId
+		dataType: string
+		summarizeBy: none
+		sourceColumn: CheckId
+
+	partition BlockingCheck = m
+		mode: import
+		source =
+				let
+					Source = Dataverse,
+					Rows = Source{[Schema = "dbo", Item = "ev_usageevent"]}[Data],
+					Blocked = Table.SelectRows(Rows, each [ev_eventtype] = 100000005 and [ev_detail] <> null),
+					Kept = Table.SelectColumns(Blocked, {"ev_usageeventid", "ev_detail"}),
+					Parsed = Table.AddColumn(Kept, "Checks", each try Record.FieldOrDefault(Json.Document([ev_detail]), "blockingChecks", {}) otherwise {}),
+					Expanded = Table.ExpandListColumn(Table.RemoveColumns(Parsed, {"ev_detail"}), "Checks"),
+					NonEmpty = Table.SelectRows(Expanded, each [Checks] <> null),
+					Renamed = Table.RenameColumns(NonEmpty, {{"Checks", "CheckId"}}),
+					Typed = Table.TransformColumnTypes(Renamed, {{"ev_usageeventid", type text}, {"CheckId", type text}})
+				in
+					Typed
+

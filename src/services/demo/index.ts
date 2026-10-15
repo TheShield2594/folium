@@ -454,7 +454,15 @@ export function demoUsage(): UsageEvent[] {
 /** Only what was recorded in this demo, without the seeded history. */
 export const recordedUsage = (): UsageEvent[] => clone(state.usage ?? []);
 
-const usage = createUsageQueue(demoUsageWriter);
+const usage = Object.assign(createUsageQueue(demoUsageWriter), {
+  async list(since: string) {
+    await wait(120);
+    const events = demoUsage()
+      .filter((e) => e.occurredOn >= since)
+      .sort((a, b) => a.occurredOn.localeCompare(b.occurredOn));
+    return { events, truncated: false };
+  },
+});
 
 // Attached files: in memory, and in localStorage when it has room, so a demo draft's
 // attachments survive a reload.

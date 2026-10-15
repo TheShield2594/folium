@@ -105,6 +105,7 @@ describe('CSV', () => {
     const csv = toCsv([['Name', 'Note'], ['Yoder, Dana', '=HYPERLINK("x")']]);
     expect(csv.startsWith('﻿')).toBe(true);
     expect(parseCsv(csv)).toEqual([['Name', 'Note'], ['Yoder, Dana', `'=HYPERLINK("x")`]]);
+    expect(parseCsv(toCsv([['\t=1+1', '-2', '@SUM(A1)']]))).toEqual([["'\t=1+1", "'-2", "'@SUM(A1)"]]);
   });
 
   it('exports the list with status and last sign-in', () => {

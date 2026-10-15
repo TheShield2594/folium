@@ -1,0 +1,9 @@
+/// Everyone who opens the report. BlockingCheck is imported, so Dataverse single sign-on doesn't secure it:
+/// this keeps only the checks on usage rows the viewer can read through DirectQuery (UsageEvent runs as them).
+/// Add the reporting group as members in the service (Semantic model › Security). Workspace Admins, Members
+/// and Contributors aren't filtered by roles; give everyone else Viewer access.
+role Viewer
+	modelPermission: read
+
+	tablePermission BlockingCheck = BlockingCheck[ev_usageeventid] IN VALUES ( UsageEvent[ev_usageeventid] )
+

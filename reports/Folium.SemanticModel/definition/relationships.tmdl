@@ -1,0 +1,35 @@
+relationship 3b1f6c1e-0001-4d6b-9a0e-6d0b2f3f0001
+	fromColumn: UsageEvent.ev_user
+	toColumn: User.systemuserid
+
+/// Work an Assistant did for a User: use with USERELATIONSHIP.
+relationship 3b1f6c1e-0002-4d6b-9a0e-6d0b2f3f0002
+	isActive: false
+	fromColumn: UsageEvent.ev_actingfor
+	toColumn: User.systemuserid
+
+relationship 3b1f6c1e-0003-4d6b-9a0e-6d0b2f3f0003
+	fromColumn: UsageEvent.ev_request
+	toColumn: SignatureRequest.ev_signaturerequestid
+
+relationship 3b1f6c1e-0004-4d6b-9a0e-6d0b2f3f0004
+	fromColumn: UsageEvent.ev_template
+	toColumn: FormTemplate.ev_formtemplateid
+
+relationship 3b1f6c1e-0005-4d6b-9a0e-6d0b2f3f0005
+	fromColumn: UsageEvent.OccurredDate
+	toColumn: Date.Date
+
+relationship 3b1f6c1e-0007-4d6b-9a0e-6d0b2f3f0007
+	isActive: false
+	fromColumn: SignatureRequest.SentDate
+	toColumn: Date.Date
+
+relationship 3b1f6c1e-0008-4d6b-9a0e-6d0b2f3f0008
+	isActive: false
+	fromColumn: SignatureRequest.ev_owner
+	toColumn: User.systemuserid
+
+relationship 3b1f6c1e-0009-4d6b-9a0e-6d0b2f3f0009
+	fromColumn: BlockingCheck.ev_usageeventid
+	toColumn: UsageEvent.ev_usageeventid

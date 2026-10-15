@@ -1,0 +1,15 @@
+/// The Dataverse environment's URL, without https:// (e.g. everence.crm.dynamics.com). Set it per environment in Power BI Desktop (Transform data › Edit parameters) or the service (Settings › Parameters).
+expression DataverseUrl = "yourorg.crm.dynamics.com" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
+	lineageTag: 7e3f6a52-1c0e-4a8e-9a55-2f3b8c1d0a01
+
+	annotation PBI_ResultType = Text
+
+/// Dataverse through its TDS endpoint, so the fact tables can be DirectQuery with single sign-on (docs/REPORTS.md › Access).
+expression Dataverse =
+		let
+			Source = CommonDataService.Database(DataverseUrl)
+		in
+			Source
+	lineageTag: 7e3f6a52-1c0e-4a8e-9a55-2f3b8c1d0a02
+
+	annotation PBI_ResultType = Table

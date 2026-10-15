@@ -4,7 +4,7 @@ import type { SignatureRequest, SignatureStatus } from '../../domain/types';
 import { usageEvents } from '../../domain/usage';
 import { seedRequests, TEMPLATES, USERS } from '../demo/seed';
 import { FEEDBACK_KIND_OPTIONS, FEEDBACK_STATUS_OPTIONS, SIGNATURE_STATUS_OPTIONS, USAGE_EVENT_OPTIONS } from './config';
-import { bind, feedbackRow, fromFeedbackRow, isDuplicateKeyError, requestRow, usageRow } from './rows';
+import { bind, feedbackRow, fromFeedbackRow, fromUsageRow, isDuplicateKeyError, requestRow, usageRow } from './rows';
 
 const OWNER = '6f1c2d3e-4a5b-6c7d-8e9f-0a1b2c3d4e5f';
 const PREPARER = '0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d';
@@ -114,5 +114,35 @@ describe('helpers', () => {
     expect(isDuplicateKeyError({ code: '0x80060892' })).toBe(true);
     expect(isDuplicateKeyError({ message: 'A record with matching key values already exists.' })).toBe(true);
     expect(isDuplicateKeyError({ message: 'Failed to fetch' })).toBe(false);
+  });
+});
+
+describe('fromUsageRow', () => {
+  it('reads back what usageRow wrote, with lookups as their _value columns', () => {
+    const [e] = usageEvents('send.blocked', { user: { systemuserid: OWNER, groupIds: [] }, actingFor: { systemuserid: PREPARER }, at: '2026-10-01T09:00:00.000Z', batchId: 'b1' }, [{ ...TEMPLATES[0], id: TEMPLATE }], {
+      detail: { blockingChecks: ['required', 'state'] },
+    });
+    const row = usageRow(e);
+    const back = fromUsageRow({
+      ...row,
+      _ev_user_value: OWNER,
+      _ev_actingfor_value: PREPARER,
+      _ev_template_value: TEMPLATE,
+      ev_formnumber: row.ev_formnumber ?? undefined,
+      ev_revision: row.ev_revision ?? undefined,
+      ev_source: row.ev_source ?? undefined,
+      ev_issuer: row.ev_issuer ?? undefined,
+      ev_category: row.ev_category ?? undefined,
+      ev_region: undefined,
+      ev_groups: undefined,
+      ev_detail: row.ev_detail ?? undefined,
+    });
+    expect(back).toEqual(e);
+  });
+
+  it('skips rows with an unknown event type or no user, and survives bad detail', () => {
+    expect(fromUsageRow({ ev_eventtype: 999, ev_occurredon: '2026-10-01T00:00:00Z', _ev_user_value: OWNER })).toBeUndefined();
+    expect(fromUsageRow({ ev_eventtype: USAGE_EVENT_OPTIONS['form.added'], ev_occurredon: '2026-10-01T00:00:00Z' })).toBeUndefined();
+    expect(fromUsageRow({ ev_eventtype: USAGE_EVENT_OPTIONS['form.added'], ev_occurredon: '2026-10-01T00:00:00Z', _ev_user_value: OWNER, ev_detail: '{' })?.detail).toBeUndefined();
   });
 });

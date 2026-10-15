@@ -1,0 +1,29 @@
+table User
+
+	column systemuserid
+		dataType: string
+		isHidden
+		summarizeBy: none
+		sourceColumn: systemuserid
+
+	column fullname
+		dataType: string
+		summarizeBy: none
+		sourceColumn: fullname
+
+	column isdisabled
+		dataType: boolean
+		summarizeBy: none
+		sourceColumn: isdisabled
+
+	partition User = m
+		mode: directQuery
+		source =
+				let
+					Source = Dataverse,
+					Rows = Source{[Schema = "dbo", Item = "systemuser"]}[Data],
+					Kept = Table.SelectColumns(Rows, {"systemuserid", "fullname", "isdisabled"}),
+					Typed = Table.TransformColumnTypes(Kept, {{"systemuserid", type text}})
+				in
+					Typed
+

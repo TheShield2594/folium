@@ -60,6 +60,78 @@ export function usageRow(e: UsageEvent) {
   };
 }
 
+/** The columns `fromUsageRow` reads. */
+export const USAGE_COLUMNS = [
+  'ev_eventtype',
+  'ev_occurredon',
+  '_ev_user_value',
+  '_ev_actingfor_value',
+  '_ev_template_value',
+  'ev_formnumber',
+  'ev_revision',
+  'ev_source',
+  'ev_issuer',
+  'ev_category',
+  'ev_region',
+  'ev_groups',
+  '_ev_request_value',
+  'ev_batchid',
+  'ev_dedupekey',
+  'ev_detail',
+];
+
+export interface UsageRowIn {
+  ev_eventtype?: number;
+  ev_occurredon?: string;
+  _ev_user_value?: string;
+  _ev_actingfor_value?: string;
+  _ev_template_value?: string;
+  ev_formnumber?: string;
+  ev_revision?: string;
+  ev_source?: string;
+  ev_issuer?: string;
+  ev_category?: string;
+  ev_region?: string;
+  ev_groups?: string;
+  _ev_request_value?: string;
+  ev_batchid?: string;
+  ev_dedupekey?: string;
+  ev_detail?: string;
+}
+
+const USAGE_TYPE_BY_OPTION = new Map(Object.entries(USAGE_EVENT_OPTIONS).map(([type, n]) => [n, type as UsageEvent['type']]));
+
+/** An `ev_usageevent` row read back, for Administration › Readiness. Undefined for an unknown event type. The contact isn't read. */
+export function fromUsageRow(row: UsageRowIn): UsageEvent | undefined {
+  const type = row.ev_eventtype === undefined ? undefined : USAGE_TYPE_BY_OPTION.get(row.ev_eventtype);
+  if (!type || !row.ev_occurredon || !row._ev_user_value) return undefined;
+  let detail: UsageEvent['detail'];
+  try {
+    detail = row.ev_detail ? (JSON.parse(row.ev_detail) as UsageEvent['detail']) : undefined;
+  } catch {
+    detail = undefined;
+  }
+  const opt = <K extends string>(key: K, v: string | undefined) => (v ? { [key]: v } : {}) as Partial<Record<K, string>>;
+  return {
+    type,
+    occurredOn: new Date(row.ev_occurredon).toISOString(),
+    userId: row._ev_user_value,
+    ...opt('actingForId', row._ev_actingfor_value),
+    ...opt('templateId', row._ev_template_value),
+    ...opt('formNumber', row.ev_formnumber),
+    ...opt('revision', row.ev_revision),
+    ...opt('source', row.ev_source),
+    ...opt('issuer', row.ev_issuer),
+    ...opt('category', row.ev_category),
+    ...opt('region', row.ev_region),
+    ...opt('groups', row.ev_groups),
+    ...opt('requestId', row._ev_request_value),
+    batchId: row.ev_batchid ?? '',
+    dedupeKey: row.ev_dedupekey ?? '',
+    ...(detail ? { detail } : {}),
+  };
+}
+
 /** Dataverse refuses a second row with the same alternate key: that event is already recorded. */
 export function isDuplicateKeyError(err: { code?: string; message?: string } | undefined): boolean {
   return err?.code === '0x80060892' || /duplicate|same key|already exists/i.test(err?.message ?? '');

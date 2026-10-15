@@ -1,0 +1,272 @@
+/// ev_usageevent: one row per event per form (docs/DATAVERSE.md). DirectQuery, so Dataverse security decides what each person sees.
+table UsageEvent
+
+	/// A form added to a packet: the Laser App baseline (#31).
+	measure 'Form uses' = CALCULATE ( COUNTROWS ( UsageEvent ), UsageEvent[EventType] = "form.added" )
+		formatString: #,0
+		displayFolder: Usage
+
+	/// Downloads, prints and sends, one per form.
+	measure 'Outputs' = CALCULATE ( COUNTROWS ( UsageEvent ), UsageEvent[EventType] IN { "pdf.fillable", "pdf.flattened", "pdf.print", "request.sent", "request.inperson" } )
+		formatString: #,0
+		displayFolder: Usage
+
+	measure 'Drafts saved' = CALCULATE ( DISTINCTCOUNT ( UsageEvent[ev_batchid] ), UsageEvent[EventType] = "draft.saved" )
+		formatString: #,0
+		displayFolder: Usage
+
+	measure 'In-person packets' = CALCULATE ( DISTINCTCOUNT ( UsageEvent[ev_request] ), UsageEvent[EventType] = "request.inperson" )
+		formatString: #,0
+		displayFolder: Usage
+
+	measure 'Last activity' = MAX ( UsageEvent[ev_occurredon] )
+		formatString: General Date
+		displayFolder: People
+
+	/// People with any event in the slicer range.
+	measure 'Active people' = DISTINCTCOUNT ( UsageEvent[ev_user] )
+		formatString: #,0
+		displayFolder: People
+
+	measure 'Active people (7 days)' =
+			VAR last = MIN ( MAX ( 'Date'[Date] ), TODAY () )
+			RETURN CALCULATE ( DISTINCTCOUNT ( UsageEvent[ev_user] ), DATESINPERIOD ( 'Date'[Date], last, -7, DAY ) )
+		formatString: #,0
+		displayFolder: People
+
+	measure 'Active people (30 days)' =
+			VAR last = MIN ( MAX ( 'Date'[Date] ), TODAY () )
+			RETURN CALCULATE ( DISTINCTCOUNT ( UsageEvent[ev_user] ), DATESINPERIOD ( 'Date'[Date], last, -30, DAY ) )
+		formatString: #,0
+		displayFolder: People
+
+	measure 'Active people (90 days)' =
+			VAR last = MIN ( MAX ( 'Date'[Date] ), TODAY () )
+			RETURN CALCULATE ( DISTINCTCOUNT ( UsageEvent[ev_user] ), DATESINPERIOD ( 'Date'[Date], last, -90, DAY ) )
+		formatString: #,0
+		displayFolder: People
+
+	/// Form uses an Assistant (or colleague) did for another User.
+	measure 'Form uses for others' = CALCULATE ( [Form uses], NOT ISBLANK ( UsageEvent[ev_actingfor] ) )
+		formatString: #,0
+		displayFolder: People
+
+	measure 'Requests sent' = CALCULATE ( DISTINCTCOUNT ( UsageEvent[ev_request] ), UsageEvent[EventType] = "request.sent" )
+		formatString: #,0
+		displayFolder: E-signature
+
+	/// Requests sent in the range that were viewed, whenever that happened.
+	measure 'Requests viewed' =
+			VAR sent = CALCULATETABLE ( VALUES ( UsageEvent[ev_request] ), UsageEvent[EventType] = "request.sent" )
+			RETURN CALCULATE ( DISTINCTCOUNT ( UsageEvent[ev_request] ), UsageEvent[EventType] = "request.viewed", REMOVEFILTERS ( 'Date' ), TREATAS ( sent, UsageEvent[ev_request] ) )
+		formatString: #,0
+		displayFolder: E-signature
+
+	/// Requests sent in the range that were signed, whenever that happened.
+	measure 'Requests signed' =
+			VAR sent = CALCULATETABLE ( VALUES ( UsageEvent[ev_request] ), UsageEvent[EventType] = "request.sent" )
+			RETURN CALCULATE ( DISTINCTCOUNT ( UsageEvent[ev_request] ), UsageEvent[EventType] = "request.signed", REMOVEFILTERS ( 'Date' ), TREATAS ( sent, UsageEvent[ev_request] ) )
+		formatString: #,0
+		displayFolder: E-signature
+
+	/// Requests sent in the range that were declined, whenever that happened.
+	measure 'Requests declined' =
+			VAR sent = CALCULATETABLE ( VALUES ( UsageEvent[ev_request] ), UsageEvent[EventType] = "request.sent" )
+			RETURN CALCULATE ( DISTINCTCOUNT ( UsageEvent[ev_request] ), UsageEvent[EventType] = "request.declined", REMOVEFILTERS ( 'Date' ), TREATAS ( sent, UsageEvent[ev_request] ) )
+		formatString: #,0
+		displayFolder: E-signature
+
+	/// Requests sent in the range that were voided, whenever that happened.
+	measure 'Requests voided' =
+			VAR sent = CALCULATETABLE ( VALUES ( UsageEvent[ev_request] ), UsageEvent[EventType] = "request.sent" )
+			RETURN CALCULATE ( DISTINCTCOUNT ( UsageEvent[ev_request] ), UsageEvent[EventType] = "request.voided", REMOVEFILTERS ( 'Date' ), TREATAS ( sent, UsageEvent[ev_request] ) )
+		formatString: #,0
+		displayFolder: E-signature
+
+	/// Requests sent in the range that were expired, whenever that happened.
+	measure 'Requests expired' =
+			VAR sent = CALCULATETABLE ( VALUES ( UsageEvent[ev_request] ), UsageEvent[EventType] = "request.sent" )
+			RETURN CALCULATE ( DISTINCTCOUNT ( UsageEvent[ev_request] ), UsageEvent[EventType] = "request.expired", REMOVEFILTERS ( 'Date' ), TREATAS ( sent, UsageEvent[ev_request] ) )
+		formatString: #,0
+		displayFolder: E-signature
+
+	/// Nearest rank, like percentile() in src/domain/reports.ts. Not PERCENTILE.INC, which interpolates.
+	measure 'Hours to sign (median)' =
+			VAR reqs = CALCULATETABLE ( VALUES ( UsageEvent[ev_request] ), UsageEvent[EventType] = "request.sent", NOT ISBLANK ( UsageEvent[ev_request] ) )
+			VAR timed =
+				ADDCOLUMNS (
+					reqs,
+					"@sent", CALCULATE ( MIN ( UsageEvent[ev_occurredon] ), UsageEvent[EventType] = "request.sent" ),
+					"@signed", CALCULATE ( MIN ( UsageEvent[ev_occurredon] ), UsageEvent[EventType] = "request.signed", REMOVEFILTERS ( 'Date' ) )
+				)
+			VAR hours = FILTER ( ADDCOLUMNS ( timed, "@h", ( [@signed] - [@sent] ) * 24 ), NOT ISBLANK ( [@signed] ) && [@h] >= 0 )
+			VAR n = COUNTROWS ( hours )
+			VAR k = MAX ( 1, ROUNDUP ( 0.5 * n, 0 ) )
+			RETURN IF ( n > 0, MAXX ( TOPN ( k, hours, [@h], ASC ), [@h] ) )
+		formatString: #,0.0
+		displayFolder: E-signature
+
+	/// Nearest rank, like percentile() in src/domain/reports.ts.
+	measure 'Hours to sign (90th percentile)' =
+			VAR reqs = CALCULATETABLE ( VALUES ( UsageEvent[ev_request] ), UsageEvent[EventType] = "request.sent", NOT ISBLANK ( UsageEvent[ev_request] ) )
+			VAR timed =
+				ADDCOLUMNS (
+					reqs,
+					"@sent", CALCULATE ( MIN ( UsageEvent[ev_occurredon] ), UsageEvent[EventType] = "request.sent" ),
+					"@signed", CALCULATE ( MIN ( UsageEvent[ev_occurredon] ), UsageEvent[EventType] = "request.signed", REMOVEFILTERS ( 'Date' ) )
+				)
+			VAR hours = FILTER ( ADDCOLUMNS ( timed, "@h", ( [@signed] - [@sent] ) * 24 ), NOT ISBLANK ( [@signed] ) && [@h] >= 0 )
+			VAR n = COUNTROWS ( hours )
+			VAR k = MAX ( 1, ROUNDUP ( 0.9 * n, 0 ) )
+			RETURN IF ( n > 0, MAXX ( TOPN ( k, hours, [@h], ASC ), [@h] ) )
+		formatString: #,0.0
+		displayFolder: E-signature
+
+	/// Per form: a press on a 3-form packet counts once on each form.
+	measure 'Blocked presses' = CALCULATE ( COUNTROWS ( UsageEvent ), UsageEvent[EventType] = "send.blocked" )
+		formatString: #,0
+		displayFolder: Quality
+
+	measure 'Send attempts' = CALCULATE ( COUNTROWS ( UsageEvent ), UsageEvent[EventType] IN { "send.blocked", "request.sent" } )
+		formatString: #,0
+		displayFolder: Quality
+
+	/// Per form: send.blocked ÷ (send.blocked + request.sent), as blockedSendRate() in src/domain/reports.ts.
+	measure 'Blocked-send rate' = DIVIDE ( [Blocked presses], [Send attempts] )
+		formatString: 0.0%
+		displayFolder: Quality
+
+	column ev_usageeventid
+		dataType: string
+		isHidden
+		summarizeBy: none
+		sourceColumn: ev_usageeventid
+
+	column ev_eventtype
+		dataType: int64
+		isHidden
+		summarizeBy: none
+		sourceColumn: ev_eventtype
+
+	column EventType
+		dataType: string
+		summarizeBy: none
+		sourceColumn: EventType
+
+	column ev_occurredon
+		dataType: dateTime
+		formatString: General Date
+		summarizeBy: none
+		sourceColumn: ev_occurredon
+
+	column OccurredDate
+		dataType: dateTime
+		formatString: Short Date
+		isHidden
+		summarizeBy: none
+		sourceColumn: OccurredDate
+
+	column ev_user
+		dataType: string
+		isHidden
+		summarizeBy: none
+		sourceColumn: ev_user
+
+	column ev_actingfor
+		dataType: string
+		isHidden
+		summarizeBy: none
+		sourceColumn: ev_actingfor
+
+	column ev_template
+		dataType: string
+		isHidden
+		summarizeBy: none
+		sourceColumn: ev_template
+
+	column ev_request
+		dataType: string
+		isHidden
+		summarizeBy: none
+		sourceColumn: ev_request
+
+	column ev_formnumber
+		dataType: string
+		summarizeBy: none
+		sourceColumn: ev_formnumber
+
+	column ev_revision
+		dataType: string
+		summarizeBy: none
+		sourceColumn: ev_revision
+
+	column ev_source
+		dataType: string
+		summarizeBy: none
+		sourceColumn: ev_source
+
+	column ev_issuer
+		dataType: string
+		summarizeBy: none
+		sourceColumn: ev_issuer
+
+	column ev_category
+		dataType: string
+		summarizeBy: none
+		sourceColumn: ev_category
+
+	column ev_region
+		dataType: string
+		summarizeBy: none
+		sourceColumn: ev_region
+
+	column ev_groups
+		dataType: string
+		summarizeBy: none
+		sourceColumn: ev_groups
+
+	column ev_batchid
+		dataType: string
+		isHidden
+		summarizeBy: none
+		sourceColumn: ev_batchid
+
+	column Issuer
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Issuer
+
+	column Form
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Form
+
+	partition UsageEvent = m
+		mode: directQuery
+		source =
+				let
+					Source = Dataverse,
+					Rows = Source{[Schema = "dbo", Item = "ev_usageevent"]}[Data],
+					Kept = Table.SelectColumns(Rows, {"ev_usageeventid", "ev_eventtype", "ev_occurredon", "ev_user", "ev_actingfor", "ev_template", "ev_request", "ev_formnumber", "ev_revision", "ev_source", "ev_issuer", "ev_category", "ev_region", "ev_groups", "ev_batchid"}),
+					Typed = Table.TransformColumnTypes(Kept, {{"ev_usageeventid", type text}, {"ev_user", type text}, {"ev_actingfor", type text}, {"ev_template", type text}, {"ev_request", type text}, {"ev_eventtype", Int64.Type}, {"ev_occurredon", type datetime}}),
+					WithDate = Table.AddColumn(Typed, "OccurredDate", each DateTime.From(DateTime.Date([ev_occurredon])), type datetime),
+					WithType = Table.AddColumn(WithDate, "EventType", each
+						if [ev_eventtype] = 100000000 then "form.added"
+						else if [ev_eventtype] = 100000001 then "pdf.fillable"
+						else if [ev_eventtype] = 100000002 then "pdf.flattened"
+						else if [ev_eventtype] = 100000003 then "pdf.print"
+						else if [ev_eventtype] = 100000004 then "draft.saved"
+						else if [ev_eventtype] = 100000005 then "send.blocked"
+						else if [ev_eventtype] = 100000006 then "request.sent"
+						else if [ev_eventtype] = 100000007 then "request.viewed"
+						else if [ev_eventtype] = 100000008 then "request.signed"
+						else if [ev_eventtype] = 100000009 then "request.declined"
+						else if [ev_eventtype] = 100000010 then "request.voided"
+						else if [ev_eventtype] = 100000011 then "request.expired"
+						else if [ev_eventtype] = 100000012 then "request.inperson"
+						else "unknown", type text),
+					WithIssuer = Table.AddColumn(WithType, "Issuer", each if [ev_issuer] <> null and [ev_issuer] <> "" then [ev_issuer] else if [ev_source] <> null then [ev_source] else "Unknown", type text),
+					WithForm = Table.AddColumn(WithIssuer, "Form", each [ev_formnumber] & " Rev " & (if [ev_revision] = null then "?" else [ev_revision]), type text)
+				in
+					WithForm
+

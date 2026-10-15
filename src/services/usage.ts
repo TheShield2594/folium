@@ -21,7 +21,7 @@ interface Pending {
   tries: number;
 }
 
-export interface UsageQueue extends UsageLog {
+export interface UsageQueue extends Omit<UsageLog, 'list'> {
   /** Events waiting to be written (for tests and diagnostics). */
   pending(): number;
   /** Stop the timer and the page listener. */

@@ -7,6 +7,7 @@ import { AdminAnnouncements } from './screens/admin/AdminAnnouncements';
 import { AdminFirm } from './screens/admin/AdminFirm';
 import { AdminSettings } from './screens/admin/AdminSettings';
 import { AdminPeople } from './screens/admin/AdminPeople';
+import { AdminReadiness } from './screens/admin/AdminReadiness';
 import { AdminTemplates } from './screens/admin/AdminTemplates';
 import { TemplateEditor } from './screens/admin/TemplateEditor';
 import { ClientScreen } from './screens/client/ClientScreen';
@@ -104,6 +105,7 @@ const router = createHashRouter([
       { path: '/admin/announcements', element: <AdminAnnouncements /> },
       { path: '/admin/firm', element: <AdminFirm /> },
       { path: '/admin/settings', element: <AdminSettings /> },
+      { path: '/admin/readiness', element: <AdminReadiness /> },
       { path: '*', element: <Navigate to="/" replace /> },
     ],
   },
