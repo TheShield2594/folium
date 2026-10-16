@@ -1,11 +1,25 @@
 import { fitsBox } from '../pdf/layout';
-import { toNumber } from './format';
+import { formatValue, toNumber, validateFormat } from './format';
 import { evaluateCondition, type ResolveScope } from './paths';
-import { copyScope, valuesForAccount, type FormFill } from './prefill';
+import { copyScope, valuesForAccount, type FieldState, type FormFill } from './prefill';
 import { availableIn, describeStates, normalizeState } from './states';
 import type { Attachment, Check, FormTemplate } from './types';
 
 export type CheckLevel = 'pass' | 'warn' | 'block';
+
+/**
+ * A one-click fix for a failing check. `values` is a patch for `packet.values`: a key set
+ * to `undefined` drops the advisor's override, so the field goes back to its CRM value.
+ */
+export interface CheckFix {
+  /** The button: "Use 03/12/1984", "Split 50 / 50". */
+  label: string;
+  values: Record<string, string | undefined>;
+  /** What the row says once the fix is applied: "Filled from Dynamics 365". */
+  resolvedLabel: string;
+  /** The field to show after fixing. */
+  fieldKey?: string;
+}
 
 export interface CheckResult {
   id: string;
@@ -17,6 +31,8 @@ export interface CheckResult {
   itemId?: string;
   /** Field key to jump to when the advisor clicks the check. */
   fieldKey?: string;
+  /** Set when Folium can make the check pass in one click. */
+  fix?: CheckFix;
 }
 
 export interface CheckContext {
@@ -65,6 +81,7 @@ function runTemplateCheck(check: Check, fill: FormFill, ctx: CheckContext, idx: 
         detail: ok ? `${name}: totals ${total}%.` : `${name}: now ${total}%${filled.length ? '' : ' (nothing entered yet)'}.`,
         ...at,
         fieldKey: keyOf(fill, check.fields[0]),
+        fix: ok ? undefined : splitFix(fill, filled, check.value),
       };
     }
     case 'requiredIf': {
@@ -150,6 +167,7 @@ export function runChecks(fills: FormFill[], ctx: CheckContext): CheckResult[] {
         templateId: fill.template.id,
         itemId: fill.itemId,
         fieldKey: missing[0].key,
+        fix: crmFix(missing, 'Filled from Dynamics 365'),
       });
     }
   }
@@ -163,7 +181,9 @@ export function runChecks(fills: FormFill[], ctx: CheckContext): CheckResult[] {
   for (const f of badFormat) {
     if (seen.has(f.key)) continue;
     seen.add(f.key);
-    results.push({ id: `format:${f.key}`, level: 'block', title: `${f.label}: ${f.formatError}`, templateId: f.templateId, itemId: f.itemId, fieldKey: f.key });
+    // A value the advisor typed over a good CRM value: offer the CRM value back.
+    const back = f.origin === 'edited' && !validateFormat(f.crmBaseline, f.mapping.format, f.mapping.limits) ? crmFix([f], 'Back to the Dynamics 365 value') : undefined;
+    results.push({ id: `format:${f.key}`, level: 'block', title: `${f.label}: ${f.formatError}`, templateId: f.templateId, itemId: f.itemId, fieldKey: f.key, fix: back });
   }
 
   // 4. Template-specific rules (beneficiary totals, etc.).
@@ -243,6 +263,67 @@ export function runChecks(fills: FormFill[], ctx: CheckContext): CheckResult[] {
   }
 
   return results;
+}
+
+/**
+ * Put the CRM value back on fields the advisor cleared or typed over: dropping the
+ * override is enough, since prefill falls back to Dynamics 365. Only fields that have a
+ * CRM value qualify; one value is named on the button, several are counted.
+ */
+function crmFix(fields: FieldState[], resolvedLabel: string): CheckFix | undefined {
+  const keys = [...new Map(fields.filter((f) => f.origin !== 'signer' && !f.locked && f.crmBaseline?.trim()).map((f) => [f.key, f])).values()];
+  if (!keys.length) return undefined;
+  const one = keys.length === 1 ? keys[0] : undefined;
+  return {
+    label: one ? `Use ${formatValue(one.crmBaseline, one.mapping.format, one.mapping.limits)}` : `Use ${keys.length} values from Dynamics 365`,
+    values: Object.fromEntries(keys.map((f) => [f.key, undefined])),
+    resolvedLabel,
+    fieldKey: keys[0].key,
+  };
+}
+
+/**
+ * Even shares across the rows that have one, so they total `target`. Whole numbers
+ * when they divide evenly; otherwise the first rows take the remainder (34 / 33 / 33).
+ */
+export function evenShares(rows: number, target: number): number[] {
+  if (rows < 1) return [];
+  const base = Math.floor(target / rows);
+  const extra = target - base * rows;
+  return Array.from({ length: rows }, (_, i) => base + (i < extra ? 1 : 0));
+}
+
+function splitFix(fill: FormFill, filledPdfFields: string[], target: number): CheckFix | undefined {
+  const rows = filledPdfFields
+    .map((pdf) => fill.fields.find((f) => f.mapping.pdfField === pdf))
+    .filter((f): f is FieldState => !!f && !f.locked);
+  const keys = [...new Set(rows.map((f) => f.key))];
+  if (!keys.length) return undefined;
+  const parts = evenShares(keys.length, target);
+  const same = parts.every((p) => p === parts[0]);
+  return {
+    label: keys.length === 1 ? `Set to ${target}%` : keys.length <= 4 ? `Split ${parts.join(' / ')}` : `Split evenly ${keys.length} ways`,
+    values: Object.fromEntries(keys.map((k, i) => [k, String(parts[i])])),
+    resolvedLabel: keys.length === 1 ? `Updated to ${target}%` : same ? `Updated to ${parts[0]}% each` : `Updated to ${parts.join(' / ')}%`,
+    fieldKey: keys[0],
+  };
+}
+
+/**
+ * How far a packet is from good order, 0–100. Checks that block count fully and
+ * warnings count half, so a packet whose only open items are warnings sits just under
+ * 100 but is still ready for signers (`blocking === 0`).
+ */
+export function goodOrder(results: Pick<CheckResult, 'level'>[]): { percent: number; blocking: number; warnings: number; ready: boolean } {
+  const blocking = results.filter((r) => r.level === 'block').length;
+  const warnings = results.filter((r) => r.level === 'warn').length;
+  const passed = results.length - blocking - warnings;
+  const total = passed + blocking + warnings * 0.5;
+  const earned = passed;
+  const percent = total ? Math.round((100 * earned) / total) : 100;
+  // Never round up to 100 while anything is open, or down to 0 when something passed.
+  const shown = blocking + warnings && percent === 100 ? 99 : passed && percent === 0 ? 1 : percent;
+  return { percent: shown, blocking, warnings, ready: blocking === 0 };
 }
 
 /** A form's name as the packet shows it, with "(copy 2)" on an added copy. */

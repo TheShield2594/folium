@@ -126,7 +126,7 @@ export function PdfView({ template, fields = [], placements = [], width = 640, a
                     if (!onFieldClick || f.locked || (canActivate && !canActivate(f))) {
                       // Nothing to do here: read as text in the page, not as a button that does nothing.
                       return (
-                        <span key={key} className={cls} style={style} title={title}>
+                        <span key={key} data-key={f.key} className={cls} style={style} title={title}>
                           <span className="sr-only">{spoken}</span>
                           <span aria-hidden="true">{text}</span>
                         </span>
@@ -136,6 +136,7 @@ export function PdfView({ template, fields = [], placements = [], width = 640, a
                       <button
                         key={key}
                         type="button"
+                        data-key={f.key}
                         className={cls}
                         style={style}
                         onClick={(e) => {

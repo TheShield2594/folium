@@ -9,6 +9,7 @@ import { defaultFirm, firmGroup } from '../domain/firms';
 import type { SigningSettings } from '../domain/signing';
 import { carryVariantValues, copyScope, migrateAccountValues, seedCopyValues, type PersonPick } from '../domain/prefill';
 import { currentTemplates, latestLive } from '../domain/revisions';
+import type { CheckResult } from '../domain/checks';
 import { normalizeState, pickVariant } from '../domain/states';
 import { statusEvents, usageEvents, type UsageEventType } from '../domain/usage';
 import type {
@@ -68,6 +69,10 @@ export interface Packet {
   send?: SendState;
   /** Revision changes from "Update to current forms", recorded in the audit trail at the next save. */
   formsUpdated?: string;
+  /** Checks fixed with one click, by check id, with what the row says now ("Filled from Dynamics 365"). */
+  resolved?: Record<string, string>;
+  /** Why Start a packet added each form, by template id, so Review can explain it. */
+  reasons?: Record<string, string>;
 }
 
 /**
@@ -131,6 +136,10 @@ interface AppState {
   favorites: string[];
   recent: { templateId: string; at: string }[];
   theme: Theme;
+  /** Show Start a packet on Today (Settings). Kept on this device. */
+  showAssist: boolean;
+  /** What the advisor typed into Start a packet, kept while they move around. */
+  startPrompt: string;
   sidebarOpen: boolean;
   paletteOpen: boolean;
   /** Set while asking what to do with unsaved work; the Shell renders the question. */
@@ -177,10 +186,17 @@ interface AppState {
   loadRequest(req: SignatureRequest): void;
   /** Move out-of-date forms in the open packet to the current revisions ("Update" in Review). */
   upgradePacket(): UpgradeReport;
+  /**
+   * Apply a check's one-click fix to the packet's values and remember it as resolved.
+   * Returns an undo that puts the values (and the check) back.
+   */
+  applyFix(check: CheckResult): (() => void) | undefined;
 
   toggleFavorite(templateId: string): void;
   markUsed(templateIds: string[]): void;
   setTheme(t: Theme): void;
+  setShowAssist(on: boolean): void;
+  setStartPrompt(text: string): void;
   setSidebar(open: boolean): void;
   setPalette(open: boolean): void;
 }
@@ -271,6 +287,8 @@ export const useApp = create<AppState>((set, get) => ({
   favorites: readLocal('folium.favorites', ['tpl-ev1120-0326', 'tpl-ev1004-0125']),
   recent: readLocal('folium.recent', []),
   theme: readLocal<Theme>('folium.theme', 'system'),
+  showAssist: readLocal('folium.showAssist', true),
+  startPrompt: '',
   sidebarOpen: false,
   paletteOpen: false,
 
@@ -582,6 +600,29 @@ export const useApp = create<AppState>((set, get) => ({
     return report;
   },
 
+  applyFix(check) {
+    const fix = check.fix;
+    if (!fix) return undefined;
+    const before = get().packet;
+    const previous = Object.fromEntries(Object.keys(fix.values).map((k) => [k, Object.prototype.hasOwnProperty.call(before.values, k) ? before.values[k] : undefined]));
+    const values = { ...before.values };
+    for (const [k, v] of Object.entries(fix.values)) {
+      if (v === undefined) delete values[k];
+      else values[k] = v;
+    }
+    set({ packet: { ...before, dirty: true, values, resolved: { ...before.resolved, [check.id]: fix.resolvedLabel } } });
+    return () => {
+      const now = get().packet;
+      const back = { ...now.values };
+      for (const [k, v] of Object.entries(previous)) {
+        if (v === undefined) delete back[k];
+        else back[k] = v;
+      }
+      const { [check.id]: _undone, ...resolved } = now.resolved ?? {};
+      set({ packet: { ...now, dirty: true, values: back, resolved } });
+    };
+  },
+
   toggleFavorite(id) {
     const f = get().favorites.includes(id) ? get().favorites.filter((x) => x !== id) : [...get().favorites, id];
     writeLocal('folium.favorites', f);
@@ -597,6 +638,13 @@ export const useApp = create<AppState>((set, get) => ({
     writeLocal('folium.theme', t);
     applyTheme(t);
     set({ theme: t });
+  },
+  setShowAssist(on) {
+    writeLocal('folium.showAssist', on);
+    set({ showAssist: on });
+  },
+  setStartPrompt(text) {
+    set({ startPrompt: text });
   },
   setSidebar(open) {
     set({ sidebarOpen: open });

@@ -19,7 +19,7 @@ import { Icon, type IconName } from './Icon';
 
 // ------------------------------------------------------------------ Buttons
 
-type Variant = 'filled' | 'tinted' | 'gray' | 'plain' | 'bordered' | 'danger';
+type Variant = 'filled' | 'tinted' | 'gray' | 'plain' | 'bordered' | 'danger' | 'fix';
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;

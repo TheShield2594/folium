@@ -646,6 +646,12 @@ export function SendScreen() {
                   <strong>What happens next.</strong> {provider.label} emails {ordered.length > 1 ? 'each signer' : client.contact.firstname}. Status shows on {client.contact.firstname}’s Forms tab. When it’s signed, download the completed PDF and upload it to OnBase as you do today, then tick it off in Folium.
                 </span>
               </section>
+              {/* The disclosures of the entities whose forms go out, in Sabon Italic: the one place the brand uses it. */}
+              {[...new Set(view.fills.map((f) => f.firm?.disclosure?.trim()).filter((d): d is string => !!d))].map((d) => (
+                <p key={d} className="t-disclosure" style={{ padding: '0 4px' }}>
+                  {d}
+                </p>
+              ))}
             </aside>
           </div>
         </div>
