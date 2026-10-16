@@ -948,8 +948,8 @@ a.list-row:hover {
   white-space: pre-line;
 }
 .announcement-text a {
-  /* The banner's own text color: the accent green is under 4.5:1 on the tinted banner. */
-  color: inherit;
+  /* The green for text on tints: the accent green is under 4.5:1 on the tinted banner. */
+  color: var(--accent-text);
   text-decoration: underline;
 }
 .banner.critical .announcement-text {
@@ -1269,4 +1269,23 @@ a.list-row:hover {
     padding-top: 6px;
     padding-bottom: 6px;
   }
+}
+
+/* Contrast without changing the palette (WCAG 1.4.3). Secondary text on a gray fill
+   uses the next text step (brand slate in light). Tinted badges and buttons sit their
+   tint on the surface, so they read the same on the gray page or a banner as on a card. */
+.badge .c3,
+.kbd,
+.list-row[aria-selected='true'] .c3,
+.list-row.selected .c3 {
+  color: var(--label-2);
+}
+.badge-danger {
+  background: linear-gradient(var(--danger-tint), var(--danger-tint)), var(--surface);
+}
+.banner .btn-tinted {
+  background: linear-gradient(var(--accent-tint), var(--accent-tint)), var(--surface);
+}
+.banner .btn-tinted:hover:not(:disabled) {
+  background: linear-gradient(var(--accent-tint-2), var(--accent-tint-2)), var(--surface);
 }

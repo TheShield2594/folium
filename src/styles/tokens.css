@@ -86,7 +86,7 @@
 
   --label: #1a2326;
   --label-2: #4b5457; /* slate, 7.4:1 on warm gray */
-  --label-3: #5f686b; /* 4.7:1 on fill-2 over the warm gray */
+  --label-3: #646d70;
   --label-4: #8d9496;
   --separator: rgba(26, 35, 38, 0.12);
   --separator-strong: rgba(26, 35, 38, 0.2);
@@ -97,11 +97,11 @@
   --accent: var(--ev-grass);
   --accent-hover: #2d7446;
   --accent-pressed: var(--ev-forest);
-  --accent-text: #296a41;
+  --accent-text: #2b6e42;
   --accent-tint: rgba(53, 132, 80, 0.11);
   --accent-tint-2: rgba(53, 132, 80, 0.18);
   --on-accent: #ffffff;
-  --focus: var(--ev-royal); /* solid: 4.5:1 or more on the grounds (WCAG 1.4.11) */
+  --focus: rgba(0, 115, 159, 0.55);
 
   --info: var(--ev-royal);
   --info-tint: rgba(0, 115, 159, 0.1);
@@ -109,7 +109,7 @@
   --warn-fill: #cc4f00;
   --warn-tint: rgba(243, 174, 0, 0.16);
   --warn-border: rgba(204, 79, 0, 0.35);
-  --danger: #bb242c;
+  --danger: #c4262e;
   --danger-tint: rgba(196, 38, 46, 0.1);
   --success: var(--ev-grass);
   --success-tint: rgba(53, 132, 80, 0.12);
@@ -144,7 +144,7 @@
     --material-thick: rgba(28, 36, 39, 0.9);
     --label: #eef2f1;
     --label-2: #b4bdbd;
-    --label-3: #9aa5a5;
+    --label-3: #8f9a9a;
     --label-4: #6a7475;
     --separator: rgba(233, 243, 243, 0.12);
     --separator-strong: rgba(233, 243, 243, 0.2);
@@ -158,7 +158,7 @@
     --accent-tint: rgba(143, 194, 90, 0.14);
     --accent-tint-2: rgba(143, 194, 90, 0.22);
     --on-accent: #0b1a0f;
-    --focus: #4dc5e2;
+    --focus: rgba(77, 197, 226, 0.6);
     --info: #4dc5e2;
     --info-tint: rgba(77, 197, 226, 0.13);
     --warn: #f3ae00;
@@ -187,7 +187,7 @@
   --material-thick: rgba(28, 36, 39, 0.9);
   --label: #eef2f1;
   --label-2: #b4bdbd;
-  --label-3: #9aa5a5;
+  --label-3: #8f9a9a;
   --label-4: #6a7475;
   --separator: rgba(233, 243, 243, 0.12);
   --separator-strong: rgba(233, 243, 243, 0.2);
@@ -201,7 +201,7 @@
   --accent-tint: rgba(143, 194, 90, 0.14);
   --accent-tint-2: rgba(143, 194, 90, 0.22);
   --on-accent: #0b1a0f;
-  --focus: #4dc5e2;
+  --focus: rgba(77, 197, 226, 0.6);
   --info: #4dc5e2;
   --info-tint: rgba(77, 197, 226, 0.13);
   --warn: #f3ae00;

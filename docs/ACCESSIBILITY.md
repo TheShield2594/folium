@@ -22,7 +22,7 @@ npm run test:a11y          # serves dist/ with vite preview on :4173
 
 ## What the audit found
 
-Blocking means someone using a keyboard or a screen reader couldn't finish the task, or the build would fail WCAG AA outright. All blocking findings are fixed.
+Blocking means someone using a keyboard or a screen reader couldn't finish the task, or the build would fail WCAG AA outright. All blocking findings are fixed. The Everence palette (brand guidelines, p. 13) is unchanged: no fix alters a color token.
 
 | # | Where | Finding | WCAG | Severity | Status |
 |---|---|---|---|---|---|
@@ -37,8 +37,8 @@ Blocking means someone using a keyboard or a screen reader couldn't finish the t
 | 9 | Administration › Templates | Rows opened only on mouse click; nothing to Tab to. The form name is now a link. | 2.1.1 | Blocking | Fixed |
 | 10 | Template editor | Field-mapping rows and signature-tab rows were selected only by mouse click (and the tab rows used `aria-selected` on a plain `div`). Focusing anything in a row now selects it; tab rows have a toggle button. | 2.1.1, 4.1.2 | Serious | Fixed |
 | 11 | Everywhere | No skip link and no `main` landmark; after moving between screens focus stayed in the sidebar; every tab was titled “Folium”. Now a “Skip to content” link, `<main>`, focus moves to the new screen, and each screen sets the title (“Prefill & review – Folium”). | 2.4.1, 2.4.2, 2.4.3 | Serious | Fixed |
-| 12 | Everywhere | The focus ring was translucent (about 2.3:1 on white). Now solid royal (5.3:1) in light, cyan in dark; focused inputs get a 2 px border. | 1.4.11, 2.4.7 | Serious | Fixed |
-| 13 | Everywhere | Text contrast under 4.5:1: secondary text on gray fills (light 4.39, dark 4.19), links in announcements (3.64), danger badges (4.43), tinted buttons on tinted cards (4.48), the command palette's selected detail text (3.32). Colors adjusted. | 1.4.3 | Serious | Fixed |
+| 12 | Everywhere | The focus ring is the brand royal at 55% opacity: about 2.3:1 on white, under the 3:1 for focus indicators. Fixing it means drawing the ring in solid royal (`#00739f`, 5.3:1) and solid robin (`#4dc5e2`) in dark: both are in the palette, but the ring would look stronger. Focused inputs already get a 2 px border in the accent green. | 1.4.11, 2.4.7 | Serious | **Open: brand decision** |
+| 13 | Everywhere | Text contrast under 4.5:1: secondary gray text on gray fills (role tags, key hints, selected rows), links in announcements (grass on the tinted banner, 3.64), danger badges on the gray page (4.43), a tinted button on a warning banner (4.48), the command palette's selected detail text (3.32). Fixed **without changing any color in the palette**: those spots use the next existing text step (brand slate `#4B5457` in light), announcement links use the app's existing green for text on tints, and tinted badges and buttons lay their tint over the surface so they look as they do on a card. | 1.4.3 | Serious | Fixed |
 | 14 | Everywhere | Links in running text were distinguishable only by color. Now underlined. | 1.4.1 | Serious | Fixed |
 | 15 | 400% zoom | The toolbar ran off the right edge, hiding “Signers” and “Send”. It now wraps. Wide admin tables scroll inside a named, focusable region. | 1.4.10, 2.1.1 | Blocking | Fixed |
 | 16 | Command palette | The results list had no name, the empty message sat inside the listbox, and the input wasn't a combobox. | 4.1.2 | Moderate | Fixed |
@@ -102,12 +102,12 @@ Terms: **Supports** — meets the criterion without known defects. **Partially s
 | 1.4.4 Resize text | Supports | Tested at 200%. |
 | 1.4.5 Images of text | Supports | The PDF page is an image of a document, which is exempt; its fields are real text in the overlay. |
 | 1.4.10 Reflow | Supports | Tested at 320 px. Data tables and the PDF scroll in their own regions (two-dimensional content is exempt). |
-| 1.4.11 Non-text contrast | Supports | Focus ring, input borders and controls at 3:1 or more. Highlight fills: see Known limitations. |
+| 1.4.11 Non-text contrast | Partially supports | The focus ring is translucent royal, about 2.3:1 (finding 12, open). Input borders and controls meet 3:1. Highlight fills: see Known limitations. |
 | 1.4.12 Text spacing | Supports | No fixed-height text containers clip with increased spacing, except the field values drawn on the PDF, which mirror the printed form. |
 | 1.4.13 Content on hover or focus | Supports | Tooltips are the browser's own (`title`); popovers open on click and close with Escape. |
 | 2.4.5 Multiple ways | Supports | Sidebar, command palette (⌘K), search. |
 | 2.4.6 Headings and labels | Supports | |
-| 2.4.7 Focus visible | Supports | |
+| 2.4.7 Focus visible | Supports | Every focusable element shows the ring; its contrast is under 1.4.11 above. |
 | 3.1.2 Language of parts | Supports | |
 | 3.2.3 Consistent navigation | Supports | |
 | 3.2.4 Consistent identification | Supports | |

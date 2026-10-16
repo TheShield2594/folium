@@ -27,6 +27,15 @@ export async function go(page: Page, path: string) {
 
 /** Run axe against the page (or part of it) and fail with a readable list of what's wrong. */
 export async function expectNoViolations(page: Page, include?: string) {
+  // Let fades and slides finish, so axe measures colors at rest (spinners loop forever; skip them).
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((a) => a.effect?.getTiming().iterations !== Infinity)
+        .map((a) => a.finished.catch(() => undefined)),
+    ),
+  );
   let builder = new AxeBuilder({ page }).withTags(WCAG_AA);
   if (include) builder = builder.include(include);
   const { violations } = await builder.analyze();
