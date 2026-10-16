@@ -9,14 +9,22 @@
  *   forest #225433 ● grass #358450 ● navy #003346 ● royal #00739F ● lemon #F3AE00
  *   slate #4B5457  mist #E9F3F3 ●  sage #EAEDD3 ●  warm gray #FAFAF7 ●
  *
- * Type: Frutiger (text) and Sabon (display). Verdana and Times are the brand's
- * approved fallbacks. `font-size-adjust` keeps Verdana's large x-height from
- * blowing up the layout on machines without Frutiger.
+ * Type: Frutiger for everything, headlines included (Bold). Sabon Italic is for
+ * disclosures only (guidelines p.15–16: "Sabon as headline" is incorrect use).
+ * Verdana and Times are the brand's approved fallbacks. `font-size-adjust` keeps
+ * Verdana's large x-height from blowing up the layout on machines without Frutiger.
+ *
+ * Shape: one rounded corner per shape, always top-left (guidelines p.18). The radius
+ * is the 24px margin on panels and half of it on cards and controls. Avatars, status
+ * dots, count badges and progress-bar ends stay fully round: they're marks, not shapes.
+ *
+ * Gradients: only the four approved pairs, 50% midpoint, never recombined (p.14).
  */
 
 :root {
   --font-text: 'Frutiger Next Pro', 'Frutiger LT Pro', 'Frutiger LT Std', 'Frutiger', Verdana, system-ui, sans-serif;
-  --font-display: 'Sabon Next LT Pro', 'Sabon LT Pro', 'Sabon LT Std', 'Sabon', 'Times New Roman', Times, serif;
+  /* Disclosures only. Never headings. */
+  --font-disclosure: 'Sabon Next LT Pro', 'Sabon LT Pro', 'Sabon LT Std', 'Sabon', 'Times New Roman', Times, serif;
   --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Consolas, monospace;
 
   /* Everence palette */
@@ -36,16 +44,17 @@
   --ev-warmgray: #fafaf7;
 
   /* Type scale (macOS-leaning, a notch larger for a browser app) */
-  --t-large: 600 30px/1.15 var(--font-display);
-  --t-title1: 600 24px/1.2 var(--font-display);
-  --t-title2: 600 19px/1.25 var(--font-text);
-  --t-title3: 600 16px/1.3 var(--font-text);
-  --t-headline: 600 14px/1.35 var(--font-text);
+  --t-large: 700 30px/1.15 var(--font-text);
+  --t-title1: 700 24px/1.2 var(--font-text);
+  --t-title2: 700 19px/1.25 var(--font-text);
+  --t-title3: 700 16px/1.3 var(--font-text);
+  --t-headline: 700 14px/1.35 var(--font-text);
   --t-body: 400 14px/1.45 var(--font-text);
   --t-callout: 400 13px/1.4 var(--font-text);
   --t-subhead: 400 12.5px/1.35 var(--font-text);
   --t-footnote: 400 12px/1.35 var(--font-text);
   --t-caption: 500 11px/1.3 var(--font-text);
+  --t-disclosure: italic 400 13px/1.5 var(--font-disclosure);
 
   --r-xs: 6px;
   --r-sm: 8px;
@@ -53,6 +62,20 @@
   --r-lg: 14px;
   --r-xl: 20px;
   --r-pill: 999px;
+  /* One rounded corner (top-left), sized from the 24px margin. */
+  --r-panel: 24px 2px 2px 2px; /* = margin: hero panels, inspector cards, request list */
+  --r-card: 12px 2px 2px 2px; /* = ½ margin: cards, list groups, tiles, inputs, buttons */
+  --r-ctl: 10px 2px 2px 2px; /* small buttons and segmented items inside a 3px track */
+  --r-chip: 8px 2px 2px 2px; /* chips, client pill, menu items */
+  /* A gradient block flush against a panel's right edge rounds its bottom-left instead. */
+  --r-panel-flush: 2px 2px 2px 24px;
+
+  /* Approved gradient pairs (p.14). Green: good-order meter and Start a packet; blue:
+     sign-in and empty states; orange: announcements; gray: admin surfaces. */
+  --grad-green: linear-gradient(90deg, #b5bf00 0%, #719500 100%);
+  --grad-blue: linear-gradient(90deg, #4dc5e2 0%, #0080bd 100%);
+  --grad-orange: linear-gradient(90deg, #f3ae00 0%, #cc4f00 100%);
+  --grad-gray: linear-gradient(90deg, #969696 0%, #5e5456 100%);
 
   --sp-1: 4px;
   --sp-2: 8px;
@@ -64,9 +87,9 @@
   --sp-10: 40px;
 
   --hit: 44px; /* HIG minimum touch target */
-  --sidebar-w: 260px;
+  --sidebar-w: 248px;
   --inspector-w: 340px;
-  --toolbar-h: 52px;
+  --toolbar-h: 60px;
 
   --ease: cubic-bezier(0.32, 0.72, 0, 1); /* Apple's spring-like ease-out */
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
@@ -75,21 +98,36 @@
   --dur-3: 380ms;
 
   /* ---- Light ---- */
-  --bg: #f4f4ef; /* window background: warm gray, a step down from Warm Gray 1 */
+  --bg: var(--ev-warmgray); /* window background: Warm Gray 1 */
   --bg-grouped: var(--ev-warmgray);
   --surface: #ffffff;
   --surface-2: #f7f7f3;
   --surface-sunken: #ecece6;
-  --sidebar: rgba(236, 237, 228, 0.78);
-  --material: rgba(250, 250, 247, 0.72);
+  --sidebar: var(--ev-sage); /* solid sage reads more on-brand than a translucent material */
+  --sidebar-active: #ffffff;
+  --sidebar-hover: rgba(255, 255, 255, 0.7);
+  --assist: var(--ev-mist); /* assist and highlight panels, the new-row highlight */
+  --material: rgba(250, 250, 247, 0.82);
   --material-thick: rgba(255, 255, 255, 0.86);
 
-  --label: #1a2326;
+  --label: var(--ev-navy); /* 12.6:1 on white */
   --label-2: #4b5457; /* slate, 7.4:1 on warm gray */
-  --label-3: #646d70;
+  --label-3: #586164;
   --label-4: #8d9496;
-  --separator: rgba(26, 35, 38, 0.12);
-  --separator-strong: rgba(26, 35, 38, 0.2);
+  --separator: rgba(0, 51, 70, 0.08); /* within lists */
+  --separator-strong: rgba(0, 51, 70, 0.14); /* section rules */
+  --border: rgba(0, 51, 70, 0.1); /* surfaces */
+  --border-strong: rgba(0, 51, 70, 0.22);
+  --line: rgba(0, 51, 70, 0.18); /* outlined controls: chips, the ⌘K hint, bordered buttons */
+  --track: rgba(0, 51, 70, 0.07); /* segmented tracks, meter grooves, disabled Continue */
+  --badge: var(--ev-navy); /* count badges */
+  --on-badge: #ffffff;
+  --dot-attention: var(--ev-pumpkin); /* status dots only, never text */
+  --dot-passed: var(--ev-grass);
+  --dot-info: var(--ev-royal);
+  --pipe-done: var(--ev-grass);
+  --pipe-current: var(--ev-royal);
+  --pipe-todo: rgba(0, 51, 70, 0.1);
   --fill: rgba(75, 84, 87, 0.08);
   --fill-2: rgba(75, 84, 87, 0.12);
   --fill-3: rgba(75, 84, 87, 0.18);
@@ -115,13 +153,13 @@
   --success-tint: rgba(53, 132, 80, 0.12);
 
   /* Field highlight states on the PDF preview */
-  --hl-crm: rgba(53, 132, 80, 0.14);
+  --hl-crm: rgba(53, 132, 80, 0.12);
   --hl-crm-line: var(--ev-grass);
-  --hl-need: rgba(243, 174, 0, 0.22);
+  --hl-need: rgba(243, 174, 0, 0.24);
   --hl-need-line: #cc4f00;
-  --hl-edit: rgba(0, 115, 159, 0.12);
+  --hl-edit: rgba(0, 115, 159, 0.09);
   --hl-edit-line: var(--ev-royal);
-  --hl-sign: rgba(0, 128, 189, 0.1);
+  --hl-sign: rgba(0, 128, 189, 0.05);
   --hl-sign-line: var(--ev-blue);
 
   --shadow-1: 0 1px 2px rgba(0, 30, 40, 0.06), 0 0 0 0.5px rgba(0, 30, 40, 0.06);
@@ -139,8 +177,11 @@
     --surface: #182023;
     --surface-2: #1e272a;
     --surface-sunken: #0a0f10;
-    --sidebar: rgba(22, 30, 32, 0.8);
-    --material: rgba(20, 27, 29, 0.72);
+    --sidebar: #141c1e;
+    --sidebar-active: #222c2f;
+    --sidebar-hover: rgba(233, 243, 243, 0.06);
+    --assist: #15282b;
+    --material: rgba(20, 27, 29, 0.82);
     --material-thick: rgba(28, 36, 39, 0.9);
     --label: #eef2f1;
     --label-2: #b4bdbd;
@@ -148,6 +189,20 @@
     --label-4: #6a7475;
     --separator: rgba(233, 243, 243, 0.12);
     --separator-strong: rgba(233, 243, 243, 0.2);
+    --border: rgba(233, 243, 243, 0.1);
+    --border-strong: rgba(233, 243, 243, 0.24);
+  --line: rgba(233, 243, 243, 0.22);
+  --track: rgba(233, 243, 243, 0.09);
+    --line: rgba(233, 243, 243, 0.22);
+    --track: rgba(233, 243, 243, 0.09);
+    --badge: #e9f3f3;
+    --on-badge: #0e1415;
+    --dot-attention: #f39a4a;
+    --dot-passed: #8fc25a;
+    --dot-info: #4dc5e2;
+    --pipe-done: #8fc25a;
+    --pipe-current: #4dc5e2;
+    --pipe-todo: rgba(233, 243, 243, 0.12);
     --fill: rgba(233, 243, 243, 0.07);
     --fill-2: rgba(233, 243, 243, 0.11);
     --fill-3: rgba(233, 243, 243, 0.16);
@@ -182,8 +237,11 @@
   --surface: #182023;
   --surface-2: #1e272a;
   --surface-sunken: #0a0f10;
-  --sidebar: rgba(22, 30, 32, 0.8);
-  --material: rgba(20, 27, 29, 0.72);
+  --sidebar: #141c1e;
+  --sidebar-active: #222c2f;
+  --sidebar-hover: rgba(233, 243, 243, 0.06);
+  --assist: #15282b;
+  --material: rgba(20, 27, 29, 0.82);
   --material-thick: rgba(28, 36, 39, 0.9);
   --label: #eef2f1;
   --label-2: #b4bdbd;
@@ -191,6 +249,18 @@
   --label-4: #6a7475;
   --separator: rgba(233, 243, 243, 0.12);
   --separator-strong: rgba(233, 243, 243, 0.2);
+  --border: rgba(233, 243, 243, 0.1);
+  --border-strong: rgba(233, 243, 243, 0.24);
+  --line: rgba(233, 243, 243, 0.22);
+  --track: rgba(233, 243, 243, 0.09);
+  --badge: #e9f3f3;
+  --on-badge: #0e1415;
+  --dot-attention: #f39a4a;
+  --dot-passed: #8fc25a;
+  --dot-info: #4dc5e2;
+  --pipe-done: #8fc25a;
+  --pipe-current: #4dc5e2;
+  --pipe-todo: rgba(233, 243, 243, 0.12);
   --fill: rgba(233, 243, 243, 0.07);
   --fill-2: rgba(233, 243, 243, 0.11);
   --fill-3: rgba(233, 243, 243, 0.16);

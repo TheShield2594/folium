@@ -6,7 +6,7 @@ import { canDownload, sharingAllowed } from '../../domain/policy';
 import { draftsAllowed, retentionDays } from '../../domain/requests';
 import { blockKey, choiceOptions, copyScope, fillBlockFromPerson, inputsNeeded, personBlocks, relatedPeople, snapshotDiff } from '../../domain/prefill';
 import type { SignatureRequest } from '../../domain/types';
-import { formLabel, outputGate, summarize, type CheckResult } from '../../domain/checks';
+import { formLabel, goodOrder, outputGate, summarize, type CheckResult } from '../../domain/checks';
 import { sourceKind } from '../../domain/paths';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
@@ -43,6 +43,8 @@ export function ReviewScreen() {
   const setPacketAccount = useApp((s) => s.setPacketAccount);
   const removeFromPacket = useApp((s) => s.removeFromPacket);
   const upgradePacket = useApp((s) => s.upgradePacket);
+  const applyFix = useApp((s) => s.applyFix);
+  const showAssist = useApp((s) => s.showAssist);
   const templates = useApp((s) => s.templates);
   const owner = useActingFor();
   const services = useServices();
@@ -109,6 +111,15 @@ export function ReviewScreen() {
   const optionalNeeds = needs.filter((n) => !n.required);
   const [showOptional, setShowOptional] = useState(false);
   const sum = view ? summarize(view.checks) : undefined;
+  const order = view ? goodOrder(view.checks) : undefined;
+  // Checks lead while anything blocks; otherwise the field inputs do.
+  const [chosenTab, setTab] = useState<'checks' | 'fields'>();
+  // Checks lead while anything blocks, decided once the packet's checks are known (the
+  // client may still be loading on the first render). After that the advisor's choice stands.
+  useEffect(() => {
+    if (!chosenTab && sum) setTab(sum.blocking ? 'checks' : 'fields');
+  }, [chosenTab, sum]);
+  const tab = chosenTab ?? 'fields';
   const changedSince = useMemo(() => (view ? snapshotDiff(packet.snapshot, view.fills) : []), [view, packet.snapshot]);
   const replaced = packet.items.filter((i) => i.accountReplaced);
 
@@ -131,6 +142,7 @@ export function ReviewScreen() {
     if (!key) return;
     setSelected(key);
     setEditorKey(key);
+    setTab('fields');
     if (optionalNeeds.some((n) => n.key === key)) setShowOptional(true);
     requestAnimationFrame(() => document.getElementById(`in-${cssKey(key)}`)?.querySelector<HTMLElement>('input, select, textarea')?.focus());
   }
@@ -141,6 +153,20 @@ export function ReviewScreen() {
       .filter((c) => c.level !== 'pass' && c.fieldKey === key && (!itemId || !c.itemId || c.itemId === itemId))
       .map((c) => checkId(c.id));
     return ids.length ? ids.join(' ') : undefined;
+  }
+
+  /** Apply a check's fix, show the form and field it changed, and offer Undo. */
+  function fix(c: CheckResult) {
+    if (!view || !c.fix) return;
+    const key = c.fix.fieldKey ?? c.fieldKey;
+    const undo = applyFix(c);
+    const idx = view.fills.findIndex((f) => f.itemId === c.itemId);
+    if (idx >= 0) setActive(idx);
+    if (key) {
+      setSelected(key);
+      setTimeout(() => document.querySelector(`.review-canvas .hl[data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 60);
+    }
+    toast.ok(c.fix.resolvedLabel, undo ? { label: 'Undo', onClick: undo } : undefined);
   }
 
   function nextMissing() {
@@ -289,7 +315,7 @@ export function ReviewScreen() {
   return (
     <>
       <Toolbar title="Prefill & review" subtitle={`${client.contact.fullname} · ${view.fills.length} ${view.fills.length === 1 ? 'form' : 'forms'}`} back={{ label: 'Forms', to: '/' }}>
-        <Steps current={1} />
+        <Steps current={1} locked={sum?.blocking ? [2] : undefined} />
         {downloads.length > 0 && (
           <Menu
             trigger={(p) => (
@@ -313,49 +339,81 @@ export function ReviewScreen() {
             Save draft
           </Button>
         )}
-        <Button variant="filled" iconAfter="chevronRight" onClick={() => navigate('/send')}>
+        <Button
+          variant="filled"
+          iconAfter="chevronRight"
+          disabled={!!sum?.blocking}
+          title={sum?.blocking ? `Fix ${sum.blocking} ${sum.blocking === 1 ? 'item' : 'items'} before adding signers` : undefined}
+          onClick={() => navigate('/send')}
+        >
           Signers
         </Button>
       </Toolbar>
 
-      <div
-        className="doc-tabs"
-        role="tablist"
-        aria-label="Forms in this packet"
-        onKeyDown={(e) => {
-          // Arrow keys move between forms, as in any tab list; Tab moves on to the form itself.
-          const n = view.fills.length;
-          const to = e.key === 'ArrowRight' ? (active + 1) % n : e.key === 'ArrowLeft' ? (active - 1 + n) % n : e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : -1;
-          if (to < 0) return;
-          e.preventDefault();
-          setActive(to);
-          document.getElementById(`doc-tab-${to}`)?.focus();
-        }}
-      >
-        {view.fills.map((f, i) => (
-          <button key={f.itemId} id={`doc-tab-${i}`} role="tab" className="doc-tab" aria-selected={i === active} aria-controls="doc-panel" tabIndex={i === active ? 0 : -1} onClick={() => setActive(i)}>
-            {formLabel(f)}
-            {f.missingCount ? (
-              <span className="count-dot">
-                {f.missingCount}
-                <span className="sr-only"> to fill</span>
-              </span>
-            ) : (
-              <Icon name="checkCircle" size={16} className="ok" label="nothing to fill" />
-            )}
-          </button>
-        ))}
-      </div>
-
       <div className="review" style={{ flex: 1, minHeight: 0 }}>
+        <nav className="forms-rail" aria-labelledby="rail-h">
+          <h2 id="rail-h" className="rail-head">Forms in packet</h2>
+          <div
+            className="rail-tabs"
+            role="tablist"
+            aria-labelledby="rail-h"
+            aria-orientation="vertical"
+            onKeyDown={(e) => {
+              // Arrow keys move between forms, as in any tab list; Tab moves on to the form itself.
+              const n = view.fills.length;
+              const next = e.key === 'ArrowDown' || e.key === 'ArrowRight';
+              const prev = e.key === 'ArrowUp' || e.key === 'ArrowLeft';
+              const to = next ? (active + 1) % n : prev ? (active - 1 + n) % n : e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : -1;
+              if (to < 0) return;
+              e.preventDefault();
+              setActive(to);
+              document.getElementById(`doc-tab-${to}`)?.focus();
+            }}
+          >
+            {view.fills.map((f, i) => {
+              const open = view.checks.filter((c) => c.level === 'block' && c.itemId === f.itemId).length;
+              return (
+                <button
+                  key={f.itemId}
+                  id={`doc-tab-${i}`}
+                  type="button"
+                  role="tab"
+                  className="form-tile"
+                  aria-selected={i === active}
+                  aria-controls="doc-panel"
+                  tabIndex={i === active ? 0 : -1}
+                  onClick={() => setActive(i)}
+                >
+                  <span className="name">{formLabel(f)}</span>
+                  <span className="meta">
+                    {f.template.formNumber} · Rev {f.template.revision}
+                  </span>
+                  <span className="status">
+                    <i className={['dot sm', open && 'attention'].filter(Boolean).join(' ')} aria-hidden="true" />
+                    {open ? `${open} to fix` : 'In good order'}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {showAssist &&
+            [...new Set(view.fills.map((f) => f.template.id))]
+              .filter((id) => packet.reasons?.[id])
+              .map((id) => (
+                <p key={id} className="why-added">
+                  {packet.reasons![id]}
+                </p>
+              ))}
+        </nav>
+
         <section className="review-canvas" ref={canvasRef} id="doc-panel" role="tabpanel" aria-labelledby={`doc-tab-${active}`}>
           <div className="row wrap" style={{ maxWidth: width, margin: '0 auto 14px', justifyContent: 'space-between' }}>
             <div className="legend" role="group" aria-label="Legend">
-              <span><i style={{ background: 'var(--hl-crm)', boxShadow: 'inset 0 -1.5px 0 var(--hl-crm-line)' }} />From CRM</span>
-              <span><i style={{ background: 'var(--hl-need)', boxShadow: 'inset 0 0 0 1.25px var(--hl-need-line)' }} />Needs input</span>
-              <span><i style={{ background: 'var(--hl-edit)', boxShadow: 'inset 0 -1.5px 0 var(--hl-edit-line)' }} />Entered or changed</span>
-              <span><i style={{ background: 'rgba(0,128,189,.1)', boxShadow: 'inset 0 0 0 1px rgba(0,128,189,.35)' }} />Signer completes</span>
-              <span><i style={{ background: '#fff8d6', boxShadow: '0 0 0 1px #d4a400' }} />Signature tab</span>
+              <span><i className="hl-crm" />From Dynamics 365</span>
+              <span><i className="hl-edit" />Entered once</span>
+              <span><i className="hl-need" style={{ animation: 'none' }} />Needs input</span>
+              <span><i className="hl-signer" />Signature</span>
+              <span><i style={{ background: '#fff8d6', boxShadow: '0 0 0 1px #d4a400' }} />DocuSign tab</span>
             </div>
             <Segmented
               label="Zoom"
@@ -388,6 +446,96 @@ export function ReviewScreen() {
         </section>
 
         <aside className="review-side stack-4" aria-label="Review panel">
+          {view.missing.map((item) => (
+            <section key={item.id} className="banner" role="alert" style={{ alignItems: 'flex-start', flexDirection: 'column', gap: 8 }}>
+              <span className="t-callout">
+                <Icon name="warning" size={16} /> <strong>{missingLabel(item)}</strong> is no longer in the library, so it can’t be shown or sent.
+              </span>
+              <Button variant="gray" size="sm" icon="trash" onClick={() => removeFromPacket(item.id)}>
+                Remove it from the packet
+              </Button>
+            </section>
+          ))}
+
+          <Segmented
+            label="Inspector"
+            value={tab}
+            onChange={setTab}
+            options={[
+              { value: 'checks', label: sum?.blocking ? `Checks (${sum.blocking})` : 'Checks' },
+              { value: 'fields', label: requiredNeeds.length ? `Fields (${requiredNeeds.length})` : 'Fields' },
+            ]}
+          />
+
+          {tab === 'checks' && order && (
+            <>
+              <section className="card panel good-order" aria-labelledby="order-h">
+                <div className="row" style={{ alignItems: 'baseline' }}>
+                  <h2 id="order-h" className="grow">In good order</h2>
+                  <b className="tabular">{order.percent}%</b>
+                </div>
+                <div className="meter good-order-meter" role="meter" aria-valuenow={order.percent} aria-valuemin={0} aria-valuemax={100} aria-label="In good order">
+                  <i style={{ clipPath: `inset(0 ${100 - order.percent}% 0 0)` }} />
+                </div>
+                <p className="t-callout c2">
+                  {order.blocking
+                    ? `${order.blocking} ${order.blocking === 1 ? 'item' : 'items'} to fix. Signers can’t be added until ${order.blocking === 1 ? 'it’s' : 'they’re'} fixed.`
+                    : order.warnings
+                      ? `Ready for signers. ${order.warnings} ${order.warnings === 1 ? 'note' : 'notes'} to look over.`
+                      : 'Every check passed. Ready for signers.'}
+                </p>
+              </section>
+
+              <section className="card check-list" aria-label="Checks before send">
+                {[...view.checks].sort((a, b) => rank(a) - rank(b)).map((c) => {
+                  const resolved = c.level === 'pass' ? packet.resolved?.[c.id] : undefined;
+                  const preview = c.id === 'current-revisions' && c.level === 'block' ? upgradePacketItems(packet.items, packet.values, templates).report : undefined;
+                  const canJump = c.level !== 'pass' && !!(c.fieldKey || c.templateId);
+                  return (
+                    <div key={c.id} id={checkId(c.id)} className="check-item">
+                      <i className={['dot', c.level === 'block' ? 'attention' : c.level === 'warn' ? 'info' : ''].filter(Boolean).join(' ')} aria-hidden="true" />
+                      <div className="stack" style={{ minWidth: 0 }}>
+                        <div>
+                          <div className="t-callout" style={{ fontWeight: 700 }}>
+                            <span className="sr-only">{c.level === 'pass' ? 'Passed: ' : c.level === 'warn' ? 'Note: ' : 'To fix: '}</span>
+                            {c.title}
+                          </div>
+                          {c.detail && <div className="t-footnote c2">{c.detail}</div>}
+                        </div>
+                        {resolved && <span className="resolved">{resolved}</span>}
+                        {(c.fix || preview || canJump) && (
+                          <div className="row wrap" style={{ gap: 6 }}>
+                            {c.fix && (
+                              <Button variant="fix" size="sm" onClick={() => fix(c)}>
+                                {c.fix.label}
+                              </Button>
+                            )}
+                            {preview?.forms.some((f) => f.state === 'newer') && (
+                              <Button variant="fix" size="sm" onClick={() => setUpgrade(preview)}>
+                                Update to current
+                              </Button>
+                            )}
+                            {canJump && (
+                              <Button variant="plain" size="sm" onClick={() => focusKey(c.fieldKey, c.itemId ?? c.templateId)}>
+                                Show
+                              </Button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </section>
+
+              <button type="button" className="continue-btn" disabled={!order.ready} onClick={() => navigate('/send')}>
+                {order.ready ? 'Continue to signers' : `Fix ${order.blocking} ${order.blocking === 1 ? 'item' : 'items'} to continue`}
+              </button>
+            </>
+          )}
+
+          {tab === 'fields' && (
+          <>
           {selectedField && (
             <FieldEditor
               field={selectedField}
@@ -399,17 +547,6 @@ export function ReviewScreen() {
               onReport={() => setReporting({ itemId: selectedField.itemId, fieldKeys: [selectedField.mapping.pdfField] })}
             />
           )}
-
-          {view.missing.map((item) => (
-            <section key={item.id} className="banner" role="alert" style={{ alignItems: 'flex-start', flexDirection: 'column', gap: 8 }}>
-              <span className="t-callout">
-                <Icon name="warning" size={16} /> <strong>{missingLabel(item)}</strong> is no longer in the library, so it can’t be shown or sent.
-              </span>
-              <Button variant="gray" size="sm" icon="trash" onClick={() => removeFromPacket(item.id)}>
-                Remove it from the packet
-              </Button>
-            </section>
-          ))}
 
           {replaced.map((item) => {
             const f = view.fills.find((x) => x.itemId === item.id);
@@ -508,55 +645,12 @@ export function ReviewScreen() {
             {optionalNeeds.length > 0 && (
               <>
                 <button className="btn btn-plain btn-sm" style={{ alignSelf: 'flex-start' }} aria-expanded={showOptional} onClick={() => setShowOptional(!showOptional)}>
-                  <Icon name={showOptional ? 'chevronDown' : 'chevronRight'} size={14} strokeWidth={2.2} />
+                  <Icon name={showOptional ? 'chevronDown' : 'chevronRight'} size={14} />
                   {optionalNeeds.length} optional {optionalNeeds.length === 1 ? 'field' : 'fields'}
                 </button>
                 {showOptional && optionalNeeds.map((n) => renderNeed(n.key, n.fields))}
               </>
             )}
-          </section>
-
-          <section className="card" aria-labelledby="checks-h">
-            <div className="card-head">
-              <h2 id="checks-h">Checks before send</h2>
-              {sum && (sum.blocking ? <span className="badge badge-warn">{sum.blocking} to fix</span> : <span className="badge badge-accent">All clear</span>)}
-            </div>
-            <div style={{ padding: '0 8px 10px' }}>
-              {view.checks.map((c) => {
-                const content = (
-                  <>
-                    <Icon name={c.level === 'pass' ? 'checkCircle' : c.level === 'warn' ? 'info' : 'warning'} size={18} className={c.level === 'pass' ? 'c-accent' : c.level === 'warn' ? 'c-info' : 'c-warn'} label={c.level === 'pass' ? 'Passed:' : c.level === 'warn' ? 'Note:' : 'To fix:'} />
-                    <span className="grow">
-                      <span style={{ fontWeight: c.level === 'pass' ? 400 : 600 }}>{c.title}</span>
-                      {c.detail && <span className="t-footnote c3" style={{ display: 'block' }}>{c.detail}</span>}
-                    </span>
-                  </>
-                );
-                if (c.id === 'current-revisions' && c.level === 'block') {
-                  const preview = upgradePacketItems(packet.items, packet.values, templates).report;
-                  return (
-                    <div key={c.id} id={checkId(c.id)} className="check-row">
-                      {content}
-                      {preview.forms.some((f) => f.state === 'newer') && (
-                        <Button variant="tinted" size="sm" onClick={() => setUpgrade(preview)}>
-                          Update
-                        </Button>
-                      )}
-                    </div>
-                  );
-                }
-                return c.level !== 'pass' && (c.fieldKey || c.templateId) ? (
-                  <button key={c.id} id={checkId(c.id)} className="check-row" onClick={() => focusKey(c.fieldKey, c.itemId ?? c.templateId)}>
-                    {content}
-                    <Icon name="chevronRight" size={14} className="c3" />
-                  </button>
-                ) : (
-                  <div key={c.id} id={checkId(c.id)} className="check-row">
-                    {content}
-                  </div>
-                );
-              })}
-            </div>
           </section>
 
           <AttachmentsCard />
@@ -580,6 +674,8 @@ export function ReviewScreen() {
               </dl>
               <p className="t-footnote c3">Edits here change the form only, never the CRM record.</p>
             </section>
+          )}
+          </>
           )}
         </aside>
       </div>
@@ -606,6 +702,8 @@ export function ReviewScreen() {
           onUpdate={() => {
             setUpgrade(undefined);
             const done = upgradePacket().forms.filter((f) => f.state === 'newer').length;
+            const now = useApp.getState().packet;
+            setPacket({ resolved: { ...now.resolved, 'current-revisions': 'Updated to the current version. Entered values carried over.' } });
             toast.ok(`Updated ${done} ${done === 1 ? 'form' : 'forms'} to the current version.${canSaveDrafts && packet.requestId ? ' Save draft to keep it.' : ''}`);
           }}
         />
@@ -632,3 +730,6 @@ export function ReviewScreen() {
 const cssKey = (k: string) => k.replace(/[^a-zA-Z0-9_-]/g, '_');
 /** The element id of a check's row in "Checks before send". */
 const checkId = (id: string) => `check-${cssKey(id)}`;
+
+/** Open items first (blocking, then warnings), then what passed. */
+const rank = (c: CheckResult) => (c.level === 'block' ? 0 : c.level === 'warn' ? 1 : 2);

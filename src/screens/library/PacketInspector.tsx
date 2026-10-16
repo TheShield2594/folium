@@ -43,7 +43,7 @@ export function PacketInspector() {
       <div style={{ padding: '0 var(--sp-5) var(--sp-5)' }} className="stack-4">
         {packet.items.length === 0 ? (
           <div className="packet-empty">
-            <Icon name="tray" size={34} strokeWidth={1.3} />
+            <Icon name="tray" size={34} />
             <p className="t-callout c2">Add forms with <span className="kbd">+</span> and they’ll collect here. Fields shared across forms are entered once.</p>
           </div>
         ) : (
@@ -118,7 +118,7 @@ export function PacketInspector() {
                       </Select>
                     )}
                     <button className="btn btn-plain btn-sm" style={{ marginTop: 4, paddingLeft: 0 }} disabled={full} title={full ? `A packet holds up to ${PACKET_LIMIT} forms` : undefined} onClick={() => addForm(t.id, undefined, { duplicate: true })}>
-                      <Icon name="plus" size={13} strokeWidth={2.2} /> Add another copy
+                      <Icon name="plus" size={13} /> Add another copy
                     </button>
                   </li>
                 );

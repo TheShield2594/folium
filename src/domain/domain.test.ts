@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { CLIENTS, FIRM, TEMPLATES, USERS } from '../services/demo/seed';
 import type { FieldMapping, FormTemplate, PacketItem, RequestDocument } from './types';
 import { describeFormUpgrade, draftFreshness, upgradeAuditDetail, upgradeDraft, upgradePacketItems } from './drafts';
-import { attachmentLimits, checkAttachments, DEFAULT_ATTACHMENT_LIMITS, MB, outputGate, runChecks, summarize, type CheckResult } from './checks';
+import { attachmentLimits, checkAttachments, DEFAULT_ATTACHMENT_LIMITS, evenShares, goodOrder, MB, outputGate, runChecks, summarize, type CheckResult } from './checks';
 import { fillSubject, fillTokens, formatValue, resolveDateLimit, validateFormat } from './format';
 import { buildCondition, conditionTerms, evaluateCondition, explainCondition, parseCondition, resolvePath } from './paths';
 import { carryVariantValues, choiceDisplay, choiceOptions, fieldKey, fillBlockFromPerson, personBlocks, relatedPeople, inputsNeeded, mappingWarnings, migrateAccountValues, prefillForm, prefillPacket, seedCopyValues, termLabels, validateMapping } from './prefill';
@@ -469,6 +469,51 @@ describe('checks', () => {
     const bad = { ...bene, mapping: { ...bene.mapping, checks: [{ type: 'pattern' as const, field: 'Owner_Name_Full', pattern: '([' }] } };
     const results = runChecks(prefillPacket([{ template: bad }], scope, {}), ctx({}));
     expect(results.find((r) => r.title.includes('can’t be checked'))!.level).toBe('warn');
+  });
+
+  it('offers to split shares evenly when they don’t total 100', () => {
+    const values = { 'bene.Prim.1.pct': '45', 'bene.Prim.2.pct': '45' };
+    const shares = runChecks(prefillPacket([{ template: bene }], scope, values), ctx(values)).find((r) => r.title.includes('100%'))!;
+    expect(shares.fix?.label).toBe('Split 50 / 50');
+    expect(shares.fix?.resolvedLabel).toBe('Updated to 50% each');
+    const fixed = { ...values, ...shares.fix!.values } as Record<string, string>;
+    const after = runChecks(prefillPacket([{ template: bene }], scope, fixed), ctx(fixed));
+    expect(after.find((r) => r.title.includes('100%'))!.level).toBe('pass');
+  });
+
+  it('has no split fix when no share is entered yet', () => {
+    const values = { 'bene.Prim.1.pct': '', 'bene.Prim.2.pct': '', 'bene.Prim.3.pct': '' };
+    const shares = runChecks(prefillPacket([{ template: bene }], scope, values), ctx(values)).find((r) => r.title.includes('100%'))!;
+    expect(shares.level).toBe('block');
+    expect(shares.fix).toBeUndefined();
+  });
+
+  it('offers the Dynamics 365 value back for a required field the advisor cleared', () => {
+    const owner = bene.mapping.fields.find((m) => m.required && m.source.startsWith('contact.'))!;
+    const key = fieldKey(owner, bene);
+    const values = { [key]: '' };
+    const fills = prefillPacket([{ template: bene }], scope, values);
+    const required = runChecks(fills, ctx(values)).find((r) => r.id.endsWith(':required'))!;
+    expect(required.fix?.label).toMatch(/^Use /);
+    expect(required.fix?.values).toEqual({ [key]: undefined });
+    expect(required.fix?.resolvedLabel).toBe('Filled from Dynamics 365');
+    const fixed = Object.fromEntries(Object.entries({ ...values, ...required.fix!.values }).filter(([, v]) => v !== undefined)) as Record<string, string>;
+    const after = prefillPacket([{ template: bene }], scope, fixed)[0].fields.find((f) => f.key === key)!;
+    expect(after.missing).toBe(false);
+    expect(after.origin).toBe('crm');
+  });
+
+  it('splits shares into whole numbers that add up', () => {
+    expect(evenShares(2, 100)).toEqual([50, 50]);
+    expect(evenShares(3, 100)).toEqual([34, 33, 33]);
+    expect(evenShares(0, 100)).toEqual([]);
+  });
+
+  it('scores good order with warnings at half weight', () => {
+    expect(goodOrder([{ level: 'pass' }, { level: 'pass' }])).toMatchObject({ percent: 100, ready: true });
+    expect(goodOrder([{ level: 'pass' }, { level: 'block' }])).toMatchObject({ percent: 50, blocking: 1, ready: false });
+    expect(goodOrder([{ level: 'pass' }, { level: 'pass' }, { level: 'warn' }])).toMatchObject({ percent: 80, warnings: 1, ready: true });
+    expect(goodOrder([]).percent).toBe(100);
   });
 
   it('flags retired revisions', () => {

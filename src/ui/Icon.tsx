@@ -1,4 +1,5 @@
-// Line icons drawn in the spirit of SF Symbols (regular weight, rounded joins).
+// Line icons drawn in the spirit of SF Symbols, rounded joins. Every line icon uses the
+// brand's 1.5px stroke (guidelines p.18); only the dot glyphs draw heavier.
 
 const P: Record<string, string> = {
   search: 'M10.5 17a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13ZM15.3 15.3 20 20',
@@ -76,7 +77,9 @@ const FILLED: Record<string, string> = {
 
 export type IconName = keyof typeof P | keyof typeof FILLED;
 
-export function Icon({ name, size = 18, strokeWidth = 1.7, className, label }: { name: IconName; size?: number; strokeWidth?: number; className?: string; label?: string }) {
+const STROKE = 1.5;
+
+export function Icon({ name, size = 18, className, label }: { name: IconName; size?: number; className?: string; label?: string }) {
   const filled = FILLED[name as string];
   return (
     <svg
@@ -89,7 +92,7 @@ export function Icon({ name, size = 18, strokeWidth = 1.7, className, label }: {
       aria-hidden={label ? undefined : true}
       fill={filled ? 'currentColor' : 'none'}
       stroke="currentColor"
-      strokeWidth={filled ? 1.2 : name === 'ellipsis' || name === 'dot' ? 3 : strokeWidth}
+      strokeWidth={filled ? 1.2 : name === 'ellipsis' || name === 'dot' ? 3 : STROKE}
       strokeLinecap="round"
       strokeLinejoin="round"
     >

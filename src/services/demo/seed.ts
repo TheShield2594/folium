@@ -128,6 +128,9 @@ const ruth = c({ contactid: 'c-ruth', firstname: 'Ruth', lastname: 'Miller-Kauff
 
 const priya = c({ contactid: 'c-priya', ownerid: 'usr-advisor-1', firstname: 'Priya', lastname: 'Hostetler', ev_clientid: 'C-0039920', birthdate: '1984-01-27', ev_ssn: '318-44-2290', emailaddress1: 'priya.h@example.com', mobilephone: '717-555-0101', address1_line1: '22 Orchard Way', address1_city: 'Lancaster', address1_stateorprovince: 'PA', address1_postalcode: '17602', familystatuscode: 'single', ev_region: 'Lancaster', ev_employer: 'Lancaster General Health' });
 const eli = c({ contactid: 'c-eli', ownerid: 'usr-advisor-2', firstname: 'Eli', lastname: 'Yoder', ev_clientid: 'C-0012004', birthdate: '1952-11-30', emailaddress1: 'eli.yoder@example.com', address1_line1: '5 Mill Race Rd', address1_city: 'Harrisonburg', address1_stateorprovince: 'VA', address1_postalcode: '22801', familystatuscode: 'widowed', ev_region: 'Harrisonburg' });
+// Turns 73 this December: Today prompts for the first RMD election.
+const leon = c({ contactid: 'c-leon', ownerid: 'usr-advisor-1', firstname: 'Leon', lastname: 'Martin', ev_clientid: 'C-0021455', birthdate: '1953-12-04', ev_ssn: '402-18-5530', emailaddress1: 'leon.martin@example.com', mobilephone: '574-555-0164', address1_line1: '61 Prairie St', address1_city: 'Elkhart', address1_stateorprovince: 'IN', address1_postalcode: '46516', familystatuscode: 'married', ev_region: 'Goshen' });
+const anna = c({ contactid: 'c-anna', firstname: 'Anna', lastname: 'Martin', ev_clientid: 'C-0021456', birthdate: '1955-03-19', emailaddress1: 'anna.martin@example.com' });
 const grace = c({ contactid: 'c-grace', ownerid: 'usr-advisor-1', firstname: 'Grace', lastname: 'Nafziger', ev_clientid: 'C-0060318', birthdate: '1990-06-12', ev_ssn: '511-30-8842', emailaddress1: 'grace.n@example.com', mobilephone: '316-555-0133', address1_line1: '310 Main St', address1_line2: 'Apt 4', address1_city: 'Newton', address1_stateorprovince: 'KS', address1_postalcode: '67114', familystatuscode: 'married', ev_region: 'Newton', ev_employer: 'Bethel College' });
 
 export const CLIENTS: Record<string, ClientRecord> = {
@@ -150,6 +153,8 @@ export const CLIENTS: Record<string, ClientRecord> = {
     accounts: [
       { accountid: 'a-p1', name: 'Priya Hostetler Roth IRA', ev_accountno: 'ROTH-40-1182', ev_accounttype: 'Roth IRA', ev_custodian: 'Everence Trust Company', ev_balance: 64210, ev_openedon: '2016-04-02' },
       { accountid: 'a-p2', name: 'Praxis Impact Bond', ev_accountno: 'PX-8820-1191', ev_accounttype: 'Brokerage', ev_custodian: 'Praxis Mutual Funds', ev_balance: 21900, ev_openedon: '2020-09-15' },
+      // Held away: Start a packet reads it to explain a rollover.
+      { accountid: 'a-p3', name: 'Lancaster General Health 401(k)', ev_accountno: 'FID-401-2290', ev_accounttype: '401(k)', ev_custodian: 'Fidelity', ev_balance: 84250, ev_openedon: '2011-06-01' },
     ],
     connections: [],
   },
@@ -160,6 +165,14 @@ export const CLIENTS: Record<string, ClientRecord> = {
       { accountid: 'a-e2', name: 'Fixed annuity', ev_accountno: 'SA-55-20019', ev_accounttype: 'Annuity', ev_custodian: 'Sample Annuity Co.', ev_balance: 150000, ev_openedon: '2012-08-08' },
     ],
     connections: [],
+  },
+  'c-leon': {
+    contact: leon,
+    accounts: [{ accountid: 'a-l1', name: 'Leon Martin Traditional IRA', ev_accountno: 'IRA-11-6024', ev_accounttype: 'Traditional IRA', ev_custodian: 'Everence Trust Company', ev_balance: 286500, ev_openedon: '2003-02-18' }],
+    connections: [
+      { role: 'Spouse', contact: anna },
+      { role: 'Beneficiary', contact: anna, ev_sharepct: 100 },
+    ],
   },
   'c-grace': {
     contact: grace,
