@@ -12,7 +12,7 @@ import { useApp, type Theme } from '../../state/store';
 import { MyFormReports } from '../common/MyFeedback';
 import { RepAudit, RepDetails } from '../common/RepDetails';
 import { StatesPicker } from '../common/StatesPicker';
-import { Avatar, Badge, Button, Field, Segmented, Select, TextArea, toast } from '../../ui/controls';
+import { Avatar, Badge, Button, Field, Segmented, Select, SwitchRow, TextArea, toast } from '../../ui/controls';
 
 /** Your own Folium profile (User Data), preferences and appearance. */
 export function SettingsScreen() {
@@ -23,6 +23,8 @@ export function SettingsScreen() {
   const policy = useApp((s) => s.policy);
   const theme = useApp((s) => s.theme);
   const setTheme = useApp((s) => s.setTheme);
+  const showAssist = useApp((s) => s.showAssist);
+  const setShowAssist = useApp((s) => s.setShowAssist);
   const reloadDirectory = useApp((s) => s.reloadDirectory);
   const services = useServices();
   const [p, setP] = useState<UserProfile | undefined>(me);
@@ -138,6 +140,16 @@ export function SettingsScreen() {
                 { value: 'light', label: 'Light' },
                 { value: 'dark', label: 'Dark' },
               ]}
+            />
+          </section>
+
+          <section className="card card-pad stack-4" aria-labelledby="today-h">
+            <h2 id="today-h" className="t-title3">Today</h2>
+            <SwitchRow
+              checked={showAssist}
+              onChange={setShowAssist}
+              label="Show Start a packet on Today"
+              detail="Describe what a client needs and Folium picks the forms, saying why it added each one. Kept on this device."
             />
           </section>
 

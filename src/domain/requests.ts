@@ -200,3 +200,16 @@ export function draftExpiryInfo(req: Pick<SignatureRequest, 'status' | 'inPerson
   const daysLeft = Math.ceil(ms / DAY);
   return { expiresOn: req.expiresOn, daysLeft, soon: daysLeft <= 7 };
 }
+
+/** A request's five stages, as Requests and Today draw them. */
+export const STAGES = ['Drafted', 'Sent', 'Viewed', 'Signed', 'In OnBase'] as const;
+
+/** `done` grass, `now` royal (the stage it's at), `wait` dashed pumpkin (OnBase waits on the advisor), `todo` empty. */
+export type StageState = 'done' | 'now' | 'wait' | 'todo';
+
+/** Where each stage stands for a request. A filed request is done all the way. */
+export function pipeline(r: Pick<SignatureRequest, 'status' | 'sentOn' | 'viewedOn' | 'signedOn' | 'uploadedToOnBase'>): StageState[] {
+  if (r.uploadedToOnBase) return STAGES.map(() => 'done');
+  const at = r.status === 'Signed' || r.signedOn ? 3 : r.status === 'Viewed' || r.viewedOn ? 2 : r.status === 'Sent' || r.sentOn ? 1 : 0;
+  return STAGES.map((_, k) => (k < at ? 'done' : k === at ? 'now' : k === 4 && r.status === 'Signed' ? 'wait' : 'todo'));
+}

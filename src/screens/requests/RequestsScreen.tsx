@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { expiryInfo, isFinished } from '../../domain/requests';
 import type { SignatureRequest } from '../../domain/types';
 import { useServices } from '../../services';
@@ -19,7 +20,9 @@ export function RequestsScreen() {
   const me = useApp((s) => s.me);
   const actingForId = useApp((s) => s.actingForId);
   const services = useServices();
-  const [scope, setScope] = useState<Scope>(client ? 'client' : 'all');
+  // Opened from Today's "All requests", it starts on every client.
+  const [params] = useSearchParams();
+  const [scope, setScope] = useState<Scope>(client && params.get('scope') !== 'all' ? 'client' : 'all');
   const [filter, setFilter] = useState<Filter>('open');
   const [all, setAll] = useState<SignatureRequest[]>();
   const [names, setNames] = useState<Record<string, string>>({});

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { createHashRouter, Navigate, Outlet, RouterProvider } from 'react-router-dom';
+import { createHashRouter, Navigate, Outlet, RouterProvider, useLocation, useNavigate } from 'react-router-dom';
 import { FoliumAppIcon } from './brand/FoliumMark';
 import { isActiveUser } from './domain/users';
 import { AdminFeedback } from './screens/admin/AdminFeedback';
@@ -20,6 +20,7 @@ import { RequestsScreen } from './screens/requests/RequestsScreen';
 import { ReviewScreen } from './screens/review/ReviewScreen';
 import { SendScreen } from './screens/send/SendScreen';
 import { SettingsScreen } from './screens/settings/SettingsScreen';
+import { TodayScreen } from './screens/today/TodayScreen';
 import { createServices, ServicesContext } from './services';
 import { setDemoUser } from './services/demo';
 import type { Services } from './services/types';
@@ -71,7 +72,21 @@ function Launch() {
   );
 }
 
+/**
+ * Opened without a client (`?contactId=`), Folium lands on Today, the cross-client home.
+ * Opened from a Contact form, it goes straight to that client's forms as before.
+ */
+let landOnToday = false;
+
 function Root() {
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  useEffect(() => {
+    if (!landOnToday) return;
+    landOnToday = false;
+    if (pathname === '/') navigate('/today', { replace: true });
+    // Only on the first render after boot.
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <>
       <Shell>
@@ -89,6 +104,7 @@ const router = createHashRouter([
     element: <Root />,
     children: [
       { path: '/', element: <LibraryScreen /> },
+      { path: '/today', element: <TodayScreen /> },
       { path: '/packets', element: <PacketsScreen /> },
       { path: '/recent', element: <RecentScreen /> },
       { path: '/review', element: <ReviewScreen /> },
@@ -131,6 +147,8 @@ export function App() {
         const demo = s.mode === 'demo';
         const contactId = await contactIdFromHost(demo);
         if (cancelled) return;
+        // The host may hand over a client even when the URL doesn't: then Find forms it is.
+        if (!contactId) landOnToday = true;
         setServices(s);
         await boot(s, contactId ?? (demo && !hasLastContact() ? 'c-jordan' : undefined));
       } catch (e) {
