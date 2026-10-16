@@ -416,7 +416,7 @@
 .good-order-meter {
   height: 8px;
   border-radius: 4px;
-  background: rgba(0, 51, 70, 0.09);
+  background: var(--track);
 }
 .check-list {
   display: flex;
@@ -462,7 +462,7 @@
 }
 /* Disabled keeps a readable label that says why. */
 .continue-btn:disabled {
-  background: rgba(0, 51, 70, 0.08);
+  background: var(--track);
   color: var(--label-2);
   cursor: not-allowed;
 }
@@ -781,7 +781,7 @@ button.check-row:hover {
   margin: 0 8px;
   padding: 3px;
   border-radius: var(--r-card);
-  background: rgba(0, 51, 70, 0.07);
+  background: var(--track);
 }
 .flow-steps button {
   display: inline-flex;
@@ -913,7 +913,7 @@ details[open] .disclosure {
 .start-input {
   width: 100%;
   padding: 14px 16px;
-  border: 1px solid rgba(0, 51, 70, 0.16);
+  border: 1px solid var(--line);
   border-radius: var(--r-card);
   background: var(--surface);
   color: var(--label);
@@ -1034,5 +1034,15 @@ details[open] .disclosure {
   .today {
     padding: var(--sp-6) var(--sp-4) var(--sp-10);
     gap: var(--sp-8);
+  }
+}
+
+/* A request that was just sent: Mist, fading to the card's white. */
+.req.fresh {
+  animation: fresh-fade 600ms var(--ease) 1200ms both;
+}
+@keyframes fresh-fade {
+  from {
+    background: var(--assist);
   }
 }

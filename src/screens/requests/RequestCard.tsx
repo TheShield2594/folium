@@ -52,7 +52,7 @@ function draftExpiryLabel(r: SignatureRequest, now = new Date()): { text: string
   return { text: e.daysLeft <= 0 ? 'draft expires today' : `draft kept until ${fmtDay(e.expiresOn)}`, tone: e.soon ? 'warn' : undefined };
 }
 
-export function RequestCard({ req, showClient, clientName }: { req: SignatureRequest; showClient?: boolean; clientName?: string }) {
+export function RequestCard({ req, showClient, clientName, fresh }: { req: SignatureRequest; showClient?: boolean; clientName?: string; fresh?: boolean }) {
   const services = useServices();
   const me = useApp((s) => s.me);
   const users = useApp((s) => s.users);
@@ -154,7 +154,7 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
   ];
 
   return (
-    <article className="card req" aria-labelledby={`req-${r.id}`}>
+    <article className={['card req', fresh && 'fresh'].filter(Boolean).join(' ')} aria-labelledby={`req-${r.id}`}>
       <div className="req-head">
         <div style={{ minWidth: 0 }}>
           <h2 id={`req-${r.id}`} className="t-title3">
@@ -212,8 +212,9 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
 
       {r.status !== 'Drafted' && (
         <ol className="steps" aria-label="Progress">
-          {steps.map((s) => (
-            <li key={s.label} className={s.done ? 'done' : s.wait ? 'wait' : undefined}>
+          {steps.map((s, i) => (
+            // The stage it's at is royal; stages behind it grass.
+            <li key={s.label} className={s.done ? (i === steps.map((x) => x.done).lastIndexOf(true) && !r.uploadedToOnBase ? 'done now' : 'done') : s.wait ? 'wait' : undefined}>
               <i />
               <strong className={s.wait ? 'c-warn' : s.done ? undefined : 'c3'}>{s.label}</strong>
               <span>{s.done ? fmtWhen(s.at) : s.wait ? 'Waiting on you' : '—'}</span>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import { expiryInfo, isFinished } from '../../domain/requests';
 import type { SignatureRequest } from '../../domain/types';
 import { useServices } from '../../services';
@@ -22,6 +22,8 @@ export function RequestsScreen() {
   const services = useServices();
   // Opened from Today's "All requests", it starts on every client.
   const [params] = useSearchParams();
+  /** The request just sent, highlighted in Mist as it arrives. */
+  const fresh = (useLocation().state as { fresh?: string } | null)?.fresh;
   const [scope, setScope] = useState<Scope>(client && params.get('scope') !== 'all' ? 'client' : 'all');
   const [filter, setFilter] = useState<Filter>('open');
   const [all, setAll] = useState<SignatureRequest[]>();
@@ -142,7 +144,7 @@ export function RequestsScreen() {
               {filter === 'open' ? 'Requests you send show up here until they’re signed and filed.' : 'Try another filter.'}
             </Empty>
           ) : (
-            list.map((r) => <RequestCard key={r.id} req={r} showClient={scope === 'all'} clientName={scope === 'all' ? names[r.contactId] : client?.contact.fullname} />)
+            list.map((r) => <RequestCard key={r.id} req={r} fresh={r.id === fresh} showClient={scope === 'all'} clientName={scope === 'all' ? names[r.contactId] : client?.contact.fullname} />)
           )}
 
           <div className="banner info">

@@ -345,7 +345,8 @@ export function SendScreen() {
       await refreshRequests();
       const now = ordered.filter((s) => s.inSession);
       toast.ok(now.length ? `Sent. Use “Sign now” on the request to open ${provider.label} for ${now.map((s) => s.name.split(' ')[0]).join(' and ')}.` : `Sent to ${ordered.map((s) => s.name.split(' ')[0]).join(' and ')}`);
-      navigate('/requests');
+      // Requests highlights the new row for a moment.
+      navigate('/requests', { state: { fresh: recorded.id } });
     } catch (e) {
       toast.error(`${provider.label} sent the envelope, but Folium couldn’t record it${e instanceof Error ? ` (${e.message})` : ''}. Don’t send again — use “Record it again”.`);
     } finally {

@@ -23,6 +23,12 @@ Contact form (D365) ──► Folium (Power Apps code app: React + TypeScript + 
 6. **Send.** `providerFor()` picks the e-signature connection (firm profile, group, firm default) from `services.signing`, a registry of connections; its `capabilities` decide what the Send screen offers. `rolesForPacket()` + `assignSigners()` build signers from template roles and CRM connections. `buildEnvelopeDefinition()` turns neutral placements (page + x/y in points from the top-left) into DocuSign tabs. The request is saved as an `ev_signaturerequest` row.
 7. **Track.** Every request action goes through `services.signing.get(request.provider)`, the connection that sent it. Status comes from DocuSign Connect (Power Automate updates the row) or Check status (polling). Signed requests wait for the "Uploaded to OnBase" tick.
 
+## Today and Start a packet
+
+- **Today** (`screens/today`) reads the advisor's requests (`requests.listMine`) and the clients they're about plus recent contacts, then asks `domain/prompts.ts` what needs them: drafts with blocking checks (re-run with `runChecks`), requests that are declined, lapsing or waiting for OnBase, CRM prompts (first RMD year by SECURE 2.0 age, accounts with no beneficiary) and new revisions of forms in saved packets. Folium lands here unless it was opened with `?contactId=`.
+- **Start a packet** (`domain/startPacket.ts`) is deterministic: intents recognised by keyword, forms found by name and Marketing's keywords, the client's accounts deciding what's needed (no application when the client already holds the IRA a rollover goes into). It only picks templates, never form content, and every form carries a sentence saying why; `packet.reasons` keeps them for Review. An LLM classifier (through a Power Automate flow, returning template IDs only) could replace the matcher later behind an admin setting.
+- **Check fixes.** A `CheckResult` can carry a `fix`: a patch for `packet.values` (a key set to `undefined` drops the override, so the CRM value returns). `applyFix` applies it, records the resolved label in `packet.resolved` and returns an undo. `goodOrder()` scores the packet (warnings count half); blocking checks keep Signers closed.
+
 ## Why these choices
 
 - **Overlay preview, pdf-lib output.** Re-filling a PDF on every keystroke is slow; the overlay is exact enough to review and the real fill happens once.

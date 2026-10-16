@@ -28,8 +28,9 @@ Demo mode needs nothing else: sample clients, a template library of generated Ac
 
 ## What's in it
 
+- **Today** — the home when Folium opens without a client: what needs you across every client (drafts not in good order, declined, lapsing or unfiled requests, a first RMD this year, accounts with no beneficiary on file, new revisions of forms in your saved packets) and the latest requests out for signature. **Start a packet** builds a packet from a description ("rolling her Fidelity 401(k) into an IRA"), using the client's Dynamics 365 accounts, and Review says why each form was added. Hide it in Settings.
 - **Find forms** — search by name, number or keyword; suggested from the client's accounts; favorites, recent, saved packets; ask Marketing for a missing form.
-- **Prefill & review** — the real PDF with highlights for what came from CRM, what needs input, and where signers sign. Enter a value once and it fills every form that uses it. Pre-send checks catch "not in good order" problems. Download an editable (fillable) or flattened PDF, attach supporting documents, save a draft, share it with a colleague.
+- **Prefill & review** — the real PDF with highlights for what came from CRM, what needs input, and where signers sign. Enter a value once and it fills every form that uses it. Pre-send checks catch "not in good order" problems, with one-click fixes where Folium can make them (the Dynamics 365 value back in a cleared field, shares split evenly), an "In good order" meter, and Signers closed until nothing blocks. Download an editable (fillable) or flattened PDF, attach supporting documents, save a draft, share it with a colleague.
 - **Signers & send** — signers from the template roles and the client's connections, signing order, SMS/KBA/email verification, message, reminders, expiration.
 - **Signature requests** — Drafted → Sent → Viewed → Signed → In OnBase with audit trail, resend, correct signer, void, download signed PDF + certificate.
 - **Contact & accounts** — fix the client's Dynamics 365 record in place.
@@ -43,7 +44,14 @@ See [docs/PARITY.md](docs/PARITY.md) for the feature-by-feature comparison with 
 
 ## Design
 
-Built to Apple's Human Interface Guidelines — source-list sidebar, translucent toolbars, inspectors, sheets, segmented controls, 44 pt targets, light and dark appearance, reduced motion, WCAG 2.1 AA ([audit](docs/ACCESSIBILITY.md)) — in the Everence brand: the guidelines' web-accessible greens, navy and royal, Warm Gray grounds, Frutiger for text and Sabon for display (Verdana and Times as fallbacks).
+Layout and behaviour follow Apple's Human Interface Guidelines — sidebar, toolbars, inspectors, sheets, segmented controls, 44 pt targets, light and dark appearance, reduced motion, WCAG 2.1 AA ([audit](docs/ACCESSIBILITY.md)). Look follows the Everence Brand Guidelines (tokens in `src/styles/tokens.css`):
+
+- **Type:** Frutiger for everything, headlines in Frutiger Bold; Sabon Italic only for disclosures (`.t-disclosure`). Verdana and Times are the fallbacks.
+- **Shape:** one rounded corner per shape, top-left, sized from the 24px margin (`--r-panel`, `--r-card`, `--r-ctl`, `--r-chip`). Avatars, status dots, count badges and progress ends stay round.
+- **Color:** navy text and count badges, grass for primary actions, royal for links and the current step, solid sage sidebar, mist for assist panels; pumpkin only as a status dot.
+- **Gradients:** only the four approved pairs (`--grad-green` and friends): green for the good-order meter and Start a packet.
+- **Brandmark:** the sidebar shows the approved Everence brandmark from `public/brand/everence-brandmark.svg` (supplied by Marketing, not in this repo) with the Folium name below it as plain text.
+- **Icons:** one 1.5px stroke.
 
 ## Docs
 

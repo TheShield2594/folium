@@ -118,6 +118,8 @@
   --separator-strong: rgba(0, 51, 70, 0.14); /* section rules */
   --border: rgba(0, 51, 70, 0.1); /* surfaces */
   --border-strong: rgba(0, 51, 70, 0.22);
+  --line: rgba(0, 51, 70, 0.18); /* outlined controls: chips, the ⌘K hint, bordered buttons */
+  --track: rgba(0, 51, 70, 0.07); /* segmented tracks, meter grooves, disabled Continue */
   --badge: var(--ev-navy); /* count badges */
   --on-badge: #ffffff;
   --dot-attention: var(--ev-pumpkin); /* status dots only, never text */
@@ -189,6 +191,10 @@
     --separator-strong: rgba(233, 243, 243, 0.2);
     --border: rgba(233, 243, 243, 0.1);
     --border-strong: rgba(233, 243, 243, 0.24);
+  --line: rgba(233, 243, 243, 0.22);
+  --track: rgba(233, 243, 243, 0.09);
+    --line: rgba(233, 243, 243, 0.22);
+    --track: rgba(233, 243, 243, 0.09);
     --badge: #e9f3f3;
     --on-badge: #0e1415;
     --dot-attention: #f39a4a;
@@ -245,6 +251,8 @@
   --separator-strong: rgba(233, 243, 243, 0.2);
   --border: rgba(233, 243, 243, 0.1);
   --border-strong: rgba(233, 243, 243, 0.24);
+  --line: rgba(233, 243, 243, 0.22);
+  --track: rgba(233, 243, 243, 0.09);
   --badge: #e9f3f3;
   --on-badge: #0e1415;
   --dot-attention: #f39a4a;
