@@ -37,9 +37,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   const cls = ['btn', `btn-${variant}`, size !== 'md' && `btn-${size}`, block && 'btn-block', className].filter(Boolean).join(' ');
   return (
     <button ref={ref} type={type} className={cls} disabled={disabled || busy} aria-busy={busy || undefined} {...rest}>
-      {busy ? <span className="spinner" style={{ width: 14, height: 14, borderTopColor: 'currentColor' }} /> : icon && <Icon name={icon} size={size === 'sm' ? 14 : 16} strokeWidth={2} />}
+      {busy ? <span className="spinner" style={{ width: 14, height: 14, borderTopColor: 'currentColor' }} /> : icon && <Icon name={icon} size={size === 'sm' ? 14 : 16} />}
       {children}
-      {iconAfter && <Icon name={iconAfter} size={size === 'sm' ? 13 : 15} strokeWidth={2} />}
+      {iconAfter && <Icon name={iconAfter} size={size === 'sm' ? 13 : 15} />}
     </button>
   );
 });
@@ -203,7 +203,7 @@ export function Avatar({ name, size = 32, alt }: { name: string; size?: number; 
 export function Badge({ tone, children, icon }: { tone?: 'accent' | 'warn' | 'info' | 'danger' | 'solid-warn'; children: ReactNode; icon?: IconName }) {
   return (
     <span className={['badge', tone && `badge-${tone}`].filter(Boolean).join(' ')}>
-      {icon && <Icon name={icon} size={12} strokeWidth={2.2} />}
+      {icon && <Icon name={icon} size={12} />}
       {children}
     </span>
   );
@@ -220,7 +220,7 @@ export function Meter({ value, label }: { value: number; label?: string }) {
 export function Empty({ icon, title, children, action }: { icon: IconName; title: string; children?: ReactNode; action?: ReactNode }) {
   return (
     <div className="empty">
-      <Icon name={icon} size={40} strokeWidth={1.3} />
+      <Icon name={icon} size={40} />
       <h3>{title}</h3>
       {children && <p className="t-callout" style={{ maxWidth: 380 }}>{children}</p>}
       {action && <div style={{ marginTop: 8 }}>{action}</div>}

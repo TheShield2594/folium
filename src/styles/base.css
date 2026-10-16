@@ -74,8 +74,10 @@ a:hover {
   letter-spacing: -0.01em;
 }
 
-.t-large { font: var(--t-large); letter-spacing: -0.01em; }
-.t-title1 { font: var(--t-title1); }
+.t-large { font: var(--t-large); letter-spacing: -0.015em; text-wrap: pretty; }
+.t-title1 { font: var(--t-title1); letter-spacing: -0.01em; }
+/* Compliance and disclosure copy: the only place Sabon Italic appears. */
+.t-disclosure { font: var(--t-disclosure); color: var(--label-2); text-wrap: pretty; }
 .t-title2 { font: var(--t-title2); letter-spacing: -0.005em; }
 .t-title3 { font: var(--t-title3); }
 .t-headline { font: var(--t-headline); }
@@ -142,7 +144,7 @@ a:hover {
 .page {
   max-width: 1240px;
   margin: 0 auto;
-  padding: var(--sp-6) var(--sp-8) var(--sp-10);
+  padding: var(--sp-6) var(--sp-8) 64px;
 }
 .page-narrow {
   max-width: 880px;
@@ -197,82 +199,123 @@ a:hover {
   min-width: 0;
   overflow: hidden;
   background: var(--sidebar);
-  backdrop-filter: saturate(180%) blur(30px);
-  -webkit-backdrop-filter: saturate(180%) blur(30px);
-  border-right: 0.5px solid var(--separator-strong);
+  padding: var(--sp-6) var(--sp-4) var(--sp-4);
 }
 .scrim {
   display: none;
 }
 .sidebar-head {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  height: var(--toolbar-h);
-  padding: 0 var(--sp-4);
+  flex-direction: column;
+  gap: var(--sp-5);
+  padding: 0 var(--sp-2);
 }
-.wordmark {
-  font: 600 21px/1 var(--font-display);
-  letter-spacing: 0.005em;
+/* The approved Everence brandmark, top-left inside the margin (guidelines p.9). */
+.brandmark {
+  display: block;
+  height: 20px;
+  width: auto;
+  max-width: 168px;
+}
+/* The product name is plain text under a rule, never locked up with the brandmark (p.11). */
+.product-name {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding-top: 14px;
+  border-top: 1px solid var(--separator-strong);
+}
+.product-name > span:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.product-name b {
+  font: 700 17px/1.2 var(--font-text);
+  letter-spacing: -0.01em;
   color: var(--label);
+}
+.product-name small {
+  font: var(--t-footnote);
+  color: var(--label-2);
 }
 .sidebar-scroll {
   flex: 1;
   overflow: auto;
-  padding: var(--sp-2) var(--sp-3) var(--sp-4);
+  margin: var(--sp-5) calc(-1 * var(--sp-2)) 0;
+  padding: 2px var(--sp-2) var(--sp-4);
 }
 .sidebar-section {
   margin-top: var(--sp-4);
 }
 .sidebar-section > h2 {
   font: var(--t-caption);
-  color: var(--label-3);
-  text-transform: none;
-  padding: 0 10px 6px;
-  letter-spacing: 0.01em;
+  font-weight: 700;
+  color: var(--label-2);
+  text-transform: uppercase;
+  padding: 0 12px 6px;
+  letter-spacing: 0.06em;
 }
 .nav-item {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
-  min-height: 34px;
-  padding: 6px 10px;
+  min-height: 40px;
+  padding: 0 12px;
   border: 0;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-card);
   background: transparent;
   color: var(--label);
-  font: var(--t-callout);
-  font-weight: 500;
+  font: var(--t-body);
   text-align: left;
   cursor: pointer;
   text-decoration: none;
   transition: background var(--dur-1);
 }
 .nav-item:hover {
-  background: var(--fill);
+  background: var(--sidebar-hover);
   text-decoration: none;
 }
 .nav-item[aria-current='page'] {
-  background: var(--accent-tint-2);
+  background: var(--sidebar-active);
+  box-shadow: 0 1px 2px rgba(0, 51, 70, 0.08);
   color: var(--label);
+  font-weight: 700;
 }
 .nav-item[aria-current='page'] svg {
-  color: var(--accent-text);
+  color: var(--label);
 }
 .nav-item svg {
   color: var(--label-2);
   flex: none;
 }
 .nav-item .count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
   margin-left: auto;
-  font: var(--t-footnote);
-  color: var(--label-3);
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--badge);
+  color: var(--on-badge);
+  font: 700 11px/1 var(--font-text);
   font-variant-numeric: tabular-nums;
 }
+/* Something waits on the advisor: a pumpkin dot beside the navy count. */
+.nav-item .count.alert::before {
+  content: '';
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  margin: -14px -18px 0 0;
+  border-radius: 50%;
+  background: var(--dot-attention);
+  box-shadow: 0 0 0 2px var(--sidebar);
+}
 .nav-item .count.alert {
-  color: var(--warn);
-  font-weight: 600;
+  position: relative;
 }
 
 .client-card {
@@ -282,9 +325,9 @@ a:hover {
   width: 100%;
   padding: 10px;
   border: 0;
-  border-radius: var(--r-md);
-  background: var(--material-thick);
-  box-shadow: var(--shadow-1);
+  border-radius: var(--r-card);
+  background: var(--sidebar-hover);
+  box-shadow: inset 0 0 0 1px var(--border);
   text-align: left;
   cursor: pointer;
   color: var(--label);
@@ -297,8 +340,8 @@ a:hover {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px var(--sp-3) 12px;
-  border-top: 0.5px solid var(--separator);
+  padding: 12px var(--sp-2) 0;
+  border-top: 1px solid var(--separator-strong);
 }
 
 /* ------------------------------------------------------------------ Toolbar */
@@ -311,11 +354,11 @@ a:hover {
   align-items: center;
   gap: var(--sp-2);
   height: var(--toolbar-h);
-  padding: 0 var(--sp-4) 0 var(--sp-3);
+  padding: 0 var(--sp-8);
   background: var(--material);
-  backdrop-filter: saturate(180%) blur(24px);
-  -webkit-backdrop-filter: saturate(180%) blur(24px);
-  border-bottom: 0.5px solid var(--separator);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
 }
 .toolbar-title {
   font: var(--t-headline);
@@ -326,15 +369,65 @@ a:hover {
 }
 .toolbar-sub {
   font: var(--t-footnote);
-  color: var(--label-3);
+  color: var(--label-2);
+}
+/* The ⌘K field: opens the command palette. */
+.toolbar-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  width: min(340px, 40vw);
+  height: 36px;
+  padding: 0 8px 0 12px;
+  border: 1px solid var(--separator-strong);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  color: var(--label-2);
+  font: var(--t-callout);
+  text-align: left;
+  cursor: text;
+  transition: border-color var(--dur-1);
+}
+.toolbar-search:hover {
+  border-color: var(--border-strong);
+}
+.toolbar-search > span {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.toolbar-search .kbd {
+  font-weight: 700;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px rgba(0, 51, 70, 0.18);
+  color: var(--label-2);
+}
+@media (max-width: 1100px) {
+  .toolbar-search {
+    width: 36px;
+    padding: 0;
+    justify-content: center;
+    cursor: pointer;
+  }
+  .toolbar-search > span,
+  .toolbar-search .kbd {
+    display: none;
+  }
 }
 
 /* ------------------------------------------------------------------ Surfaces */
 
 .card {
   background: var(--surface);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-1);
+  border-radius: var(--r-card);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+/* Hero panels and inspector cards take the full margin radius. */
+.panel {
+  border-radius: var(--r-panel);
 }
 .card-pad {
   padding: var(--sp-5);
@@ -360,8 +453,8 @@ a:hover {
 /* Inset grouped list (Settings-style) */
 .list {
   background: var(--surface);
-  border-radius: var(--r-md);
-  box-shadow: var(--shadow-1);
+  border-radius: var(--r-card);
+  box-shadow: inset 0 0 0 1px var(--border);
   overflow: hidden;
 }
 .list-row {
@@ -418,9 +511,9 @@ a.list-row:hover {
   min-height: var(--h);
   padding: 0 14px;
   border: 0;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-card);
   font: var(--t-callout);
-  font-weight: 600;
+  font-weight: 700;
   white-space: nowrap;
   cursor: pointer;
   text-decoration: none;
@@ -442,13 +535,13 @@ a.list-row:hover {
   --h: var(--hit);
   padding: 0 20px;
   font-size: 14px;
-  border-radius: var(--r-md);
 }
 .btn-sm {
-  --h: 28px;
-  padding: 0 10px;
+  --h: 32px;
+  padding: 0 12px;
   font: var(--t-footnote);
-  font-weight: 600;
+  font-weight: 700;
+  border-radius: var(--r-ctl);
 }
 .btn-block {
   width: 100%;
@@ -456,10 +549,9 @@ a.list-row:hover {
 .btn-filled {
   background: var(--accent);
   color: var(--on-accent);
-  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.08), inset 0 0.5px 0 rgba(255, 255, 255, 0.2);
 }
 .btn-filled:hover:not(:disabled) {
-  background: var(--accent-hover);
+  background: var(--accent-pressed);
 }
 .btn-filled:active:not(:disabled) {
   background: var(--accent-pressed);
@@ -496,10 +588,29 @@ a.list-row:hover {
 .btn-bordered {
   background: var(--surface);
   color: var(--label);
-  box-shadow: inset 0 0 0 0.5px var(--separator-strong), var(--shadow-1);
+  box-shadow: inset 0 0 0 1px rgba(0, 51, 70, 0.2);
 }
 .btn-bordered:hover:not(:disabled) {
-  background: var(--surface-2);
+  background: var(--assist);
+}
+/* A one-click fix on a check: white with a grass outline and forest text. */
+.btn-fix {
+  background: var(--surface);
+  color: var(--ev-forest);
+  box-shadow: inset 0 0 0 1px var(--ev-grass);
+}
+.btn-fix:hover:not(:disabled) {
+  background: rgba(53, 132, 80, 0.08);
+}
+:root[data-theme='dark'] .btn-fix {
+  color: var(--accent-text);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .btn-fix {
+    color: var(--accent-text);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
 }
 
 .icon-btn {
@@ -509,7 +620,7 @@ a.list-row:hover {
   height: 34px;
   padding: 0;
   border: 0;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-ctl);
   background: transparent;
   color: var(--label-2);
   cursor: pointer;
@@ -568,7 +679,7 @@ a.list-row:hover {
   min-height: 36px;
   padding: 7px 11px;
   border: 0;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-card);
   background: var(--surface);
   box-shadow: inset 0 0 0 1px var(--separator-strong);
   color: var(--label);
@@ -636,7 +747,7 @@ a.list-row:hover {
   align-items: center;
   gap: 2px;
   padding: 1px 6px;
-  border-radius: 5px;
+  border-radius: 4px;
   background: var(--fill-2);
   color: var(--label-3);
   font: var(--t-caption);
@@ -702,16 +813,16 @@ a.list-row:hover {
   align-self: flex-start;
   max-width: 100%;
   overflow-x: auto;
-  padding: 2px;
-  border-radius: var(--r-sm);
-  background: var(--fill-2);
+  padding: 3px;
+  border-radius: var(--r-card);
+  background: rgba(0, 51, 70, 0.07);
   gap: 2px;
 }
 .segmented button {
-  min-height: 28px;
+  min-height: 30px;
   padding: 0 12px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--r-ctl);
   background: transparent;
   color: var(--label);
   font: var(--t-footnote);
@@ -723,7 +834,7 @@ a.list-row:hover {
 .segmented button[aria-pressed='true'],
 .segmented button[aria-selected='true'] {
   background: var(--surface);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 1px 2px rgba(0, 51, 70, 0.1);
 }
 .segmented {
   position: relative;
@@ -734,12 +845,12 @@ a.list-row:hover {
 }
 .segmented-thumb {
   position: absolute;
-  top: 2px;
-  bottom: 2px;
+  top: 3px;
+  bottom: 3px;
   left: 0;
-  border-radius: 6px;
+  border-radius: var(--r-ctl);
   background: var(--surface);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 1px 2px rgba(0, 51, 70, 0.1);
   transition: transform var(--dur-2) var(--ease), width var(--dur-2) var(--ease);
 }
 .segmented.has-thumb button[aria-pressed='true'] {
@@ -752,24 +863,25 @@ a.list-row:hover {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 30px;
+  min-height: 32px;
   padding: 0 12px;
-  border: 0;
-  border-radius: var(--r-pill);
-  background: var(--fill-2);
+  border: 1px solid rgba(0, 51, 70, 0.18);
+  border-radius: var(--r-chip);
+  background: transparent;
   color: var(--label);
-  font: var(--t-footnote);
-  font-weight: 600;
+  font: var(--t-callout);
   cursor: pointer;
   white-space: nowrap;
-  transition: background var(--dur-1);
+  transition: background var(--dur-1), border-color var(--dur-1);
 }
 .chip:hover {
-  background: var(--fill-3);
+  background: var(--surface);
 }
 .chip[aria-pressed='true'] {
   background: var(--label);
+  border-color: var(--label);
   color: var(--surface);
+  font-weight: 700;
 }
 
 /* Badges */
@@ -796,10 +908,10 @@ a.list-row:hover {
   min-width: 20px;
   height: 20px;
   padding: 0 6px;
-  border-radius: var(--r-pill);
-  background: var(--warn-fill);
-  color: #fff;
-  font: var(--t-caption);
+  border-radius: 10px;
+  background: var(--badge);
+  color: var(--on-badge);
+  font: 700 11px/1 var(--font-text);
   font-variant-numeric: tabular-nums;
 }
 
@@ -808,14 +920,27 @@ a.list-row:hover {
   place-items: center;
   flex: none;
   border-radius: 50%;
-  background: linear-gradient(180deg, #c5d36a, #719500);
+  background: var(--ev-navy);
   color: #fff;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 0.02em;
 }
 .avatar.alt {
-  background: linear-gradient(180deg, #6fb8d6, #00739f);
+  background: var(--ev-royal);
 }
+/* A status dot (never text): pumpkin needs attention, grass passed, royal info. */
+.dot {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dot-passed);
+}
+.dot.attention { background: var(--dot-attention); }
+.dot.info { background: var(--dot-info); }
+.dot.sm { width: 7px; height: 7px; }
+.dot.xs { width: 6px; height: 6px; }
 
 .divider {
   height: 0.5px;
@@ -835,7 +960,7 @@ a.list-row:hover {
 .meter > i {
   position: absolute;
   inset: 0;
-  background: var(--accent);
+  background: var(--grad-green);
   transition: clip-path var(--dur-3) var(--ease);
 }
 
@@ -857,10 +982,13 @@ a.list-row:hover {
 .steps li > i {
   height: 4px;
   border-radius: 2px;
-  background: var(--fill-2);
+  background: var(--pipe-todo);
 }
 .steps li.done > i {
-  background: var(--accent);
+  background: var(--pipe-done);
+}
+.steps li.now > i {
+  background: var(--pipe-current);
 }
 .steps li.wait > i {
   background: repeating-linear-gradient(90deg, var(--warn-fill) 0 6px, transparent 6px 10px);
@@ -878,7 +1006,7 @@ a.list-row:hover {
   align-items: center;
   gap: var(--sp-3);
   padding: 12px var(--sp-4);
-  border-radius: var(--r-md);
+  border-radius: var(--r-card);
   background: var(--warn-tint);
   color: var(--label);
   font: var(--t-callout);
@@ -888,7 +1016,7 @@ a.list-row:hover {
   flex: none;
 }
 .banner.info {
-  background: var(--info-tint);
+  background: var(--assist);
 }
 .banner.info svg {
   color: var(--info);
@@ -1002,7 +1130,7 @@ a.list-row:hover {
   display: flex;
   flex-direction: column;
   background: var(--surface);
-  border-radius: var(--r-xl);
+  border-radius: var(--r-panel);
   box-shadow: var(--shadow-3);
   overflow: hidden;
   animation: sheet-in var(--dur-3) var(--ease);
@@ -1048,7 +1176,7 @@ a.list-row:hover {
   z-index: 90;
   min-width: 220px;
   padding: 5px;
-  border-radius: var(--r-md);
+  border-radius: var(--r-card);
   background: var(--material-thick);
   backdrop-filter: blur(30px) saturate(180%);
   -webkit-backdrop-filter: blur(30px) saturate(180%);
@@ -1063,7 +1191,7 @@ a.list-row:hover {
   min-height: 32px;
   padding: 5px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--r-chip);
   background: transparent;
   color: var(--label);
   font: var(--t-callout);
@@ -1110,7 +1238,7 @@ a.list-row:hover {
   gap: 10px;
   max-width: 520px;
   padding: 10px 14px 10px 12px;
-  border-radius: var(--r-pill);
+  border-radius: var(--r-card);
   background: var(--material-thick);
   backdrop-filter: blur(30px) saturate(180%);
   -webkit-backdrop-filter: blur(30px) saturate(180%);
@@ -1210,6 +1338,9 @@ a.list-row:hover {
   .app {
     grid-template-columns: minmax(0, 1fr);
   }
+  .toolbar {
+    padding: 0 var(--sp-3);
+  }
   .sidebar {
     position: fixed;
     inset: 0 auto 0 0;
@@ -1218,7 +1349,6 @@ a.list-row:hover {
     transform: translateX(-102%);
     transition: transform var(--dur-3) var(--ease);
     box-shadow: var(--shadow-3);
-    background: var(--material-thick);
   }
   .app[data-sidebar='open'] .sidebar {
     transform: none;

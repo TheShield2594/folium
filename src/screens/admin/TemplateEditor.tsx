@@ -751,7 +751,7 @@ function TestTab({ template }: { template: FormTemplate }) {
               ))}
             </div>
           )}
-          <div style={{ background: 'var(--surface-sunken)', borderRadius: 12, padding: 16 }}>
+          <div style={{ background: 'var(--surface-sunken)', borderRadius: 'var(--r-card)', padding: 16 }}>
             <PdfView template={template} fields={fill.fields} placements={template.mapping.placements} width={720} />
           </div>
         </>

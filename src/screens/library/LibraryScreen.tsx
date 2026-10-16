@@ -150,13 +150,13 @@ export function LibraryScreen() {
                 <div className="row wrap" role="group" aria-label="Filter forms" style={{ gap: 6 }}>
                   {FILTERS.map((f) => (
                     <button key={f.value} type="button" className="chip" aria-pressed={filter === f.value} onClick={() => setFilter(f.value)}>
-                      {f.value === 'favorites' && <Icon name="star" size={13} strokeWidth={2} />}
+                      {f.value === 'favorites' && <Icon name="star" size={13} />}
                       {f.label}
                     </button>
                   ))}
                   {state && (
                     <button type="button" className="chip" aria-pressed={stateOnly} onClick={() => setStateOnly(!stateOnly)} title="Only forms approved in the packet’s state. Search still finds the rest.">
-                      <Icon name="map" size={13} strokeWidth={2} />
+                      <Icon name="map" size={13} />
                       Available in {state}
                     </button>
                   )}
@@ -189,7 +189,7 @@ export function LibraryScreen() {
                               aria-label={inPacket ? `Remove ${t.name} from packet` : `Add ${t.name} to packet`}
                               onClick={() => (inPacket ? removeTemplateFromPacket(t.id) : addForm(t.id))}
                             >
-                              <Icon name={inPacket ? 'check' : 'plus'} size={16} strokeWidth={2.4} />
+                              <Icon name={inPacket ? 'check' : 'plus'} size={16} />
                             </button>
                             <button type="button" className="info" onClick={() => setPeek(t)} aria-label={`Preview ${t.name}`}>
                               <span className="name">{t.name}</span>

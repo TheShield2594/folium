@@ -153,7 +153,7 @@ export function AdminPeople() {
                 return (
                   <article key={g.id} className="card card-pad stack-3">
                     <div className="row" style={{ alignItems: 'flex-start' }}>
-                      <span className="avatar" style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--info-tint)', color: 'var(--info)' }}>
+                      <span className="avatar" style={{ width: 40, height: 40, borderRadius: 'var(--r-card)', background: 'var(--info-tint)', color: 'var(--info)' }}>
                         <Icon name={g.region ? 'map' : 'people'} size={20} />
                       </span>
                       <div className="grow">

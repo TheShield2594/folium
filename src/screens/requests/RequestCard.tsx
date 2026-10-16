@@ -304,7 +304,7 @@ export function RequestCard({ req, showClient, clientName }: { req: SignatureReq
 
       <details>
         <summary className="row t-callout c-accent" style={{ minHeight: 36, cursor: 'pointer', fontWeight: 600, listStyle: 'none' }}>
-          <Icon name="chevronRight" size={14} strokeWidth={2.2} className="disclosure" />
+          <Icon name="chevronRight" size={14} className="disclosure" />
           Forms, signers and audit trail
         </summary>
         <div className="grid-2" style={{ marginTop: 10 }}>

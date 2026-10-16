@@ -508,7 +508,7 @@ export function ReviewScreen() {
             {optionalNeeds.length > 0 && (
               <>
                 <button className="btn btn-plain btn-sm" style={{ alignSelf: 'flex-start' }} aria-expanded={showOptional} onClick={() => setShowOptional(!showOptional)}>
-                  <Icon name={showOptional ? 'chevronDown' : 'chevronRight'} size={14} strokeWidth={2.2} />
+                  <Icon name={showOptional ? 'chevronDown' : 'chevronRight'} size={14} />
                   {optionalNeeds.length} optional {optionalNeeds.length === 1 ? 'field' : 'fields'}
                 </button>
                 {showOptional && optionalNeeds.map((n) => renderNeed(n.key, n.fields))}

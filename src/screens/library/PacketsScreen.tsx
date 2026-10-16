@@ -133,7 +133,7 @@ export function PacketsScreen() {
                 return (
                   <article key={p.id} className="card card-pad stack-3">
                     <div className="row" style={{ alignItems: 'flex-start' }}>
-                      <span className="avatar" style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--accent-tint-2)', color: 'var(--accent-text)' }}>
+                      <span className="avatar" style={{ width: 40, height: 40, borderRadius: 'var(--r-card)', background: 'var(--accent-tint-2)', color: 'var(--accent-text)' }}>
                         <Icon name="tray" size={20} />
                       </span>
                       <div className="grow" style={{ minWidth: 0 }}>

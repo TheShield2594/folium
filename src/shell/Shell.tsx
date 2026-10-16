@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { FoliumMark } from '../brand/FoliumMark';
+import { EverenceBrandmark } from '../brand/EverenceBrandmark';
 import { canOpenReports } from '../domain/reports';
 import { useServices } from '../services';
 import { actableUsers, useActingFor, useApp } from '../state/store';
@@ -60,18 +60,27 @@ export function Sidebar() {
   return (
     <nav className="sidebar" aria-label="Folium">
       <div className="sidebar-head">
-        <FoliumMark size={26} />
-        <span className="wordmark">Folium</span>
-        {services.mode === 'demo' && (
-          <span className="badge" style={{ marginLeft: 'auto' }} title="Running on sample data">
-            Demo
+        <EverenceBrandmark />
+        <div className="product-name">
+          <span>
+            <b>Folium</b>
+            <small>Forms &amp; e-signature</small>
           </span>
-        )}
+          {services.mode === 'demo' && (
+            <span className="badge" style={{ marginLeft: 'auto' }} title="Running on sample data">
+              Demo
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="sidebar-scroll">
+        <NavItem to="/today" icon="calendar">
+          Today
+        </NavItem>
+
         {picker && (
-          <div className="field" style={{ marginBottom: 12, padding: '0 2px' }}>
+          <div className="field" style={{ margin: '16px 0 0', padding: '0 2px' }}>
             <label htmlFor="acting-for" className="t-caption c3" style={{ paddingLeft: 8 }}>
               Working for
             </label>
@@ -85,7 +94,7 @@ export function Sidebar() {
           </div>
         )}
 
-        <button className="client-card" onClick={() => setPicking(true)} aria-label={client ? `Client: ${client.contact.fullname}. Change client` : 'Choose a client'}>
+        <button className="client-card" style={{ marginTop: 'var(--sp-4)' }} onClick={() => setPicking(true)} aria-label={client ? `Client: ${client.contact.fullname}. Change client` : 'Choose a client'}>
           {client ? <Avatar name={client.contact.fullname} size={34} alt /> : <span className="avatar" style={{ width: 34, height: 34, background: 'var(--fill-2)', color: 'var(--label-3)' }}><Icon name="person" size={18} /></span>}
           <span className="grow" style={{ minWidth: 0 }}>
             <span className="t-headline ellipsis" style={{ display: 'block' }}>{client ? client.contact.fullname : 'Choose a client'}</span>
@@ -198,7 +207,7 @@ export function Toolbar({ title, subtitle, children, back }: { title?: ReactNode
       <IconButton icon="sidebar" label="Show sidebar" className="only-compact" onClick={() => setSidebar(true)} />
       {back && (
         <button className="btn btn-plain" onClick={() => navigate(back.to)} style={{ paddingLeft: 4 }}>
-          <Icon name="chevronLeft" size={18} strokeWidth={2.2} />
+          <Icon name="chevronLeft" size={18} />
           {back.label}
         </button>
       )}
@@ -207,7 +216,11 @@ export function Toolbar({ title, subtitle, children, back }: { title?: ReactNode
         {subtitle && <div className="toolbar-sub ellipsis">{subtitle}</div>}
       </div>
       {children}
-      <IconButton icon="search" label="Search everything (⌘K)" onClick={() => setPalette(true)} />
+      <button type="button" className="toolbar-search" aria-label="Search clients, forms and requests (⌘K)" onClick={() => setPalette(true)}>
+        <Icon name="search" size={16} />
+        <span>Search clients, forms, requests</span>
+        <kbd className="kbd">⌘K</kbd>
+      </button>
     </header>
   );
 }
