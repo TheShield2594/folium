@@ -216,9 +216,9 @@ export function Toolbar({ title, subtitle, children, back }: { title?: ReactNode
         {subtitle && <div className="toolbar-sub ellipsis">{subtitle}</div>}
       </div>
       {children}
-      <button type="button" className="toolbar-search" aria-label="Search clients, forms and requests (⌘K)" onClick={() => setPalette(true)}>
+      <button type="button" className="toolbar-search" aria-label="Search everything (⌘K)" title="Clients, forms and requests" onClick={() => setPalette(true)}>
         <Icon name="search" size={16} />
-        <span>Search clients, forms, requests</span>
+        <span>Search everything</span>
         <kbd className="kbd">⌘K</kbd>
       </button>
     </header>

@@ -5,7 +5,7 @@ import { ADMIN, ADVISOR, expectNoViolations, go, openAs, openReview } from './he
 // They catch what a machine can: names, roles, contrast, labels, ARIA misuse. The
 // manual audit in docs/ACCESSIBILITY.md covers the rest.
 
-const ADVISOR_SCREENS = ['/', '/packets', '/recent', '/requests', '/drafts', '/client', '/settings'];
+const ADVISOR_SCREENS = ['/today', '/', '/packets', '/recent', '/requests', '/drafts', '/client', '/settings'];
 const ADMIN_SCREENS = ['/admin/templates', '/admin/people', '/admin/feedback', '/admin/announcements', '/admin/firm', '/admin/settings', '/admin/readiness'];
 
 for (const scheme of ['light', 'dark'] as const) {
