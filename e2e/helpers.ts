@@ -20,6 +20,7 @@ export async function openAs(page: Page, userId: string, scheme: 'light' | 'dark
   await expect(page.getByRole('navigation', { name: 'Folium' })).toBeVisible();
 }
 
+/** Move to a screen by its hash route, without reloading, and wait for its toolbar. */
 export async function go(page: Page, path: string) {
   await page.evaluate((p) => (location.hash = `#${p}`), path);
   await expect(page.locator('.toolbar').first()).toBeVisible();

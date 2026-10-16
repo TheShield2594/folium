@@ -41,6 +41,7 @@ const FORMATS: [FieldFormat | '', string][] = [
 ];
 const CHANGE_TONE: Record<FieldChange, 'accent' | 'warn' | 'info' | 'danger' | undefined> = { unchanged: undefined, new: 'warn', renamed: 'info', removed: 'danger' };
 
+/** Administration › a template: map its fields, place signature tabs, set checks, test with a contact, publish. */
 export function TemplateEditor() {
   const { id } = useParams();
   const templates = useApp((s) => s.templates);
@@ -502,6 +503,7 @@ export function TemplateEditor() {
   );
 }
 
+/** The editor's Signers tab: roles and the signature tabs placed on the pages. */
 function SignersTab({ mapping, setMapping, sel, setSel, onPlace }: { mapping: TemplateMapping; setMapping: (m: TemplateMapping) => void; sel?: number; setSel: (i?: number) => void; onPlace: (p: { role: string; type: PlacementType }) => void }) {
   const [role, setRole] = useState(mapping.signers[0]?.role ?? 'Owner');
   const [type, setType] = useState<PlacementType>('signature');

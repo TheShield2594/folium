@@ -184,6 +184,7 @@ export function Sidebar() {
   );
 }
 
+/** A screen's top bar: title, back link, its actions and search. Also names the browser tab. */
 export function Toolbar({ title, subtitle, children, back }: { title?: ReactNode; subtitle?: ReactNode; children?: ReactNode; back?: { label: string; to: string } }) {
   const setSidebar = useApp((s) => s.setSidebar);
   const setPalette = useApp((s) => s.setPalette);
@@ -211,6 +212,7 @@ export function Toolbar({ title, subtitle, children, back }: { title?: ReactNode
   );
 }
 
+/** The window: sidebar, banners, the current screen in `main`, a skip link, and focus moved to each new screen. */
 export function Shell({ children }: { children: ReactNode }) {
   const sidebarOpen = useApp((s) => s.sidebarOpen);
   const setSidebar = useApp((s) => s.setSidebar);

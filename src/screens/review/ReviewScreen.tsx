@@ -27,6 +27,7 @@ import { AttachmentsCard } from './AttachmentsCard';
 import { FieldEditor, FieldInput } from './FieldEditor';
 import { ReportProblemSheet } from './ReportProblemSheet';
 
+/** Prefill & review: the packet's forms as PDFs with what Folium filled in, what's missing, and the pre-send checks. */
 export function ReviewScreen() {
   const client = useApp((s) => s.client);
   const packet = useApp((s) => s.packet);
@@ -627,5 +628,7 @@ export function ReviewScreen() {
   );
 }
 
+/** A field key made safe for an element id. */
 const cssKey = (k: string) => k.replace(/[^a-zA-Z0-9_-]/g, '_');
+/** The element id of a check's row in "Checks before send". */
 const checkId = (id: string) => `check-${cssKey(id)}`;

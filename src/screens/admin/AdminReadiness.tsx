@@ -42,6 +42,7 @@ export function AdminReadiness() {
   return <Readiness />;
 }
 
+/** The readiness checklist, pilot numbers and forms ranked by use. */
 function Readiness() {
   const services = useServices();
   const users = useApp((s) => s.users);
@@ -235,6 +236,7 @@ function ItemRow({ item }: { item: ReadinessItem }) {
   );
 }
 
+/** Laser App's top companies: their Live forms, those still being mapped, and use. */
 function CompanyTable({ coverage, totalUses }: { coverage: ReturnType<typeof companyCoverage>; totalUses?: number }) {
   return (
     <TableScroll label="Top companies’ forms" style={{ borderTop: '0.5px solid var(--separator)' }}>

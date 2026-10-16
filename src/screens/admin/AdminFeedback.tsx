@@ -17,6 +17,7 @@ export function AdminFeedback() {
   return <FeedbackInbox />;
 }
 
+/** The feedback list with its filters, once Administration has loaded. */
 function FeedbackInbox() {
   const services = useServices();
   const templates = useApp((s) => s.templates);
