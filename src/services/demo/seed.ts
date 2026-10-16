@@ -26,7 +26,8 @@ export const USERS: UserProfile[] = [
 /**
  * The demo's `systemuser` rows: what Entra ID holds for each person. Profiles above
  * override them only where they differ; office addresses are set in Folium only.
- * Riley has left (disabled); Avery has signed in but has no Folium profile yet.
+ * Riley has left (disabled); Avery and Sam have opened Folium but have no Folium
+ * profile yet, and the rest are in the directory without having opened it.
  */
 export const DIRECTORY: DirectoryUser[] = [
   { systemuserid: 'usr-advisor-1', fullname: 'Taylor Brenneman', middleName: 'Jo', email: 'taylor.brenneman@example.org', phone: '574-555-0142', fax: '574-555-0199', mobile: '574-555-0177', title: 'Financial advisor' },
@@ -34,7 +35,18 @@ export const DIRECTORY: DirectoryUser[] = [
   { systemuserid: 'usr-assistant-1', fullname: 'Morgan Beachy', email: 'morgan.beachy@example.org', phone: '574-555-0150', title: 'Client service associate' },
   { systemuserid: 'usr-admin-1', fullname: 'Dana Yoder', email: 'dana.yoder@example.org', phone: '574-555-0100', title: 'Forms & operations' },
   { systemuserid: 'usr-advisor-3', fullname: 'Riley Kauffman', email: 'riley.kauffman@example.org', title: 'Financial advisor', disabled: true },
-  { systemuserid: 'usr-advisor-4', fullname: 'Avery Graber', email: 'avery.graber@example.org', phone: '316-555-0120', title: 'Financial advisor' },
+  { systemuserid: 'usr-advisor-4', fullname: 'Avery Graber', email: 'avery.graber@example.org', phone: '316-555-0120', title: 'Financial advisor', city: 'Newton' },
+  { systemuserid: 'usr-assistant-2', fullname: 'Sam Nafziger', email: 'sam.nafziger@example.org', phone: '574-555-0133', title: 'Client service associate', city: 'Goshen' },
+  { systemuserid: 'usr-advisor-5', fullname: 'Casey Hershberger', email: 'casey.hershberger@example.org', phone: '540-555-0188', mobile: '540-555-0189', title: 'Financial advisor', city: 'Harrisonburg' },
+  { systemuserid: 'usr-advisor-6', fullname: 'Jordan Miller', email: 'jordan.miller@example.org', title: 'Financial planner', city: 'Lancaster' },
+  { systemuserid: 'usr-it-1', fullname: 'Taylor Weaver', email: 'taylor.weaver@example.org', title: 'Systems analyst', city: 'Goshen' },
+];
+
+/** Who opened the demo's Folium without a profile, and when (`user.noprofile` events). */
+export const NO_PROFILE_OPENS: { systemuserid: string; at: string }[] = [
+  { systemuserid: 'usr-advisor-4', at: '2026-10-09T14:05:00.000Z' },
+  { systemuserid: 'usr-advisor-4', at: '2026-10-12T13:40:00.000Z' },
+  { systemuserid: 'usr-assistant-2', at: '2026-10-13T15:20:00.000Z' },
 ];
 
 export const GROUPS: UserGroup[] = [

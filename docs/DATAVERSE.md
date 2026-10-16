@@ -42,7 +42,7 @@ Later: `ev_onbasehandle` (phase 2).
 
 `ev_user` (Lookup → systemuser), `ev_role` (Choice: User · Assistant · Admin), `ev_name`, `ev_payload` (`UserProfile`: rep code, OSJ and RIA numbers, branch, region, defaults, sign-off, groupIds, office address, `canEditRepData`, `canViewReports` (the reporting role), `repDataAudit`, `lastSeenOn`). `statecode` 1 (Inactive, `statuscode` 2) is a profile an Admin deactivated: it's kept, so requests keep their owner.
 
-The payload stores only what Folium overrides. Name, middle name, email, phone, fax, mobile and title are read from the user's `systemuser` row (`fullname`, `middlename`, `internalemailaddress`, `address1_telephone1`, `address1_fax`, `mobilephone`, `title`) every time, and `isdisabled` marks someone who has left. Folium users need read access to those `systemuser` columns. A Compliance view on `ev_foliumprofile` (name, role, status, modified on) can be opened in Excel for audits; Users & groups also downloads the list as CSV.
+The payload stores only what Folium overrides. Name, middle name, email, phone, fax, mobile and title are read from the user's `systemuser` row (`fullname`, `middlename`, `internalemailaddress`, `address1_telephone1`, `address1_fax`, `mobilephone`, `title`) every time, and `isdisabled` marks someone who has left. Folium users need read access to those `systemuser` columns. **Add user** in Users & groups searches `systemuser` by the start of `firstname`, `lastname`, `fullname` or `internalemailaddress` (leaving out `isdisabled` accounts, `accessmode` 3 and 4 and application users) and creates the profile linked to the person picked, with `address1_city` as the branch to start from; rep codes are typed in (or imported as CSV) until Everence names the system that holds them. Someone who opens Folium without a profile writes one `user.noprofile` usage event a day, and Users & groups lists them under "Opened Folium without a role" for 90 days or until they get a profile. A Compliance view on `ev_foliumprofile` (name, role, status, modified on) can be opened in Excel for audits; Users & groups also downloads the list as CSV.
 
 ## Contact: ID documents (to confirm)
 
@@ -90,7 +90,7 @@ One row per event per form: a packet sent with 3 forms writes 3 rows sharing `ev
 | Column | Type | Notes |
 |---|---|---|
 | ev_name | Text | `<event> <form number>`, for views |
-| ev_eventtype | Choice | form.added · pdf.fillable · pdf.flattened · pdf.print · draft.saved · send.blocked · request.sent · request.viewed · request.signed · request.declined · request.voided · request.expired · request.inperson. 100000000 upward in this order; `USAGE_EVENT_OPTIONS` in `config.ts` must match. |
+| ev_eventtype | Choice | form.added · pdf.fillable · pdf.flattened · pdf.print · draft.saved · send.blocked · request.sent · request.viewed · request.signed · request.declined · request.voided · request.expired · request.inperson · user.noprofile (someone opened Folium without a profile; at most one a day each). 100000000 upward in this order; `USAGE_EVENT_OPTIONS` in `config.ts` must match. |
 | ev_occurredon | Date/time (indexed) | The device's clock for app events; DocuSign's time for status events |
 | ev_user | Lookup → systemuser | Who did it (for status events, the request's preparer) |
 | ev_actingfor | Lookup → systemuser | The User an Assistant (or colleague) worked for; empty when it's the same person |

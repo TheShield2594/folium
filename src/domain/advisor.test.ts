@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CLIENTS, DIRECTORY, FIRM, USERS } from '../services/demo/seed';
-import { canEditRepField, fieldOrigin, fromSystemUser, mergeAdvisor, profileToSave, REP_AUDIT_LIMIT, withRepAudit, type DirectoryUser } from './advisor';
+import { canEditRepField, fieldOrigin, fromSystemUser, mergeAdvisor, profileFromDirectory, profileToSave, REP_AUDIT_LIMIT, withRepAudit, type DirectoryUser } from './advisor';
 import { describeSource, resolvePath } from './paths';
 import type { UserProfile } from './types';
 import { KNOWN_SOURCES } from '../screens/admin/sources';
@@ -152,5 +152,20 @@ describe('rep data audit', () => {
 
   it('records the edit permission changing', () => {
     expect(withRepAudit(before, { ...before, canEditRepData: false }, 'Dana').repDataAudit?.[0]).toMatchObject({ field: 'canEditRepData', to: 'false' });
+  });
+});
+
+describe('profileFromDirectory', () => {
+  it('starts a User with no groups, showing the directory details and storing none of them', () => {
+    const u = profileFromDirectory({ systemuserid: 'su-9', fullname: 'Avery Graber', email: 'avery@example.org', phone: '316-555-0120', title: 'Financial advisor', city: 'Newton' });
+    expect(u).toMatchObject({ systemuserid: 'su-9', fullname: 'Avery Graber', email: 'avery@example.org', phone: '316-555-0120', title: 'Financial advisor', branch: 'Newton', role: 'User', groupIds: [] });
+    expect(fieldOrigin(u, 'title')).toBe('directory');
+    const stored = profileToSave(u);
+    expect(stored).toMatchObject({ email: '', phone: '', title: '', branch: 'Newton' });
+    expect(stored.directory).toBeUndefined();
+  });
+
+  it('reads the city from the systemuser', () => {
+    expect(fromSystemUser({ systemuserid: 'u', fullname: 'X', address1_city: ' Goshen ' }).city).toBe('Goshen');
   });
 });

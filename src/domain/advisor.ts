@@ -19,6 +19,8 @@ export interface DirectoryUser extends Partial<Pick<Advisor, DirectoryField>> {
   fullname: string;
   /** `systemuser.isdisabled`: the account is turned off (usually: they've left). */
   disabled?: boolean;
+  /** `systemuser.address1_city`: where they work. Only a suggestion for a new profile's branch. */
+  city?: string;
 }
 
 /** Compliance identifiers: Admin-only, even for people allowed to edit their own rep data. */
@@ -56,6 +58,7 @@ export function fromSystemUser(row: Record<string, unknown>): DirectoryUser {
     fax: s('address1_fax'),
     mobile: s('mobilephone'),
     title: s('title'),
+    city: s('address1_city'),
     disabled: row.isdisabled === true || row.isdisabled === 1 || row.isdisabled === 'true' ? true : undefined,
   };
   for (const k of Object.keys(out) as (keyof DirectoryUser)[]) if (out[k] === undefined) delete out[k];
@@ -72,6 +75,7 @@ export const SYSTEMUSER_COLUMNS = [
   'address1_fax',
   'mobilephone',
   'title',
+  'address1_city',
   'isdisabled',
 ];
 
@@ -105,7 +109,7 @@ export function fieldOrigin(u: UserProfile, f: DirectoryField): 'directory' | 'o
  * extras the services add when loading.
  */
 export function profileToSave(u: UserProfile): UserProfile {
-  const { directory, disabled: _d, active: _a, ...out } = u;
+  const { directory, disabled: _d, active: _a, noProfile: _n, ...out } = u;
   if (directory) {
     for (const f of DIRECTORY_FIELDS) {
       if (same(out[f], directory[f]) || blank(out[f])) {
@@ -115,6 +119,15 @@ export function profileToSave(u: UserProfile): UserProfile {
     }
   }
   return out;
+}
+
+/**
+ * A new profile for someone picked from the directory: the User role, no groups, the
+ * directory's details shown (and kept current) rather than copied, and their city as
+ * the branch to start from.
+ */
+export function profileFromDirectory(d: DirectoryUser): UserProfile {
+  return mergeAdvisor(d, { systemuserid: d.systemuserid, fullname: d.fullname, email: '', phone: '', title: '', role: 'User', groupIds: [], repCode: '', branch: d.city ?? '' });
 }
 
 /** Whether `editor` may change `field` on `target`'s profile. */
