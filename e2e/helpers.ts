@@ -23,7 +23,10 @@ export async function openAs(page: Page, userId: string, scheme: 'light' | 'dark
 /** Move to a screen by its hash route, without reloading, and wait for its toolbar. */
 export async function go(page: Page, path: string) {
   await page.evaluate((p) => (location.hash = `#${p}`), path);
-  await expect(page.locator('.toolbar').first()).toBeVisible();
+  // The old screen's toolbar is still up while the new one renders: wait for the route itself.
+  const main = page.locator(`main[data-route="${path}"]`);
+  await expect(main).toBeVisible();
+  await expect(main.locator('.toolbar').first()).toBeVisible();
 }
 
 /** Run axe against the page (or part of it) and fail with a readable list of what's wrong. */

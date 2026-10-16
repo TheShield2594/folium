@@ -341,7 +341,7 @@ export function ReviewScreen() {
                 <span className="sr-only"> to fill</span>
               </span>
             ) : (
-              <Icon name="checkCircle" size={16} className="ok" label="complete" />
+              <Icon name="checkCircle" size={16} className="ok" label="nothing to fill" />
             )}
           </button>
         ))}

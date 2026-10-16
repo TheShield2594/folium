@@ -46,7 +46,7 @@ Blocking means someone using a keyboard or a screen reader couldn't finish the t
 
 ### Known limitations (not blocking)
 
-- **The PDF itself.** The page image is drawn on a canvas and hidden from assistive technology; everything on it that Folium knows about (fields, signature tabs) is exposed through the overlay, and the form's static text is not. The same text is in the template, so an advisor can open the PDF in a reader for it. Folium's downloaded and filled PDFs are untagged AcroForms; tagging them is a template (Marketing) task.
+- **The PDF's printed text (open, 1.1.1).** The page image is drawn on a canvas and hidden from assistive technology. Everything on it that Folium knows about (fields, signature tabs) is exposed through the overlay, but the form's printed text (headings, instructions, terms) is not, so a screen-reader user can miss it. The templates are untagged AcroForms, so opening the PDF in a reader is not a full substitute. **Remediation:** render pdf.js's text layer (`page.getTextContent()`) under the overlay, in reading order with the field boxes, as real but visually transparent text. Tagging the templates themselves is a Marketing task.
 - **Highlight colors.** The overlay's green, amber and blue fills tell the states apart; the outline style also differs (underline, full box, hatch), and the state is in each box's name and in the side panel, so color isn't the only cue. The fills themselves are below 3:1 against white, by design, so the form text stays readable.
 - **The form tab strip** scrolls sideways at 400% zoom when a packet has several forms. Arrow keys reach every tab.
 - **DocuSign.** Signing happens on DocuSign's pages, which have their own conformance statement.
@@ -62,7 +62,7 @@ Terms: **Supports** — meets the criterion without known defects. **Partially s
 
 | Criterion | Level | Remarks |
 |---|---|---|
-| 1.1.1 Non-text content | Supports | Icons are hidden or named; status icons say what they mean. The PDF page image is described by its overlay (see Known limitations). |
+| 1.1.1 Non-text content | Partially supports | Icons are hidden or named; status icons say what they mean. The PDF page's fields and signature tabs are exposed through the overlay, but its printed text is not yet (see Known limitations for the remediation). |
 | 1.2.1–1.2.3 Audio and video | Not applicable | No audio or video. |
 | 1.3.1 Info and relationships | Supports (pending screen-reader check) | Landmarks, headings, labelled inputs, `aria-required`/`aria-invalid`, checks linked with `aria-describedby`, named page groups and tables. |
 | 1.3.2 Meaningful sequence | Supports | PDF overlay in reading order. |

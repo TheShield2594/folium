@@ -202,7 +202,7 @@ export function PdfView({ template, fields = [], placements = [], width = 640, a
 /** What a screen reader hears after a field's label: its value and whether it still needs something. */
 function spokenState(f: FieldState, shown: string): string {
   if (f.locked) return `locked${f.lockReason ? ` ${f.lockReason}` : ''}, prints blank`;
-  if (f.origin === 'signer') return 'completed by the signer';
+  if (f.origin === 'signer') return 'to be completed by the signer';
   const value = f.value ? shown || 'filled' : 'empty';
   const notes = [f.formatError ? `invalid: ${f.formatError}` : f.missing ? 'needs input' : '', f.value ? (f.origin === 'edited' || f.origin === 'advisor' ? 'entered on this form' : f.sourceLabel) : ''].filter(Boolean);
   return [value, ...notes].join(', ');

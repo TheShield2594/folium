@@ -71,7 +71,7 @@ export function FieldInput({ field, value, onChange, hideLabel, choices, describ
     const word = field.mapping.checkedWhen;
     return (
       <label className="row" style={{ minHeight: 32, cursor: 'pointer' }}>
-        <input type="checkbox" className="check" checked={isTruthy(field.display)} onChange={(e) => onChange(e.target.checked ? word : '')} aria-describedby={describe()} />
+        <input type="checkbox" className="check" checked={isTruthy(field.display)} onChange={(e) => onChange(e.target.checked ? word : '')} aria-invalid={need || undefined} aria-describedby={describe()} />
         <span className="t-callout" style={{ fontWeight: 600 }}>{field.label}</span>
         {field.required && <span className="c-warn t-footnote">required</span>}
       </label>
@@ -81,7 +81,7 @@ export function FieldInput({ field, value, onChange, hideLabel, choices, describ
   if (f === 'checkbox') {
     return (
       <label className="row" style={{ minHeight: 32, cursor: 'pointer' }}>
-        <input type="checkbox" className="check" checked={isTruthy(value)} onChange={(e) => onChange(e.target.checked ? 'Yes' : '')} aria-describedby={describe()} />
+        <input type="checkbox" className="check" checked={isTruthy(value)} onChange={(e) => onChange(e.target.checked ? 'Yes' : '')} aria-invalid={need || undefined} aria-describedby={describe()} />
         <span className="t-callout" style={{ fontWeight: 600 }}>{field.label}</span>
         {field.required && <span className="c-warn t-footnote">required</span>}
       </label>

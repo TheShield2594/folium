@@ -248,7 +248,7 @@ export function Shell({ children }: { children: ReactNode }) {
       </a>
       <Sidebar />
       <div className="scrim" onClick={() => setSidebar(false)} aria-hidden="true" />
-      <main id="main" ref={main} className="main" tabIndex={-1}>
+      <main id="main" ref={main} className="main" tabIndex={-1} data-route={location.pathname}>
         <AnnouncementBanners />
         <ConnectionBanner />
         <RestoreBanner />
