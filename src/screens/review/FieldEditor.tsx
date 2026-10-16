@@ -18,8 +18,10 @@ const PLACEHOLDER: Partial<Record<FieldFormat, string>> = { currency: '$0.00', p
  * One input, shaped by the field's format. `choices`: the values a set of boxes or a
  * radio group sharing this field's key offers; with more than one, it's a picker.
  */
-export function FieldInput({ field, value, onChange, hideLabel, choices }: { field: FieldState; value: string; onChange: (v: string) => void; hideLabel?: boolean; choices?: { value: string; label: string }[] }) {
+export function FieldInput({ field, value, onChange, hideLabel, choices, describedBy }: { field: FieldState; value: string; onChange: (v: string) => void; hideLabel?: boolean; choices?: { value: string; label: string }[]; describedBy?: string }) {
   const id = useId();
+  /** The field's own message (format error or help), then any open checks about it. */
+  const describe = (own?: string) => [own, describedBy].filter(Boolean).join(' ') || undefined;
   const f = field.mapping.format;
   const [reveal, setReveal] = useState(false);
   const need = field.missing || !!field.formatError;
@@ -33,7 +35,7 @@ export function FieldInput({ field, value, onChange, hideLabel, choices }: { fie
             {field.label}
           </span>
         )}
-        <TextInput id={id} aria-label={hideLabel ? field.label : undefined} value="" placeholder="Left blank" disabled aria-describedby={`${id}-why`} />
+        <TextInput id={id} aria-label={hideLabel ? field.label : undefined} value="" placeholder="Left blank" disabled aria-describedby={describe(`${id}-why`)} />
         <span id={`${id}-why`} className="help">
           Locked {field.lockReason ?? ''}. It prints blank{value ? '; what you entered comes back if that changes' : ''}.
         </span>
@@ -48,10 +50,10 @@ export function FieldInput({ field, value, onChange, hideLabel, choices }: { fie
         {!hideLabel && (
           <label htmlFor={id} className="row" style={{ gap: 6 }}>
             {label}
-            {field.required && <span className="c-warn" aria-label="required">•</span>}
+            {field.required && <Required />}
           </label>
         )}
-        <Select id={id} aria-label={hideLabel ? label : undefined} value={choices.find((c) => c.value === value.trim().toLowerCase())?.value ?? ''} onChange={(e) => onChange(e.target.value)}>
+        <Select id={id} aria-label={hideLabel ? label : undefined} aria-required={field.required || undefined} aria-invalid={need || undefined} aria-describedby={describe(value && !choices.some((c) => c.value === value.trim().toLowerCase()) ? `${id}-help` : undefined)} value={choices.find((c) => c.value === value.trim().toLowerCase())?.value ?? ''} onChange={(e) => onChange(e.target.value)}>
           <option value="">None ticked</option>
           {choices.map((c) => (
             <option key={c.value} value={c.value}>
@@ -59,7 +61,7 @@ export function FieldInput({ field, value, onChange, hideLabel, choices }: { fie
             </option>
           ))}
         </Select>
-        {value && !choices.some((c) => c.value === value.trim().toLowerCase()) && <span className="help">On file: “{value}”, which none of the boxes match.</span>}
+        {value && !choices.some((c) => c.value === value.trim().toLowerCase()) && <span id={`${id}-help`} className="help">On file: “{value}”, which none of the boxes match.</span>}
       </div>
     );
   }
@@ -69,7 +71,7 @@ export function FieldInput({ field, value, onChange, hideLabel, choices }: { fie
     const word = field.mapping.checkedWhen;
     return (
       <label className="row" style={{ minHeight: 32, cursor: 'pointer' }}>
-        <input type="checkbox" className="check" checked={isTruthy(field.display)} onChange={(e) => onChange(e.target.checked ? word : '')} />
+        <input type="checkbox" className="check" checked={isTruthy(field.display)} onChange={(e) => onChange(e.target.checked ? word : '')} aria-invalid={need || undefined} aria-describedby={describe()} />
         <span className="t-callout" style={{ fontWeight: 600 }}>{field.label}</span>
         {field.required && <span className="c-warn t-footnote">required</span>}
       </label>
@@ -79,7 +81,7 @@ export function FieldInput({ field, value, onChange, hideLabel, choices }: { fie
   if (f === 'checkbox') {
     return (
       <label className="row" style={{ minHeight: 32, cursor: 'pointer' }}>
-        <input type="checkbox" className="check" checked={isTruthy(value)} onChange={(e) => onChange(e.target.checked ? 'Yes' : '')} />
+        <input type="checkbox" className="check" checked={isTruthy(value)} onChange={(e) => onChange(e.target.checked ? 'Yes' : '')} aria-invalid={need || undefined} aria-describedby={describe()} />
         <span className="t-callout" style={{ fontWeight: 600 }}>{field.label}</span>
         {field.required && <span className="c-warn t-footnote">required</span>}
       </label>
@@ -92,14 +94,16 @@ export function FieldInput({ field, value, onChange, hideLabel, choices }: { fie
       {!hideLabel && (
         <label htmlFor={id} className="row" style={{ gap: 6 }}>
           {field.label}
-          {field.required && <span className="c-warn" aria-label="required">•</span>}
+          {field.required && <Required />}
         </label>
       )}
       <div className="row" style={{ gap: 6 }}>
         <TextInput
           id={id}
           need={need}
-          aria-invalid={field.formatError && value ? true : undefined}
+          aria-required={field.required || undefined}
+          aria-invalid={need || undefined}
+          aria-describedby={describe(field.formatError && value ? `${id}-err` : field.mapping.help ? `${id}-help` : undefined)}
           type={f === 'date' ? 'date' : f === 'email' ? 'email' : sensitive && !reveal ? 'password' : 'text'}
           inputMode={f === 'integer' || f === 'ssn' || f === 'ssnLast4' || f === 'ein' || f === 'ssnOrTin' || f === 'zip' ? 'numeric' : f === 'currency' || f === 'percent' || f === 'decimal' ? 'decimal' : f === 'phone' ? 'tel' : undefined}
           value={f === 'date' ? toInputDate(value) : value}
@@ -110,8 +114,26 @@ export function FieldInput({ field, value, onChange, hideLabel, choices }: { fie
         />
         {sensitive && <IconButton icon={reveal ? 'eyeSlash' : 'eye'} label={reveal ? 'Hide' : 'Show'} onClick={() => setReveal(!reveal)} />}
       </div>
-      {field.formatError && value ? <span className="err">{field.formatError}</span> : field.mapping.help ? <span className="help">{field.mapping.help}</span> : null}
+      {field.formatError && value ? (
+        <span id={`${id}-err`} className="err">
+          {field.formatError}
+        </span>
+      ) : field.mapping.help ? (
+        <span id={`${id}-help`} className="help">
+          {field.mapping.help}
+        </span>
+      ) : null}
     </div>
+  );
+}
+
+/** The "required" dot, read as the word. */
+function Required() {
+  return (
+    <span className="c-warn">
+      <span aria-hidden="true">•</span>
+      <span className="sr-only">required</span>
+    </span>
   );
 }
 

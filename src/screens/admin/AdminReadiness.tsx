@@ -19,7 +19,7 @@ import { toCsv } from '../../domain/users';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
 import { useApp } from '../../state/store';
-import { Badge, Button, downloadBytes, Empty, Segmented, Spinner, toast } from '../../ui/controls';
+import { Badge, Button, downloadBytes, Empty, Segmented, Spinner, toast, TableScroll } from '../../ui/controls';
 import { Icon, type IconName } from '../../ui/Icon';
 
 const ISSUES = 'https://github.com/TheShield2594/folium/issues/';
@@ -42,6 +42,7 @@ export function AdminReadiness() {
   return <Readiness />;
 }
 
+/** The readiness checklist, pilot numbers and forms ranked by use. */
 function Readiness() {
   const services = useServices();
   const users = useApp((s) => s.users);
@@ -168,7 +169,7 @@ function Readiness() {
                 {usage === null ? 'Give Admins Read on ev_usageevent (the Folium Reporting role).' : 'Forms show here as advisors add them to packets.'}
               </Empty>
             ) : (
-              <div style={{ overflowX: 'auto' }}>
+              <TableScroll label="Forms ranked by use">
                 <table className="table" style={{ minWidth: 620 }}>
                   <thead>
                     <tr>
@@ -195,7 +196,7 @@ function Readiness() {
                   </tbody>
                 </table>
                 {ranking.length > 25 && <p className="t-footnote c3" style={{ padding: '8px 16px 16px' }}>{ranking.length - 25} more in the CSV.</p>}
-              </div>
+              </TableScroll>
             )}
           </section>
         </div>
@@ -235,9 +236,10 @@ function ItemRow({ item }: { item: ReadinessItem }) {
   );
 }
 
+/** Laser App's top companies: their Live forms, those still being mapped, and use. */
 function CompanyTable({ coverage, totalUses }: { coverage: ReturnType<typeof companyCoverage>; totalUses?: number }) {
   return (
-    <div style={{ overflowX: 'auto', borderTop: '0.5px solid var(--separator)' }}>
+    <TableScroll label="Top companies’ forms" style={{ borderTop: '0.5px solid var(--separator)' }}>
       <table className="table" style={{ minWidth: 620 }}>
         <caption className="t-footnote c3" style={{ textAlign: 'left', padding: '12px 16px 0', captionSide: 'top' }}>
           Laser App’s top companies (98.6% of 55,374 form uses in 12 months) against Folium’s library{totalUses !== undefined ? ' and use in the window' : ''}.
@@ -265,7 +267,7 @@ function CompanyTable({ coverage, totalUses }: { coverage: ReturnType<typeof com
           ))}
         </tbody>
       </table>
-    </div>
+    </TableScroll>
   );
 }
 

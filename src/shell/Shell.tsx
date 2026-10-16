@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { FoliumMark } from '../brand/FoliumMark';
 import { canOpenReports } from '../domain/reports';
@@ -184,10 +184,15 @@ export function Sidebar() {
   );
 }
 
+/** A screen's top bar: title, back link, its actions and search. Also names the browser tab. */
 export function Toolbar({ title, subtitle, children, back }: { title?: ReactNode; subtitle?: ReactNode; children?: ReactNode; back?: { label: string; to: string } }) {
   const setSidebar = useApp((s) => s.setSidebar);
   const setPalette = useApp((s) => s.setPalette);
   const navigate = useNavigate();
+  // Each screen names the browser tab, so the page title says where you are (WCAG 2.4.2).
+  useEffect(() => {
+    if (typeof title === 'string') document.title = `${title} – Folium`;
+  }, [title]);
   return (
     <header className="toolbar">
       <IconButton icon="sidebar" label="Show sidebar" className="only-compact" onClick={() => setSidebar(true)} />
@@ -207,6 +212,7 @@ export function Toolbar({ title, subtitle, children, back }: { title?: ReactNode
   );
 }
 
+/** The window: sidebar, banners, the current screen in `main`, a skip link, and focus moved to each new screen. */
 export function Shell({ children }: { children: ReactNode }) {
   const sidebarOpen = useApp((s) => s.sidebarOpen);
   const setSidebar = useApp((s) => s.setSidebar);
@@ -225,22 +231,31 @@ export function Shell({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [setPalette]);
 
+  const main = useRef<HTMLElement>(null);
+  const firstPath = useRef(true);
   useEffect(() => {
     document.querySelector('.scroll')?.scrollTo({ top: 0 });
+    // A new screen takes focus, so keyboard and screen-reader users start at its top
+    // instead of back in the sidebar. A screen that focuses a field itself goes after this.
+    if (firstPath.current) firstPath.current = false;
+    else if (!main.current?.contains(document.activeElement)) main.current?.focus({ preventScroll: true });
   }, [location.pathname]);
 
   return (
     <div className="app" data-sidebar={sidebarOpen ? 'open' : undefined}>
+      <a className="skip-link" href="#main" onClick={(e) => (e.preventDefault(), main.current?.focus())}>
+        Skip to content
+      </a>
       <Sidebar />
       <div className="scrim" onClick={() => setSidebar(false)} aria-hidden="true" />
-      <div className="main">
+      <main id="main" ref={main} className="main" tabIndex={-1} data-route={location.pathname}>
         <AnnouncementBanners />
         <ConnectionBanner />
         <RestoreBanner />
         <IdleAutoSave />
         <FeedbackNotices />
         {children}
-      </div>
+      </main>
       {paletteOpen && <CommandPalette onClose={() => setPalette(false)} />}
     </div>
   );

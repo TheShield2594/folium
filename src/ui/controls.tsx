@@ -171,6 +171,18 @@ export function Segmented<T extends string>({ value, options, onChange, label }:
   );
 }
 
+/**
+ * A wide table's sideways scroll box. Focusable and named, so keyboard users can scroll
+ * it too (at 400% zoom the table is wider than the screen).
+ */
+export function TableScroll({ label, children, style }: { label: string; children: ReactNode; style?: React.CSSProperties }) {
+  return (
+    <div role="region" aria-label={label} tabIndex={0} style={{ overflowX: 'auto', ...style }}>
+      {children}
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------ Display
 
 export function Avatar({ name, size = 32, alt }: { name: string; size?: number; alt?: boolean }) {

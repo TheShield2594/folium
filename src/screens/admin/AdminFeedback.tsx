@@ -4,7 +4,7 @@ import { categoryLabel, FEEDBACK_STATUSES, filterFeedback, isOpen, resolveFeedba
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
 import { useApp } from '../../state/store';
-import { Badge, Button, Empty, Field, SearchField, Segmented, Select, Sheet, Spinner, TextArea, toast } from '../../ui/controls';
+import { Badge, Button, Empty, Field, SearchField, Segmented, Select, Sheet, Spinner, TextArea, toast, TableScroll } from '../../ui/controls';
 import { fmtDay } from '../requests/RequestCard';
 
 const STATUS_TONE: Record<FeedbackStatus, 'accent' | 'warn' | 'info' | 'danger' | undefined> = { new: 'warn', inProgress: 'info', fixed: 'accent', wontFix: undefined, duplicate: undefined };
@@ -17,6 +17,7 @@ export function AdminFeedback() {
   return <FeedbackInbox />;
 }
 
+/** The feedback list with its filters, once Administration has loaded. */
 function FeedbackInbox() {
   const services = useServices();
   const templates = useApp((s) => s.templates);
@@ -112,7 +113,7 @@ function FeedbackInbox() {
                 {list.length ? 'Try another status or company.' : 'Requests from “Ask Marketing” and problem reports from Review land here.'}
               </Empty>
             ) : (
-              <div style={{ overflowX: 'auto' }}>
+              <TableScroll label="Form feedback">
                 <table className="table" style={{ minWidth: 760 }}>
                   <thead>
                     <tr>
@@ -166,7 +167,7 @@ function FeedbackInbox() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </TableScroll>
             )}
           </section>
         </div>

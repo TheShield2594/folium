@@ -12,7 +12,7 @@ import { fillPdf } from '../../pdf/fill';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
 import { useActingFor, useApp } from '../../state/store';
-import { Badge, Button, Empty, Field, IconButton, Segmented, Select, Sheet, TextInput, downloadBytes, toast } from '../../ui/controls';
+import { Badge, Button, Empty, Field, IconButton, Segmented, Select, Sheet, TextInput, downloadBytes, toast, TableScroll } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
 import { PdfView, useInspection } from '../common/PdfView';
 import { STATUS_TONE } from './AdminTemplates';
@@ -41,6 +41,7 @@ const FORMATS: [FieldFormat | '', string][] = [
 ];
 const CHANGE_TONE: Record<FieldChange, 'accent' | 'warn' | 'info' | 'danger' | undefined> = { unchanged: undefined, new: 'warn', renamed: 'info', removed: 'danger' };
 
+/** Administration › a template: map its fields, place signature tabs, set checks, test with a contact, publish. */
 export function TemplateEditor() {
   const { id } = useParams();
   const templates = useApp((s) => s.templates);
@@ -299,7 +300,7 @@ export function TemplateEditor() {
                       <span className="t-footnote">{w}</span>
                     </div>
                   ))}
-                  <div style={{ overflowX: 'auto' }}>
+                  <TableScroll label="Field mapping">
                     <table className="table mapping" style={{ minWidth: 900 }}>
                       <thead>
                         <tr>
@@ -317,7 +318,7 @@ export function TemplateEditor() {
                           const ch = changeOf(m.pdfField);
                           const custom = !KNOWN_SOURCES.has(m.source);
                           return (
-                            <tr key={m.pdfField} id={fieldRowId(m.pdfField)} className={sel === m.pdfField ? 'sel' : undefined} onClick={() => setSel(m.pdfField)}>
+                            <tr key={m.pdfField} id={fieldRowId(m.pdfField)} className={sel === m.pdfField ? 'sel' : undefined} onClick={() => setSel(m.pdfField)} onFocus={() => setSel(m.pdfField)}>
                               <td>
                                 <div className="mono t-footnote">{m.pdfField}</div>
                                 {ch && ch.change !== 'unchanged' && (
@@ -436,7 +437,7 @@ export function TemplateEditor() {
                         })}
                       </tbody>
                     </table>
-                  </div>
+                  </TableScroll>
                   <p className="t-footnote c3" style={{ padding: '10px 16px 16px' }}>
                     Fields with the same Dataverse source share one value across a packet. Advisor fields with matching labels on different forms can share a value through the field key.
                   </p>
@@ -502,6 +503,7 @@ export function TemplateEditor() {
   );
 }
 
+/** The editor's Signers tab: roles and the signature tabs placed on the pages. */
 function SignersTab({ mapping, setMapping, sel, setSel, onPlace }: { mapping: TemplateMapping; setMapping: (m: TemplateMapping) => void; sel?: number; setSel: (i?: number) => void; onPlace: (p: { role: string; type: PlacementType }) => void }) {
   const [role, setRole] = useState(mapping.signers[0]?.role ?? 'Owner');
   const [type, setType] = useState<PlacementType>('signature');
@@ -553,11 +555,11 @@ function SignersTab({ mapping, setMapping, sel, setSel, onPlace }: { mapping: Te
         </div>
         <div className="list">
           {mapping.placements.map((p, i) => (
-            <div key={i} className="list-row" aria-selected={sel === i} onClick={() => setSel(i)} style={{ cursor: 'pointer' }}>
+            <div key={i} className={['list-row', sel === i && 'selected'].filter(Boolean).join(' ')} onClick={() => setSel(i)} onFocus={() => setSel(i)} style={{ cursor: 'pointer' }}>
               <Icon name={p.type === 'signature' ? 'signature' : p.type === 'dateSigned' ? 'calendar' : 'pencil'} size={16} className="c3" />
-              <span className="grow">
+              <button type="button" className="grow plain-select" aria-pressed={sel === i}>
                 {roleLabel(p.role)} · {p.type === 'dateSigned' ? 'date signed' : p.type}
-              </span>
+              </button>
               <span className="t-footnote c3 mono">
                 p{p.page} · {p.x},{p.y}
               </span>

@@ -108,15 +108,22 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={onKey}
             placeholder="Search forms, packets and places"
+            role="combobox"
             aria-label="Search"
+            aria-expanded="true"
+            aria-autocomplete="list"
             aria-controls="palette-list"
             aria-activedescendant={cmds[sel] ? `cmd-${cmds[sel].id}` : undefined}
             style={{ border: 0, outline: 'none', background: 'transparent', font: 'var(--t-title3)', fontWeight: 400 }}
           />
           <span className="kbd">esc</span>
         </div>
-        <div ref={listRef} id="palette-list" role="listbox" style={{ maxHeight: 420, overflow: 'auto', padding: 6 }}>
-          {cmds.length === 0 && <div className="t-callout c3" style={{ padding: 16 }}>Nothing matches “{q}”.</div>}
+        {cmds.length === 0 && (
+          <div className="t-callout c3" role="status" style={{ padding: 16 }}>
+            Nothing matches “{q}”.
+          </div>
+        )}
+        <div ref={listRef} id="palette-list" role="listbox" aria-label="Results" style={{ maxHeight: 420, overflow: 'auto', padding: cmds.length ? 6 : 0 }}>
           {cmds.map((c, i) => (
             <div
               key={c.id}
@@ -134,7 +141,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
             >
               <Icon name={c.icon} size={17} />
               <span className="grow ellipsis">{c.title}</span>
-              {c.detail && <span className="t-footnote" style={{ opacity: 0.75 }}>{c.detail}</span>}
+              {c.detail && <span className="t-footnote" style={{ opacity: i === sel ? 1 : 0.75 }}>{c.detail}</span>}
             </div>
           ))}
         </div>

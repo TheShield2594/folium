@@ -7,3 +7,7 @@ coverage
 # Scratch output from local test runs (screenshots live in docs/)
 /*.png
 /*.pdf
+
+# Playwright output
+/test-results
+/playwright-report

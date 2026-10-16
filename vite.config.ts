@@ -17,5 +17,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    // e2e/ is Playwright (npm run test:a11y), against the built demo.
+    exclude: ['**/node_modules/**', 'e2e/**'],
   },
 });

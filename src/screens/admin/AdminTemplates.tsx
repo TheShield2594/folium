@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { openProblemCounts } from '../../domain/feedback';
 import type { FormCategory, FormSource, FormTemplate, TemplateStatus } from '../../domain/types';
 import { useServices } from '../../services';
 import type { IncomingFile } from '../../services/types';
 import { Toolbar } from '../../shell/Shell';
 import { useApp } from '../../state/store';
-import { Badge, Button, Empty, Field, SearchField, Segmented, Select, Sheet, TextInput, toast } from '../../ui/controls';
+import { Badge, Button, Empty, Field, SearchField, Segmented, Select, Sheet, TextInput, toast, TableScroll } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
 import { fmtDay } from '../requests/RequestCard';
 import { parseStatesFromTitle } from '../../domain/states';
@@ -128,7 +128,7 @@ export function AdminTemplates() {
                 ]}
               />
             </div>
-            <div style={{ overflowX: 'auto' }}>
+            <TableScroll label="Templates">
               {list.length === 0 ? (
                 <Empty icon="folder" title="No templates match" />
               ) : (
@@ -149,7 +149,10 @@ export function AdminTemplates() {
                     {list.map((t) => (
                       <tr key={t.id} onClick={() => navigate(`/admin/templates/${t.id}`)} style={{ cursor: 'pointer' }}>
                         <td>
-                          <div style={{ fontWeight: 600 }}>{t.name}</div>
+                          {/* The row opens on click; the link is the same thing for the keyboard and screen readers. */}
+                          <Link to={`/admin/templates/${t.id}`} className="row-link" style={{ fontWeight: 600 }} onClick={(e) => e.stopPropagation()}>
+                            {t.name}
+                          </Link>
                           <div className="t-footnote c3">
                             <span className="mono">{t.formNumber}</span> · {t.issuer ?? t.source}
                           </div>
@@ -181,7 +184,7 @@ export function AdminTemplates() {
                   </tbody>
                 </table>
               )}
-            </div>
+            </TableScroll>
           </section>
         </div>
       </div>
