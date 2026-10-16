@@ -1,5 +1,6 @@
 import type { DirectoryUser } from './advisor';
 import type { FirmPolicy, UserGroup, UserProfile, UserRole } from './types';
+import type { UsageEvent } from './usage';
 
 // The user lifecycle in Users & groups: who is active, dormant or gone, what a bulk
 // change will do, and moving the list in and out as CSV. Access itself comes from
@@ -262,4 +263,30 @@ export function planImport(rows: ImportRow[], users: UserProfile[], directory: D
     if (!existing) return { kind: 'new', row, next, changes };
     return changes.length ? { kind: 'changed', row, next, changes } : { kind: 'unchanged', row };
   });
+}
+
+/** Someone who opened Folium without a profile (`user.noprofile` events). */
+export interface WaitingForRole {
+  systemuserid: string;
+  /** The last time they opened it (ISO). */
+  lastOpenedOn: string;
+  /** On how many days they opened it. */
+  days: number;
+}
+
+/**
+ * People who've opened Folium but still have no profile, most recent first, from
+ * `user.noprofile` usage events. Anyone with a profile now (active or not) is left out.
+ */
+export function waitingForRole(events: Pick<UsageEvent, 'type' | 'userId' | 'occurredOn'>[], users: Pick<UserProfile, 'systemuserid'>[]): WaitingForRole[] {
+  const profiled = new Set(users.map((u) => u.systemuserid.toLowerCase()));
+  const byId = new Map<string, { last: string; days: Set<string> }>();
+  for (const e of events) {
+    if (e.type !== 'user.noprofile' || !e.userId || profiled.has(e.userId.toLowerCase())) continue;
+    const seen = byId.get(e.userId) ?? { last: e.occurredOn, days: new Set<string>() };
+    if (e.occurredOn > seen.last) seen.last = e.occurredOn;
+    seen.days.add(e.occurredOn.slice(0, 10));
+    byId.set(e.userId, seen);
+  }
+  return [...byId.entries()].map(([systemuserid, s]) => ({ systemuserid, lastOpenedOn: s.last, days: s.days.size })).sort((a, b) => b.lastOpenedOn.localeCompare(a.lastOpenedOn));
 }

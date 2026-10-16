@@ -66,7 +66,7 @@ describe('usageRow', () => {
   });
 
   it('has an option value for every event type', () => {
-    expect(new Set(Object.values(USAGE_EVENT_OPTIONS)).size).toBe(13);
+    expect(new Set(Object.values(USAGE_EVENT_OPTIONS)).size).toBe(14);
   });
 });
 

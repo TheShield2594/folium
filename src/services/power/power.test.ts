@@ -340,6 +340,31 @@ describe('directory', () => {
     const found = await createPowerServices().directory.lookupDirectory(['RILEY@example.org', '', 'nobody@example.org']);
     expect(found).toEqual([{ systemuserid: 'su-2', fullname: 'Riley Kauffman', email: 'riley@example.org', disabled: true }]);
   });
+
+  it('flags a signed-in person with no profile', async () => {
+    for (const k of Object.keys(profileRows)) delete profileRows[k];
+    const me = await createPowerServices().directory.currentUser();
+    expect(me).toMatchObject({ systemuserid: 'su-1', fullname: 'Taylor Brenneman', role: 'User', noProfile: true });
+  });
+
+  it('searches the directory by each word, leaving out turned-off and non-interactive accounts', async () => {
+    const { directory } = createPowerServices();
+    expect(await directory.searchDirectory(' t ')).toEqual([]);
+    queries.length = 0;
+    await directory.searchDirectory("tay o'brien");
+    const filter = queries.find((q) => q.table === 'systemusers')!.filter!;
+    expect(filter).toContain('isdisabled eq false and accessmode ne 3 and accessmode ne 4 and applicationid eq null');
+    expect(filter).toContain("startswith(lastname,'tay')");
+    expect(filter).toContain("startswith(internalemailaddress,'o''brien')");
+    expect(filter.split(' and (').length).toBe(3);
+  });
+
+  it('looks people up by id, ignoring anything that isn’t a GUID', async () => {
+    const id = '7d4e1c2a-0b9f-4c3d-8e2f-1a2b3c4d5e6f';
+    systemUserRows.push({ systemuserid: id, fullname: 'Avery Graber', internalemailaddress: 'avery@example.org', address1_city: 'Newton' });
+    const found = await createPowerServices().directory.directoryByIds([id, "x' or 1 eq 1"]);
+    expect(found).toEqual([{ systemuserid: id, fullname: 'Avery Graber', email: 'avery@example.org', city: 'Newton' }]);
+  });
 });
 
 describe('DocuSign setup', () => {

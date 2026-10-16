@@ -9,7 +9,7 @@ import { DOCUSIGN_MAIN, type ProviderCapabilities, type SigningSettings } from '
 import { needsSeenStamp } from '../../domain/users';
 import { mapDocuSignStatus } from '../../domain/requests';
 import { formRequest, type FormFeedback } from '../../domain/feedback';
-import type { UsageEvent } from '../../domain/usage';
+import { noProfileEvent, type UsageEvent } from '../../domain/usage';
 import { generateTemplatePdf } from '../../pdf/generate';
 import type {
   CrmService,
@@ -26,7 +26,7 @@ import type {
   TemplateLibrary,
 } from '../types';
 import { createSigningRegistry } from '../registry';
-import { CLIENTS, DIRECTORY, FIRMS, GROUPS, seedAnnouncements, seedFeedback, seedPackets, seedRequests, TEMPLATES, USERS } from './seed';
+import { CLIENTS, DIRECTORY, FIRMS, GROUPS, NO_PROFILE_OPENS, seedAnnouncements, seedFeedback, seedPackets, seedRequests, TEMPLATES, USERS } from './seed';
 import { SPECS } from './specs';
 import { createUsageQueue } from '../usage';
 import { seedUsage } from './usageSeed';
@@ -170,6 +170,16 @@ const directory: DirectoryService = {
   async lookupDirectory(emails) {
     const want = new Set(emails.map((e) => e.trim().toLowerCase()));
     return clone(DIRECTORY.filter((d) => d.email && want.has(d.email.toLowerCase())));
+  },
+  async directoryByIds(ids) {
+    return clone(DIRECTORY.filter((d) => ids.includes(d.systemuserid)));
+  },
+  async searchDirectory(query) {
+    await wait();
+    const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (query.trim().length < 2) return [];
+    const starts = (d: (typeof DIRECTORY)[number], w: string) => [...d.fullname.toLowerCase().split(/\s+/), d.fullname.toLowerCase(), d.email?.toLowerCase() ?? ''].some((x) => x.startsWith(w));
+    return clone(DIRECTORY.filter((d) => !d.disabled && words.every((w) => starts(d, w))).sort((a, b) => a.fullname.localeCompare(b.fullname)).slice(0, 25));
   },
   async listGroups() {
     return clone(state.groups);
@@ -447,7 +457,7 @@ export async function demoUsageWriter(events: UsageEvent[]): Promise<void> {
 let seeded: UsageEvent[] | undefined;
 /** The demo's usage: a seeded year of history plus what was recorded here. For reporting and tests. */
 export function demoUsage(): UsageEvent[] {
-  seeded ??= seedUsage(USERS, GROUPS, TEMPLATES);
+  seeded ??= [...seedUsage(USERS, GROUPS, TEMPLATES), ...NO_PROFILE_OPENS.flatMap((o) => noProfileEvent(o.systemuserid, new Date(o.at)))];
   return [...seeded, ...clone(state.usage ?? [])];
 }
 
@@ -455,10 +465,10 @@ export function demoUsage(): UsageEvent[] {
 export const recordedUsage = (): UsageEvent[] => clone(state.usage ?? []);
 
 const usage = Object.assign(createUsageQueue(demoUsageWriter), {
-  async list(since: string) {
+  async list(since: string, types?: UsageEvent['type'][]) {
     await wait(120);
     const events = demoUsage()
-      .filter((e) => e.occurredOn >= since)
+      .filter((e) => e.occurredOn >= since && (!types?.length || types.includes(e.type)))
       .sort((a, b) => a.occurredOn.localeCompare(b.occurredOn));
     return { events, truncated: false };
   },

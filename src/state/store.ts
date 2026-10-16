@@ -11,7 +11,7 @@ import { carryVariantValues, copyScope, migrateAccountValues, seedCopyValues, ty
 import { currentTemplates, latestLive } from '../domain/revisions';
 import type { CheckResult } from '../domain/checks';
 import { normalizeState, pickVariant } from '../domain/states';
-import { statusEvents, usageEvents, type UsageEventType } from '../domain/usage';
+import { noProfileEvent, statusEvents, usageEvents, type UsageEventType } from '../domain/usage';
 import type {
   Attachment,
   ClientRecord,
@@ -334,6 +334,8 @@ export const useApp = create<AppState>((set, get) => ({
         services.packets.list(),
       ]);
       announcementsReadAt = Date.now();
+      // So Users & groups can list them for an administrator to give a role (one row a day).
+      if (me.noProfile && me.systemuserid) services.usage.track(noProfileEvent(me.systemuserid));
       set({
         me,
         users,

@@ -264,6 +264,7 @@ table UsageEvent
 						else if [ev_eventtype] = 100000010 then "request.voided"
 						else if [ev_eventtype] = 100000011 then "request.expired"
 						else if [ev_eventtype] = 100000012 then "request.inperson"
+						else if [ev_eventtype] = 100000013 then "user.noprofile"
 						else "unknown", type text),
 					WithIssuer = Table.AddColumn(WithType, "Issuer", each if [ev_issuer] <> null and [ev_issuer] <> "" then [ev_issuer] else if [ev_source] <> null then [ev_source] else "Unknown", type text),
 					WithForm = Table.AddColumn(WithIssuer, "Form", each [ev_formnumber] & " Rev " & (if [ev_revision] = null then "?" else [ev_revision]), type text)

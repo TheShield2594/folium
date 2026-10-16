@@ -17,7 +17,8 @@ export type UsageEventType =
   | 'request.declined'
   | 'request.voided'
   | 'request.expired'
-  | 'request.inperson';
+  | 'request.inperson'
+  | 'user.noprofile';
 
 export const USAGE_EVENT_TYPES: UsageEventType[] = [
   'form.added',
@@ -33,10 +34,20 @@ export const USAGE_EVENT_TYPES: UsageEventType[] = [
   'request.voided',
   'request.expired',
   'request.inperson',
+  'user.noprofile',
 ];
 
 /** Events DocuSign reports. Both Check status and the Connect flow write them, so they're deduplicated. */
 export const STATUS_EVENT_TYPES: UsageEventType[] = ['request.viewed', 'request.signed', 'request.declined', 'request.voided', 'request.expired'];
+
+/**
+ * Someone opened Folium without a Folium profile (at most one row a day each, by its
+ * dedupe key), so Users & groups can list them for an administrator to give a role.
+ */
+export function noProfileEvent(userId: string, at: Date = new Date()): UsageEvent[] {
+  const day = at.toISOString().slice(0, 10);
+  return usageEvents('user.noprofile', { user: { systemuserid: userId, groupIds: [] }, at, batchId: `noprofile|${userId}|${day}` }, []);
+}
 
 /**
  * The only `detail` keys a row may carry: how a PDF was made, how many signers and how

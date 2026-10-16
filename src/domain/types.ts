@@ -477,6 +477,8 @@ export interface UserProfile extends Advisor {
   disabled?: boolean;
   /** Read-only, from the services: what the directory holds, under any values set in Folium. */
   directory?: DirectoryUser;
+  /** Read-only, from `currentUser()`: the signed-in person has no `ev_foliumprofile` row yet. */
+  noProfile?: boolean;
 }
 
 export interface RepDataChange {

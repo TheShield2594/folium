@@ -131,6 +131,7 @@ export const USAGE_EVENT_OPTIONS: Record<UsageEventType, number> = {
   'request.voided': 100000010,
   'request.expired': 100000011,
   'request.inperson': 100000012,
+  'user.noprofile': 100000013,
 };
 
 /** `ev_formrequest.ev_kind` and `ev_status` option values (DATAVERSE.md). */

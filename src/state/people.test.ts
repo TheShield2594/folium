@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { planBulk } from '../domain/users';
+import { planBulk, waitingForRole } from '../domain/users';
 import { createDemoServices, resetDemo } from '../services/demo';
 import { saveUserChanges } from './people';
 
@@ -55,6 +55,28 @@ describe('demo directory', () => {
     expect(again.fax).toBe('574-555-0000');
     expect(again.directory?.fax).toBe('574-555-0199');
     expect(await directory.lookupDirectory(['AVERY.graber@example.org'])).toMatchObject([{ systemuserid: 'usr-advisor-4' }]);
+  });
+
+  it('finds people by the start of each word of their name or email', async () => {
+    const { directory } = createDemoServices();
+    expect(await directory.searchDirectory('a')).toEqual([]);
+    expect((await directory.searchDirectory('taylor')).map((d) => d.fullname)).toEqual(['Taylor Brenneman', 'Taylor Weaver']);
+    expect((await directory.searchDirectory('tay wea')).map((d) => d.fullname)).toEqual(['Taylor Weaver']);
+    expect((await directory.searchDirectory('sam.naf')).map((d) => d.systemuserid)).toEqual(['usr-assistant-2']);
+    // Riley's account is turned off.
+    expect(await directory.searchDirectory('riley')).toEqual([]);
+    expect((await directory.directoryByIds(['usr-advisor-4'])).map((d) => d.city)).toEqual(['Newton']);
+  });
+
+  it('lists who opened Folium without a profile', async () => {
+    const { usage, directory } = createDemoServices();
+    const { events } = await usage.list('2026-09-01T00:00:00.000Z', ['user.noprofile']);
+    expect(new Set(events.map((e) => e.type))).toEqual(new Set(['user.noprofile']));
+    const waiting = waitingForRole(events, await directory.listUsers());
+    expect(waiting.map((w) => [w.systemuserid, w.days])).toEqual([
+      ['usr-assistant-2', 1],
+      ['usr-advisor-4', 2],
+    ]);
   });
 
   it('records the sign-in once a day', async () => {
