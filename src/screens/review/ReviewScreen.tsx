@@ -134,6 +134,14 @@ export function ReviewScreen() {
     requestAnimationFrame(() => document.getElementById(`in-${cssKey(key)}`)?.querySelector<HTMLElement>('input, select, textarea')?.focus());
   }
 
+  /** The open checks about a field, so its input and its box on the page are described by them. */
+  function checkIdsFor(key: string, itemId?: string): string | undefined {
+    const ids = (view?.checks ?? [])
+      .filter((c) => c.level !== 'pass' && c.fieldKey === key && (!itemId || !c.itemId || c.itemId === itemId))
+      .map((c) => checkId(c.id));
+    return ids.length ? ids.join(' ') : undefined;
+  }
+
   function nextMissing() {
     const keys = needs.filter((n) => n.fields.some((f) => f.missing || f.formatError)).map((n) => n.key);
     if (!keys.length) return toast.ok('Nothing left to fill.');
@@ -257,7 +265,7 @@ export function ReviewScreen() {
     const forms = [...new Set(fields.map((x) => view!.fills.find((v) => v.itemId === x.itemId)).map((v) => (v ? formLabel(v) : undefined)))];
     return (
       <div key={key} id={`in-${cssKey(key)}`} className={['input-row', selected === key && 'active'].filter(Boolean).join(' ')} onFocus={() => setSelected(key)}>
-        <FieldInput field={f} value={packet.values[key] ?? f.value} onChange={(v) => setValue(key, v)} choices={choicesFor(key)} />
+        <FieldInput field={f} value={packet.values[key] ?? f.value} onChange={(v) => setValue(key, v)} choices={choicesFor(key)} describedBy={checkIdsFor(key)} />
         <div className="where" style={{ marginTop: 6 }}>
           {forms.length > 1 ? `Used on ${forms.length} forms — enter it once` : forms[0]}
           {sourceKind(f.mapping.source) === 'crm' && ' · not on file in CRM'}
@@ -309,19 +317,39 @@ export function ReviewScreen() {
         </Button>
       </Toolbar>
 
-      <div className="doc-tabs" role="tablist" aria-label="Forms in this packet">
+      <div
+        className="doc-tabs"
+        role="tablist"
+        aria-label="Forms in this packet"
+        onKeyDown={(e) => {
+          // Arrow keys move between forms, as in any tab list; Tab moves on to the form itself.
+          const n = view.fills.length;
+          const to = e.key === 'ArrowRight' ? (active + 1) % n : e.key === 'ArrowLeft' ? (active - 1 + n) % n : e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : -1;
+          if (to < 0) return;
+          e.preventDefault();
+          setActive(to);
+          document.getElementById(`doc-tab-${to}`)?.focus();
+        }}
+      >
         {view.fills.map((f, i) => (
-          <button key={f.itemId} role="tab" className="doc-tab" aria-selected={i === active} onClick={() => setActive(i)}>
+          <button key={f.itemId} id={`doc-tab-${i}`} role="tab" className="doc-tab" aria-selected={i === active} aria-controls="doc-panel" tabIndex={i === active ? 0 : -1} onClick={() => setActive(i)}>
             {formLabel(f)}
-            {f.missingCount ? <span className="count-dot">{f.missingCount}</span> : <Icon name="checkCircle" size={16} className="ok" />}
+            {f.missingCount ? (
+              <span className="count-dot">
+                {f.missingCount}
+                <span className="sr-only"> to fill</span>
+              </span>
+            ) : (
+              <Icon name="checkCircle" size={16} className="ok" label="complete" />
+            )}
           </button>
         ))}
       </div>
 
       <div className="review" style={{ flex: 1, minHeight: 0 }}>
-        <section className="review-canvas" ref={canvasRef} aria-label={`${fill ? formLabel(fill) : ''} preview`}>
+        <section className="review-canvas" ref={canvasRef} id="doc-panel" role="tabpanel" aria-labelledby={`doc-tab-${active}`}>
           <div className="row wrap" style={{ maxWidth: width, margin: '0 auto 14px', justifyContent: 'space-between' }}>
-            <div className="legend" aria-label="Legend">
+            <div className="legend" role="group" aria-label="Legend">
               <span><i style={{ background: 'var(--hl-crm)', boxShadow: 'inset 0 -1.5px 0 var(--hl-crm-line)' }} />From CRM</span>
               <span><i style={{ background: 'var(--hl-need)', boxShadow: 'inset 0 0 0 1.25px var(--hl-need-line)' }} />Needs input</span>
               <span><i style={{ background: 'var(--hl-edit)', boxShadow: 'inset 0 -1.5px 0 var(--hl-edit-line)' }} />Entered or changed</span>
@@ -346,7 +374,9 @@ export function ReviewScreen() {
               placements={fill.template.mapping.placements}
               width={width}
               activeKey={selected}
-              onFieldClick={(f) => f.origin !== 'signer' && focusKey(f.key, f.itemId)}
+              onFieldClick={(f) => focusKey(f.key, f.itemId)}
+              canActivate={(f) => f.origin !== 'signer'}
+              describedBy={(f) => checkIdsFor(f.key, f.itemId)}
               pageLabel={(p) => (
                 <span className="t-footnote c3">
                   {fill.template.formNumber} · page {p} of {fill.template.pageCount}
@@ -494,7 +524,7 @@ export function ReviewScreen() {
               {view.checks.map((c) => {
                 const content = (
                   <>
-                    <Icon name={c.level === 'pass' ? 'checkCircle' : c.level === 'warn' ? 'info' : 'warning'} size={18} className={c.level === 'pass' ? 'c-accent' : c.level === 'warn' ? 'c-info' : 'c-warn'} />
+                    <Icon name={c.level === 'pass' ? 'checkCircle' : c.level === 'warn' ? 'info' : 'warning'} size={18} className={c.level === 'pass' ? 'c-accent' : c.level === 'warn' ? 'c-info' : 'c-warn'} label={c.level === 'pass' ? 'Passed:' : c.level === 'warn' ? 'Note:' : 'To fix:'} />
                     <span className="grow">
                       <span style={{ fontWeight: c.level === 'pass' ? 400 : 600 }}>{c.title}</span>
                       {c.detail && <span className="t-footnote c3" style={{ display: 'block' }}>{c.detail}</span>}
@@ -504,7 +534,7 @@ export function ReviewScreen() {
                 if (c.id === 'current-revisions' && c.level === 'block') {
                   const preview = upgradePacketItems(packet.items, packet.values, templates).report;
                   return (
-                    <div key={c.id} className="check-row">
+                    <div key={c.id} id={checkId(c.id)} className="check-row">
                       {content}
                       {preview.forms.some((f) => f.state === 'newer') && (
                         <Button variant="tinted" size="sm" onClick={() => setUpgrade(preview)}>
@@ -515,12 +545,12 @@ export function ReviewScreen() {
                   );
                 }
                 return c.level !== 'pass' && (c.fieldKey || c.templateId) ? (
-                  <button key={c.id} className="check-row" onClick={() => focusKey(c.fieldKey, c.itemId ?? c.templateId)}>
+                  <button key={c.id} id={checkId(c.id)} className="check-row" onClick={() => focusKey(c.fieldKey, c.itemId ?? c.templateId)}>
                     {content}
                     <Icon name="chevronRight" size={14} className="c3" />
                   </button>
                 ) : (
-                  <div key={c.id} className="check-row">
+                  <div key={c.id} id={checkId(c.id)} className="check-row">
                     {content}
                   </div>
                 );
@@ -598,3 +628,4 @@ export function ReviewScreen() {
 }
 
 const cssKey = (k: string) => k.replace(/[^a-zA-Z0-9_-]/g, '_');
+const checkId = (id: string) => `check-${cssKey(id)}`;

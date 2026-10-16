@@ -31,7 +31,7 @@ export function QuickLook({ template, inPacket, onAdd, onClose, latest }: { temp
       }
     >
       <div className="quicklook">
-        <div className="ql-preview">
+        <div className="ql-preview" tabIndex={0} role="region" aria-label={`Preview of ${template.name}`}>
           <PdfView template={template} width={420} maxPages={2} placements={template.mapping.placements} showValues={false} />
         </div>
         <div className="stack-4 ql-meta">

@@ -20,6 +20,7 @@ Everence's replacement for LaserApp Anywhere. Advisors pick forms from a client'
 npm install
 npm run dev        # http://localhost:5173 — demo mode, sample clients and forms
 npm test           # domain and PDF tests
+npm run test:a11y  # WCAG 2.1 AA checks (axe + Playwright) on the built demo
 npm run build
 ```
 
@@ -42,7 +43,7 @@ See [docs/PARITY.md](docs/PARITY.md) for the feature-by-feature comparison with 
 
 ## Design
 
-Built to Apple's Human Interface Guidelines — source-list sidebar, translucent toolbars, inspectors, sheets, segmented controls, 44 pt targets, light and dark appearance, reduced motion — in the Everence brand: the guidelines' web-accessible greens, navy and royal, Warm Gray grounds, Frutiger for text and Sabon for display (Verdana and Times as fallbacks).
+Built to Apple's Human Interface Guidelines — source-list sidebar, translucent toolbars, inspectors, sheets, segmented controls, 44 pt targets, light and dark appearance, reduced motion, WCAG 2.1 AA ([audit](docs/ACCESSIBILITY.md)) — in the Everence brand: the guidelines' web-accessible greens, navy and royal, Warm Gray grounds, Frutiger for text and Sabon for display (Verdana and Times as fallbacks).
 
 ## Docs
 
@@ -51,4 +52,5 @@ Built to Apple's Human Interface Guidelines — source-list sidebar, translucent
 - [Dataverse schema](docs/DATAVERSE.md)
 - [Reports](docs/REPORTS.md)
 - [Replacement readiness](docs/READINESS.md)
+- [Accessibility (WCAG 2.1 AA audit and conformance)](docs/ACCESSIBILITY.md)
 - [DocuSign custom connector](connectors/folium-docusign.swagger.json)

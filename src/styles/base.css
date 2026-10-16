@@ -40,6 +40,10 @@ a {
 a:hover {
   text-decoration: underline;
 }
+/* A link in running text is underlined, so it doesn't rely on color alone (WCAG 1.4.1). */
+:where(p, li, dd, .help, .banner) a:not([class]) {
+  text-decoration: underline;
+}
 
 :focus-visible {
   outline: 3px solid var(--focus);
@@ -96,6 +100,27 @@ a:hover {
 }
 .app[data-sidebar='hidden'] {
   grid-template-columns: 0 minmax(0, 1fr);
+}
+
+/* Hidden until a keyboard user tabs to it, then shown over the sidebar. */
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 1000;
+  padding: 10px 14px;
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--label);
+  font-weight: 600;
+  box-shadow: var(--shadow-2);
+  transform: translateY(-200%);
+}
+.skip-link:focus {
+  transform: none;
+}
+.main:focus {
+  outline: none;
 }
 
 .main {
@@ -372,7 +397,8 @@ button.list-row:hover,
 a.list-row:hover {
   background: var(--fill);
 }
-.list-row[aria-selected='true'] {
+.list-row[aria-selected='true'],
+.list-row.selected {
   background: var(--accent-tint);
 }
 .list-row .detail {
@@ -557,7 +583,7 @@ a.list-row:hover {
 .select:focus,
 .textarea:focus {
   outline: none;
-  box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 3.5px var(--accent-tint-2);
+  box-shadow: inset 0 0 0 2px var(--accent), 0 0 0 3.5px var(--accent-tint-2);
 }
 .input[aria-invalid='true'] {
   box-shadow: inset 0 0 0 1px var(--danger), 0 0 0 3px var(--danger-tint);
@@ -599,7 +625,7 @@ a.list-row:hover {
 }
 .search .input:focus {
   background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 3.5px var(--accent-tint-2);
+  box-shadow: inset 0 0 0 2px var(--accent), 0 0 0 3.5px var(--accent-tint-2);
 }
 .search .kbd {
   position: absolute;
@@ -886,6 +912,23 @@ a.list-row:hover {
   border-radius: 0;
   border-bottom: 1px solid var(--separator);
 }
+/* A row's own select button: reads as the row's text (the row handles the click). */
+.plain-select {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* A table row's own link: reads as the row's text, underlines on hover like any link. */
+.row-link {
+  display: block;
+  color: inherit;
+}
+
 /* Admin announcements: one row (icon, text, dismiss); long URLs wrap instead of widening the page. */
 .app-banner.announcement {
   flex-wrap: nowrap;
@@ -905,7 +948,8 @@ a.list-row:hover {
   white-space: pre-line;
 }
 .announcement-text a {
-  color: var(--accent);
+  /* The banner's own text color: the accent green is under 4.5:1 on the tinted banner. */
+  color: inherit;
   text-decoration: underline;
 }
 .banner.critical .announcement-text {
@@ -1212,5 +1256,17 @@ a.list-row:hover {
 @media (max-width: 1180px) {
   .hide-narrow {
     display: none !important;
+  }
+}
+
+/* 400% zoom (320 CSS px): the toolbar's actions wrap onto a second line instead of
+   running off the edge (WCAG 1.4.10 Reflow). */
+@media (max-width: 480px) {
+  .toolbar {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: var(--toolbar-h);
+    padding-top: 6px;
+    padding-bottom: 6px;
   }
 }
