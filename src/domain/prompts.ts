@@ -128,7 +128,8 @@ export function requestPrompt(req: SignatureRequest, clientName: string, today: 
  * `days`: packets pick it up on their own, but drafts on the old one will need updating.
  */
 export function revisionPrompts(packets: SavedPacket[], templates: FormTemplate[], today: Date, days = 30): Prompt[] {
-  const until = new Date(today.getTime() + days * 86_400_000);
+  // Calendar days, so a daylight-saving change can't move the boundary.
+  const until = new Date(today.getFullYear(), today.getMonth(), today.getDate() + days);
   const out: Prompt[] = [];
   const seen = new Set<string>();
   for (const p of packets) {
@@ -171,7 +172,8 @@ export function relativeTime(iso: string | undefined, now: Date): string {
   if (mins < 2) return 'Just now';
   if (mins < 60) return `${mins} min ago`;
   if (mins < 60 * 12) return `${Math.round(mins / 60)} h ago`;
-  const days = Math.floor((new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() - new Date(at.getFullYear(), at.getMonth(), at.getDate()).getTime()) / 86_400_000);
+  // Midnight to midnight is 23 or 25 hours across a daylight-saving change: round, don't floor.
+  const days = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() - new Date(at.getFullYear(), at.getMonth(), at.getDate()).getTime()) / 86_400_000);
   if (days <= 0) return 'Today';
   if (days === 1) return 'Yesterday';
   return at.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });

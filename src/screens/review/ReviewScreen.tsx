@@ -113,7 +113,13 @@ export function ReviewScreen() {
   const sum = view ? summarize(view.checks) : undefined;
   const order = view ? goodOrder(view.checks) : undefined;
   // Checks lead while anything blocks; otherwise the field inputs do.
-  const [tab, setTab] = useState<'checks' | 'fields'>(() => (sum?.blocking ? 'checks' : 'fields'));
+  const [chosenTab, setTab] = useState<'checks' | 'fields'>();
+  // Checks lead while anything blocks, decided once the packet's checks are known (the
+  // client may still be loading on the first render). After that the advisor's choice stands.
+  useEffect(() => {
+    if (!chosenTab && sum) setTab(sum.blocking ? 'checks' : 'fields');
+  }, [chosenTab, sum]);
+  const tab = chosenTab ?? 'fields';
   const changedSince = useMemo(() => (view ? snapshotDiff(packet.snapshot, view.fills) : []), [view, packet.snapshot]);
   const replaced = packet.items.filter((i) => i.accountReplaced);
 

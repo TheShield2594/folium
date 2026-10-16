@@ -484,7 +484,8 @@ describe('checks', () => {
   it('has no split fix when no share is entered yet', () => {
     const values = { 'bene.Prim.1.pct': '', 'bene.Prim.2.pct': '', 'bene.Prim.3.pct': '' };
     const shares = runChecks(prefillPacket([{ template: bene }], scope, values), ctx(values)).find((r) => r.title.includes('100%'))!;
-    if (shares.level === 'block') expect(shares.fix).toBeUndefined();
+    expect(shares.level).toBe('block');
+    expect(shares.fix).toBeUndefined();
   });
 
   it('offers the Dynamics 365 value back for a required field the advisor cleared', () => {

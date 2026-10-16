@@ -37,7 +37,16 @@ export async function buildPacket(text: string): Promise<PacketSuggestion[] | un
   }
   if (!(await app.confirmReplacePacket('switch'))) return undefined;
   useApp.getState().clearPacket();
-  const added = picks.filter((p) => addForm(p.template.id) === 'added');
-  useApp.getState().setPacket({ reasons: Object.fromEntries(added.map((p) => [p.template.id, p.reason])) });
+  // Key each reason by the template that actually went in: adding picks the version for
+  // the packet's state, which can differ from the one suggested.
+  const added: PacketSuggestion[] = [];
+  const reasons: Record<string, string> = {};
+  for (const p of picks) {
+    if (addForm(p.template.id) !== 'added') continue;
+    const item = useApp.getState().packet.items.at(-1);
+    reasons[item?.templateId ?? p.template.id] = p.reason;
+    added.push(p);
+  }
+  useApp.getState().setPacket({ reasons });
   return added;
 }

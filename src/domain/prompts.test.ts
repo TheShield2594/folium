@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CLIENTS, TEMPLATES } from '../services/demo/seed';
-import { clientPrompts, draftPrompt, greeting, requestPrompt, revisionPrompts, rmdAge, sortPrompts } from './prompts';
+import { clientPrompts, draftPrompt, greeting, relativeTime, requestPrompt, revisionPrompts, rmdAge, sortPrompts } from './prompts';
+import { afterEach, beforeEach } from 'vitest';
 import { suggestPacket } from './startPacket';
 import { currentTemplates } from './revisions';
 import type { ClientRecord, SignatureRequest } from './types';
@@ -57,6 +58,29 @@ describe('Today prompts', () => {
     expect(p).toHaveLength(1);
     expect(p[0].title).toBe(`${t.name} Rev 11/2026 takes effect Nov 1`);
     expect(revisionPrompts([{ id: 'p', name: 'x', templateIds: [t.id], shared: false, owner: 'me', createdOn: '', usedCount: 0 }], [t, { ...next, effectiveDate: '2027-03-01' }], today)).toHaveLength(0);
+  });
+
+  describe('across a daylight-saving change', () => {
+    const tz = process.env.TZ;
+    beforeEach(() => {
+      process.env.TZ = 'America/Chicago';
+    });
+    afterEach(() => {
+      process.env.TZ = tz;
+    });
+
+    it('counts the revision window in calendar days', () => {
+      // Oct 16 + 30 days is Nov 15; clocks go back on Nov 1.
+      const t = TEMPLATES.find((x) => x.status === 'Live')!;
+      const next = { ...t, id: 'next', revision: '11/2026', effectiveDate: '2026-11-15' };
+      const packet = { id: 'p', name: 'x', templateIds: [t.id], shared: false, owner: 'me', createdOn: '', usedCount: 0 };
+      expect(revisionPrompts([packet], [t, next], new Date(2026, 9, 16))).toHaveLength(1);
+    });
+
+    it('still calls the day before Yesterday', () => {
+      // Clocks go forward on Mar 8, 2026: that midnight-to-midnight is 23 hours.
+      expect(relativeTime(new Date(2026, 2, 8, 9).toISOString(), new Date(2026, 2, 9, 10))).toBe('Yesterday');
+    });
   });
 
   it('puts stuck work first and greets by time of day', () => {
