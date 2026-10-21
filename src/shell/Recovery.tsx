@@ -1,14 +1,16 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useBlocker } from 'react-router-dom';
 import { defaultDraftTitle } from '../domain/drafts';
 import { draftsAllowed, retentionDays } from '../domain/requests';
 import { usePacketView } from '../screens/common/usePacket';
 import { useServices } from '../services';
 import { connectionProblem, subscribeConnection } from '../services/errors';
+import { autosaveEligible, autosaveNow } from '../state/autosave';
 import { countdown, DEFAULT_IDLE_MINUTES, idleState, WARNING_MS } from '../state/idle';
 import { ago } from '../state/journal';
 import { saveDraft } from '../state/actions';
 import { useActingFor, useApp, type LeaveChoice } from '../state/store';
+import { noteRow } from '../state/versions';
 import { Button, Sheet, toast } from '../ui/controls';
 import { Icon } from '../ui/Icon';
 
@@ -138,7 +140,7 @@ function useSaveOpenPacket() {
       // Keep the row's identity even if the PDFs fail, so the next save updates it.
       onSaved: (row) => setPacket({ requestId: row.id, title: row.title, attachments: row.attachments, snapshot: row.prefillSnapshot, formsUpdated: undefined, dirty: false }),
     });
-    setPacket({ requestId: saved.id, title: saved.title, attachments: saved.attachments, snapshot: saved.prefillSnapshot, formsUpdated: undefined, dirty: false });
+    setPacket({ requestId: saved.id, title: saved.title, attachments: saved.attachments, snapshot: saved.prefillSnapshot, formsUpdated: undefined, pdfsBehind: undefined, dirty: false });
     await refreshRequests().catch(() => undefined);
     return saved;
   }
@@ -152,7 +154,8 @@ function useSaveOpenPacket() {
  */
 export function IdleAutoSave() {
   const firm = useApp((s) => s.firm);
-  const dirty = useApp((s) => !!s.packet.dirty && s.packet.items.length > 0 && !s.packet.send);
+  // Autosave keeps the row current but not the PDFs: an idle packet it saved still gets them.
+  const dirty = useApp((s) => (!!s.packet.dirty || !!s.packet.pdfsBehind) && s.packet.items.length > 0 && !s.packet.send);
   // No auto-save when the firm keeps no drafts (retention 0).
   const policy = useApp((s) => s.policy);
   const enabled = !!firm?.idleAutoSave && draftsAllowed(policy) && dirty;
@@ -225,6 +228,114 @@ export function IdleAutoSave() {
         I’m still here
       </Button>
     </div>
+  );
+}
+
+/** "7:24 PM" */
+const timeOf = (iso?: string) => (iso ? new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '');
+
+/** Autosave's state for the toolbar: "Saving…", "Saved", a failed save to retry, or someone else's save to settle. */
+export function AutosaveStatus() {
+  const status = useApp((s) => s.autosave);
+  const pending = useApp((s) => autosaveEligible(s));
+  const saved = useApp((s) => !s.packet.dirty && !!s.packet.requestId && s.packet.items.length > 0);
+  const [settling, setSettling] = useState(false);
+
+  let body: ReactNode = null;
+  if (status.phase === 'conflict') {
+    body = (
+      <Button variant="plain" size="sm" icon="warning" onClick={() => setSettling(true)}>
+        {status.conflict?.reason === 'gone' ? 'Draft deleted' : 'Changed elsewhere'}
+      </Button>
+    );
+  } else if (status.phase === 'error' && pending) {
+    body = (
+      <Button variant="plain" size="sm" icon="refresh" title={status.error} onClick={() => void autosaveNow()}>
+        Not saved, retry
+      </Button>
+    );
+  } else if (status.phase === 'saving' || pending) {
+    body = <span className="t-footnote c3 hide-narrow">Saving…</span>;
+  } else if (saved) {
+    body = (
+      <span className="t-footnote c3 hide-narrow" title={status.at ? `Saved at ${timeOf(status.at)}` : undefined}>
+        <Icon name="check" size={13} /> Saved
+      </span>
+    );
+  }
+  return (
+    <>
+      {/* Only the passive text hides on narrow screens: conflict and retry stay reachable. */}
+      <span role="status" aria-live="polite" style={{ whiteSpace: 'nowrap' }}>
+        {body}
+      </span>
+      {settling && status.conflict && <ConflictSheet conflict={status.conflict} onClose={() => setSettling(false)} />}
+    </>
+  );
+}
+
+/** Keep what's on screen as a new draft, when the one it came from was deleted or sent. */
+function saveAsNew() {
+  useApp.getState().setPacket({ requestId: undefined, autoNamed: undefined, pdfsBehind: undefined, sharedWith: [], snapshot: undefined, dirty: true });
+  void autosaveNow();
+}
+
+/** Someone saved the open draft since this tab did, sent it, or deleted it: the advisor picks which work stands. */
+function ConflictSheet({ conflict, onClose }: { conflict: NonNullable<ReturnType<typeof useApp.getState>['autosave']['conflict']>; onClose: () => void }) {
+  const row = conflict.reason === 'changed' ? conflict.row : undefined;
+  const last = row?.audit.at(-1);
+  const who = last?.actor ?? 'Someone';
+  const at = last ? ` at ${timeOf(last.at)}` : '';
+  // Gone, or no longer a draft: what's on screen can only become a new draft.
+  const closed = !row || row.status !== 'Drafted';
+  const title = !row ? 'This draft was deleted' : closed ? 'This draft was sent' : 'Saved somewhere else';
+  const body = !row
+    ? 'Someone deleted this draft while you were working on it. What’s on screen hasn’t been saved since.'
+    : closed
+      ? `${who} ${row.status === 'Voided' ? 'voided' : 'sent'} this packet${at}, so your changes can’t be saved to it.`
+      : `${who} saved this draft${at}, after you opened it. Autosave has stopped so neither of you loses work.`;
+  const footer = closed ? (
+    <>
+      <Button variant="gray" onClick={onClose}>
+        Not now
+      </Button>
+      <Button variant="filled" onClick={() => (onClose(), saveAsNew())}>
+        Save as a new draft
+      </Button>
+    </>
+  ) : (
+    <>
+      <Button variant="gray" onClick={onClose}>
+        Not now
+      </Button>
+      <Button
+        variant="bordered"
+        onClick={() => {
+          onClose();
+          // Write what's on screen over theirs: take their row as the one this tab knows.
+          noteRow(row);
+          void autosaveNow();
+        }}
+      >
+        Keep mine
+      </Button>
+      <Button
+        variant="filled"
+        onClick={() => {
+          onClose();
+          useApp.getState().loadRequest(row);
+          useApp.setState({ autosave: { phase: 'saved', at: last?.at } });
+        }}
+      >
+        Open their version
+      </Button>
+    </>
+  );
+  return (
+    <Sheet title={title} onClose={onClose} footer={footer}>
+      <p className="t-callout">{body}</p>
+      {!closed && <p className="t-footnote c3">Open their version to carry on from what they saved, or keep yours to save over it.</p>}
+    </Sheet>
   );
 }
 

@@ -6,7 +6,8 @@ import { prefillSnapshot, type FormFill } from '../domain/prefill';
 import type { Attachment, AuditEvent, SignatureRequest, UserProfile } from '../domain/types';
 import { fillPdf, mergePdfs } from '../pdf/fill';
 import type { Services, SigningProvider } from '../services/types';
-import { track, type Packet } from './store';
+import { samePacket, track, useApp, type Packet } from './store';
+import { knownVersion, oneAtATime, rowVersion } from './versions';
 
 export interface FilledDoc {
   templateId: string;
@@ -96,8 +97,8 @@ async function storeAttachments(services: Services, contactId: string, attachmen
   return out;
 }
 
-/** Save the packet as a Drafted signature request (and its PDFs to the contact's SharePoint folder). */
-export async function saveDraft(opts: {
+/** What `saveDraft` takes. */
+export interface SaveDraftOptions {
   services: Services;
   packet: Packet;
   fills: FormFill[];
@@ -115,8 +116,41 @@ export async function saveDraft(opts: {
   onSaved?: (req: SignatureRequest) => void;
   /** Record a `draft.saved` usage event: the advisor saved a draft (not a save on the way to sending). */
   trackUsage?: boolean;
-}): Promise<SignatureRequest> {
-  const { services, packet, fills, contactId, me, owner, existing } = opts;
+  /**
+   * An autosave (state/autosave): recorded as "Draft autosaved", and a run of them by the
+   * same person keeps one audit entry, moved to the latest, instead of one every few seconds.
+   */
+  autosave?: boolean;
+}
+
+/**
+ * Save the packet as a Drafted signature request (and its PDFs to the contact's SharePoint
+ * folder). Waits for an autosave in flight, so the two never write the row at once;
+ * autosave runs this inside its own turn.
+ */
+export function saveDraft(opts: SaveDraftOptions): Promise<SignatureRequest> {
+  return opts.autosave ? writeDraft(opts) : oneAtATime(() => writeDraft(opts));
+}
+
+/**
+ * The row a Save draft writes into, as it is now. One queued behind an autosave builds on
+ * what that autosave wrote, including a draft it created a moment ago, instead of an
+ * older copy (or a second draft). A packet whose row isn't in the caller's list (a
+ * refresh failed) still saves into that row.
+ */
+async function currentRow({ services, packet, existing }: SaveDraftOptions): Promise<SignatureRequest | undefined> {
+  const open = useApp.getState().packet;
+  const id = existing?.id ?? packet.requestId ?? (open.autoNamed && open.requestId && samePacket(packet, { ...open, requestId: undefined }) ? open.requestId : undefined);
+  if (!id) return existing;
+  const known = knownVersion(id);
+  if (existing && (!known || known === rowVersion(existing))) return existing;
+  return (await services.requests.get(id).catch(() => undefined)) ?? existing;
+}
+
+/** `saveDraft` itself: the row, then (with `writePdfs`) the PDFs. */
+async function writeDraft(opts: SaveDraftOptions): Promise<SignatureRequest> {
+  const { services, packet, fills, contactId, me, owner } = opts;
+  const existing = opts.autosave ? opts.existing : await currentRow(opts);
   const folder = await services.drafts.folderUrl(contactId);
   const attachments = await storeAttachments(services, contactId, packet.attachments);
   const title = packet.title || existing?.title || defaultDraftTitle(fills);
@@ -143,6 +177,9 @@ export async function saveDraft(opts: {
     audit: [],
   };
   const now = new Date().toISOString();
+  const last = base.audit.at(-1);
+  const priorAudit = opts.autosave && last?.action === AUTOSAVED && last.actor === me.fullname ? base.audit.slice(0, -1) : base.audit;
+  const action = opts.autosave ? AUTOSAVED : existing ? 'Draft updated' : 'Draft saved';
   const req: SignatureRequest = {
     ...base,
     title,
@@ -151,15 +188,17 @@ export async function saveDraft(opts: {
     values: { ...packet.values },
     state: packet.state,
     personBlocks: packet.personBlocks,
-    prefillSnapshot: prefillSnapshot(fills),
+    // An autosave keeps the values "Changed in Dynamics" compares against until each is
+    // settled (Review drops a settled key from the snapshot); Save draft takes them all as new.
+    prefillSnapshot: opts.autosave && packet.snapshot ? { ...prefillSnapshot(fills), ...packet.snapshot } : prefillSnapshot(fills),
     attachments,
     sharedWith: packet.sharedWith,
     draftFolderUrl: folder,
     audit: [
-      ...base.audit,
+      ...priorAudit,
       // An upgrade to current form revisions (made since the last save) is recorded with it.
       ...(packet.formsUpdated ? [audit(me, 'Forms updated', packet.formsUpdated)] : []),
-      audit(me, existing ? 'Draft updated' : 'Draft saved', [me.systemuserid !== owner.systemuserid ? `on behalf of ${owner.fullname}` : '', opts.auditNote ?? ''].filter(Boolean).join(' · ') || undefined),
+      audit(me, action, [me.systemuserid !== owner.systemuserid ? `on behalf of ${owner.fullname}` : '', opts.auditNote ?? ''].filter(Boolean).join(' · ') || undefined),
     ],
   };
   // Every save restarts the retention clock. Rows the clean-up never deletes (printed to
@@ -169,14 +208,26 @@ export async function saveDraft(opts: {
   opts.onSaved?.(saved);
   if (opts.trackUsage) track('draft.saved', fills.map((f) => f.template), { requestId: saved.id });
   if (!opts.writePdfs) return saved;
+  return writeDraftPdfs(services, saved, fills);
+}
+
+/** The audit action of an autosave. */
+export const AUTOSAVED = 'Draft autosaved';
+
+/**
+ * Write a saved draft's PDFs to the contact's SharePoint folder and record them on the
+ * row. Autosave saves only the row; this runs at Save draft, the idle save, or when the
+ * advisor leaves a packet autosave kept.
+ */
+export async function writeDraftPdfs(services: Services, saved: SignatureRequest, fills: FormFill[]): Promise<SignatureRequest> {
   // File names carry the draft's title and a short ID, so two drafts never overwrite each other.
   const docs = await fillPacket(services, fills, 'fillable', true);
   const draftFiles: { name: string; url: string }[] = [];
   for (const [i, d] of docs.entries()) {
-    const name = `DRAFT ${fills[i].template.formNumber}${fills[i].copy ? ` (copy ${fills[i].copy})` : ''} ${title} – ${shortDraftId(saved.id)}.pdf`.replace(/[\\/:*?"<>|#%]/g, '-');
-    draftFiles.push({ name, ...(await services.drafts.saveDraft(contactId, name, d.pdf)) });
+    const name = `DRAFT ${fills[i].template.formNumber}${fills[i].copy ? ` (copy ${fills[i].copy})` : ''} ${saved.title} – ${shortDraftId(saved.id)}.pdf`.replace(/[\\/:*?"<>|#%]/g, '-');
+    draftFiles.push({ name, ...(await services.drafts.saveDraft(saved.contactId, name, d.pdf)) });
   }
-  return services.requests.save({ ...saved, draftFiles: [...(existing?.draftFiles ?? []).filter((f) => !draftFiles.some((x) => x.name === f.name)), ...draftFiles] });
+  return services.requests.save({ ...saved, draftFiles: [...(saved.draftFiles ?? []).filter((f) => !draftFiles.some((x) => x.name === f.name)), ...draftFiles] });
 }
 
 /**

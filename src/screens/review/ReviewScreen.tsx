@@ -9,6 +9,7 @@ import type { SignatureRequest } from '../../domain/types';
 import { formLabel, goodOrder, outputGate, summarize, type CheckResult } from '../../domain/checks';
 import { sourceKind } from '../../domain/paths';
 import { useServices } from '../../services';
+import { AutosaveStatus } from '../../shell/Recovery';
 import { Toolbar } from '../../shell/Shell';
 import { audit, packetAsOnePdf, saveDraft } from '../../state/actions';
 import { track, useActingFor, useApp } from '../../state/store';
@@ -190,9 +191,9 @@ export function ReviewScreen() {
     );
   }
 
-  /** The first save asks for a name; later saves update the same draft. */
+  /** The first save asks for a name (autosave's draft has only the default one); later saves update the same draft. */
   function onSaveDraft() {
-    if (!packet.requestId) return setNaming(true);
+    if (!packet.requestId || packet.autoNamed) return setNaming(true);
     writeDraft(packet.title).catch((e) => toast.error(e instanceof Error ? e.message : 'Could not save draft'));
   }
 
@@ -215,7 +216,7 @@ export function ReviewScreen() {
         // Keep the row's identity even if writing the PDFs fails, so a retry updates it.
         onSaved: (row) => setPacket({ requestId: row.id, title: row.title, attachments: row.attachments, snapshot: row.prefillSnapshot, formsUpdated: undefined, dirty: false }),
       });
-      setPacket({ requestId: saved.id, title: saved.title, attachments: saved.attachments, snapshot: saved.prefillSnapshot, formsUpdated: undefined, dirty: false });
+      setPacket({ requestId: saved.id, title: saved.title, attachments: saved.attachments, snapshot: saved.prefillSnapshot, formsUpdated: undefined, autoNamed: undefined, pdfsBehind: undefined, dirty: false });
       toast.ok(saved.expiresOn ? `Saved to ${client!.contact.firstname}’s SharePoint folder. Kept until ${fmtDay(saved.expiresOn)}.` : `Draft saved to ${client!.contact.firstname}’s SharePoint folder`);
     } finally {
       await refreshRequests().catch(() => undefined);
@@ -316,6 +317,7 @@ export function ReviewScreen() {
     <>
       <Toolbar title="Prefill & review" subtitle={`${client.contact.fullname} · ${view.fills.length} ${view.fills.length === 1 ? 'form' : 'forms'}`} back={{ label: 'Forms', to: '/' }}>
         <Steps current={1} locked={sum?.blocking ? [2] : undefined} />
+        {canSaveDrafts && <AutosaveStatus />}
         {downloads.length > 0 && (
           <Menu
             trigger={(p) => (
@@ -713,7 +715,8 @@ export function ReviewScreen() {
           title="Save draft"
           noun="draft"
           initial={packet.title || defaultDraftTitle(view.fills)}
-          existing={requests.filter((r) => r.status === 'Drafted' && r.contactId === contactId).map((r) => ({ id: r.id, name: r.title }))}
+          // Not the draft autosave started for this packet: naming it is what this save does.
+          existing={requests.filter((r) => r.status === 'Drafted' && r.contactId === contactId && r.id !== packet.requestId).map((r) => ({ id: r.id, name: r.title }))}
           saveLabel="Save draft"
           onSave={(title) => writeDraft(title)}
           replace={{ label: 'Update that draft', allowed: () => true, run: (c) => writeDraft(c.name, requests.find((r) => r.id === c.id)) }}
