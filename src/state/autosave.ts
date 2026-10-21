@@ -58,7 +58,9 @@ export function packetFills(s: Pick<State, 'client' | 'users' | 'actingForId' | 
   return prefillPacket(items, scope, s.packet.values);
 }
 
+/** Whose work the packet is: the User being worked for, else the person signed in. */
 const owner = (s: State) => s.users.find((u) => u.systemuserid === s.actingForId) ?? s.me;
+/** Tell the toolbar what autosave did. */
 const setStatus = (autosave: State['autosave']) => useApp.setState({ autosave });
 
 let saving = false;

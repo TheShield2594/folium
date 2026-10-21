@@ -17,6 +17,7 @@ export function noteRow(r: Pick<SignatureRequest, 'id' | 'audit' | 'status'> | u
   if (r?.id) known.set(r.id, rowVersion(r));
 }
 
+/** The version of a row this tab last read or wrote; undefined if it hasn't seen the row. */
 export function knownVersion(id: string): string | undefined {
   return known.get(id);
 }

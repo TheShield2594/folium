@@ -231,6 +231,7 @@ export function IdleAutoSave() {
   );
 }
 
+/** "7:24 PM" */
 const timeOf = (iso?: string) => (iso ? new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '');
 
 /** Autosave's state for the toolbar: "Saving…", "Saved", a failed save to retry, or someone else's save to settle. */

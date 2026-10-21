@@ -146,6 +146,7 @@ async function currentRow({ services, packet, existing }: SaveDraftOptions): Pro
   return (await services.requests.get(id).catch(() => undefined)) ?? existing;
 }
 
+/** `saveDraft` itself: the row, then (with `writePdfs`) the PDFs. */
 async function writeDraft(opts: SaveDraftOptions): Promise<SignatureRequest> {
   const { services, packet, fills, contactId, me, owner } = opts;
   const existing = opts.autosave ? opts.existing : await currentRow(opts);
