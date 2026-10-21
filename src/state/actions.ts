@@ -135,11 +135,12 @@ export function saveDraft(opts: SaveDraftOptions): Promise<SignatureRequest> {
 /**
  * The row a Save draft writes into, as it is now. One queued behind an autosave builds on
  * what that autosave wrote, including a draft it created a moment ago, instead of an
- * older copy (or a second draft).
+ * older copy (or a second draft). A packet whose row isn't in the caller's list (a
+ * refresh failed) still saves into that row.
  */
 async function currentRow({ services, packet, existing }: SaveDraftOptions): Promise<SignatureRequest | undefined> {
   const open = useApp.getState().packet;
-  const id = existing?.id ?? (!packet.requestId && open.autoNamed && open.requestId && samePacket(packet, { ...open, requestId: undefined }) ? open.requestId : undefined);
+  const id = existing?.id ?? packet.requestId ?? (open.autoNamed && open.requestId && samePacket(packet, { ...open, requestId: undefined }) ? open.requestId : undefined);
   if (!id) return existing;
   const known = knownVersion(id);
   if (existing && (!known || known === rowVersion(existing))) return existing;
@@ -187,7 +188,9 @@ async function writeDraft(opts: SaveDraftOptions): Promise<SignatureRequest> {
     values: { ...packet.values },
     state: packet.state,
     personBlocks: packet.personBlocks,
-    prefillSnapshot: prefillSnapshot(fills),
+    // An autosave keeps the values "Changed in Dynamics" compares against until each is
+    // settled (Review drops a settled key from the snapshot); Save draft takes them all as new.
+    prefillSnapshot: opts.autosave && packet.snapshot ? { ...prefillSnapshot(fills), ...packet.snapshot } : prefillSnapshot(fills),
     attachments,
     sharedWith: packet.sharedWith,
     draftFolderUrl: folder,

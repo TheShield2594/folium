@@ -6,7 +6,7 @@ import { createDemoServices, resetDemo } from '../services/demo';
 import { CLIENTS, FIRM, TEMPLATES, USERS } from '../services/demo/seed';
 import type { Services } from '../services/types';
 import { audit, AUTOSAVED, saveDraft } from './actions';
-import { AUTOSAVE_MS, autosaveNow, packetFills, startAutosave } from './autosave';
+import { AUTOSAVE_MS, autosaveNow, packetFills, rowFills, startAutosave } from './autosave';
 import { useApp, type Packet } from './store';
 import { forgetRows, noteRow, withRowVersions } from './versions';
 
@@ -190,6 +190,54 @@ describe('autosave', () => {
     const saved = await manual;
     expect(saved.id).toBe(useApp.getState().packet.requestId);
     expect(saved.audit.map((a) => a.action)).toEqual([AUTOSAVED, 'Draft updated']);
+  });
+});
+
+describe('autosave, after review', () => {
+  it('keeps the CRM values "Changed in Dynamics" compares against until each is settled', async () => {
+    useApp.getState().setPacket({ snapshot: { 'contact.fullname': 'Jordan Miller (old)', 'contact.emailaddress1': 'old@example.com' } });
+    type('bene.Prim.1.pct', '100');
+    await autosaveNow();
+    expect(useApp.getState().packet.snapshot).toMatchObject({ 'contact.fullname': 'Jordan Miller (old)', 'contact.emailaddress1': 'old@example.com' });
+    expect((await row()).prefillSnapshot).toMatchObject({ 'contact.fullname': 'Jordan Miller (old)' });
+    // Settling one (Review drops it from the snapshot) takes the current value at the next autosave.
+    const { 'contact.fullname': _settled, ...rest } = useApp.getState().packet.snapshot!;
+    useApp.getState().setPacket({ snapshot: rest });
+    type('bene.Prim.1.pct', '90');
+    await autosaveNow();
+    expect(useApp.getState().packet.snapshot?.['contact.fullname']).not.toBe('Jordan Miller (old)');
+    expect(useApp.getState().packet.snapshot?.['contact.emailaddress1']).toBe('old@example.com');
+  });
+
+  it('fills left-behind PDFs from the saved row, not edits discarded on the way out', async () => {
+    type('bene.Prim.1.pct', '100');
+    await autosaveNow();
+    const saved = await row();
+    // Edit and add a form, then Discard at the leave prompt (it only clears dirty).
+    type('bene.Prim.1.pct', '5');
+    useApp.getState().addToPacket('tpl-ev1004-0125');
+    useApp.getState().setPacket({ dirty: false });
+    const fills = rowFills(useApp.getState(), saved)!;
+    expect(fills.map((f) => f.itemId)).toEqual(['pi-1']);
+    expect(fills[0].fields.find((x) => x.key === 'bene.Prim.1.pct')?.value).toBe('100');
+  });
+
+  it('saves into the packet’s draft even when the caller’s list doesn’t have it', async () => {
+    type('bene.Prim.1.pct', '100');
+    await autosaveNow();
+    const s = useApp.getState();
+    const saved = await saveDraft({ services: s.services!, packet: { ...s.packet, autoNamed: undefined }, fills: packetFills(s)!, contactId: 'c-jordan', me, owner: me });
+    expect(saved.id).toBe(s.packet.requestId);
+  });
+
+  it('keeps the listed copy of the draft current', async () => {
+    type('bene.Prim.1.pct', '100');
+    await autosaveNow();
+    const id = useApp.getState().packet.requestId!;
+    useApp.setState({ requests: [await row(id)] });
+    type('bene.Prim.1.pct', '90');
+    await autosaveNow();
+    expect(useApp.getState().requests.find((r) => r.id === id)?.values['bene.Prim.1.pct']).toBe('90');
   });
 });
 

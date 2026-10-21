@@ -255,17 +255,18 @@ export function AutosaveStatus() {
       </Button>
     );
   } else if (status.phase === 'saving' || pending) {
-    body = <span className="t-footnote c3">Saving…</span>;
+    body = <span className="t-footnote c3 hide-narrow">Saving…</span>;
   } else if (saved) {
     body = (
-      <span className="t-footnote c3" title={status.at ? `Saved at ${timeOf(status.at)}` : undefined}>
+      <span className="t-footnote c3 hide-narrow" title={status.at ? `Saved at ${timeOf(status.at)}` : undefined}>
         <Icon name="check" size={13} /> Saved
       </span>
     );
   }
   return (
     <>
-      <span role="status" aria-live="polite" className="hide-narrow" style={{ whiteSpace: 'nowrap' }}>
+      {/* Only the passive text hides on narrow screens: conflict and retry stay reachable. */}
+      <span role="status" aria-live="polite" style={{ whiteSpace: 'nowrap' }}>
         {body}
       </span>
       {settling && status.conflict && <ConflictSheet conflict={status.conflict} onClose={() => setSettling(false)} />}

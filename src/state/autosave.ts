@@ -6,7 +6,7 @@ import type { SignatureRequest } from '../domain/types';
 import { toast } from '../ui/controls';
 import { saveDraft, writeDraftPdfs } from './actions';
 import { debounced } from './journal';
-import { samePacket, useApp } from './store';
+import { normalizeItems, samePacket, useApp } from './store';
 import { knownVersion, noteRow, oneAtATime, rowVersion } from './versions';
 
 // Autosave: a few seconds after the advisor stops editing, the open packet is saved to
@@ -114,14 +114,22 @@ export async function autosaveNow(): Promise<void> {
       });
     }
     setStatus({ phase: 'saved', at: saved.audit.at(-1)?.at });
-    // A new draft: list it, so Drafts and Review's Save draft know the row.
+    // A new draft: list it, so Drafts and Review's Save draft know the row. Otherwise keep
+    // the listed copy current, so opening it from the list doesn't look like someone else's save.
     if (!cur.requestId) await useApp.getState().refreshRequests().catch(() => undefined);
+    else useApp.setState((st) => ({ requests: st.requests.map((r) => (r.id === saved.id ? saved : r)) }));
   } catch (e) {
     setStatus({ phase: 'error', error: e instanceof Error ? e.message : String(e) });
     retry = setTimeout(() => void autosaveNow(), RETRY_MS);
   } finally {
     saving = false;
   }
+}
+
+/** A saved row's forms filled as it holds them: from the row, not the screen, so edits discarded on the way out aren't in its PDFs. */
+export function rowFills(s: Parameters<typeof packetFills>[0], row: SignatureRequest): FormFill[] | undefined {
+  const items = normalizeItems(row.documents.map((d) => ({ id: d.itemId, templateId: d.templateId, accountId: d.accountId, copy: d.copy })));
+  return packetFills({ ...s, packet: { ...s.packet, items, values: row.values } });
 }
 
 /**
@@ -132,13 +140,14 @@ export async function autosaveNow(): Promise<void> {
 async function writeLeftBehind(prev: State): Promise<void> {
   const p = prev.packet;
   const services = prev.services;
-  const fills = packetFills(prev);
-  if (!p.pdfsBehind || p.dirty || !p.requestId || !services || !fills?.length) return;
+  if (!p.pdfsBehind || p.dirty || !p.requestId || !services) return;
   const id = p.requestId;
   try {
     await oneAtATime(async () => {
       const row = await services.requests.get(id);
       if (!row || conflictWith(row) || row.envelopeId || row.inPerson) return;
+      const fills = rowFills(prev, row);
+      if (!fills?.length) return;
       await writeDraftPdfs(services, row, fills);
     });
   } catch {
