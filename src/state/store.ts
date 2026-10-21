@@ -25,6 +25,7 @@ import type {
   UserProfile,
 } from '../domain/types';
 import type { Services } from '../services/types';
+import { noteRow } from './versions';
 import { clearJournal, debounced, newerThanDraft, readJournal, sensitiveKeys, worthKeeping, writeJournal, type Journal } from './journal';
 
 // Small persisted per-viewer conveniences (favorites, recents, theme). Never business data.
@@ -73,6 +74,10 @@ export interface Packet {
   resolved?: Record<string, string>;
   /** Why Start a packet added each form, by template id, so Review can explain it. */
   reasons?: Record<string, string>;
+  /** Autosave started this draft under the default name; the first Save draft asks for one. */
+  autoNamed?: boolean;
+  /** Autosave saved the row since the draft PDFs were last written (state/autosave). */
+  pdfsBehind?: boolean;
 }
 
 /**
@@ -91,7 +96,23 @@ export interface SendState {
 const emptyPacket = (): Packet => ({ items: [], values: {}, title: '', attachments: [], sharedWith: [] });
 
 /** setPacket keys that are bookkeeping, not the advisor's work, so they don't make a packet dirty. */
-const CLEAN_KEYS = new Set<keyof Packet>(['requestId', 'snapshot', 'send', 'dirty']);
+const CLEAN_KEYS = new Set<keyof Packet>(['requestId', 'snapshot', 'send', 'dirty', 'autoNamed', 'pdfsBehind']);
+
+/**
+ * What autosave last did with the open packet, for the toolbar. A conflict carries the
+ * row someone else saved (or says it's gone), so the advisor can choose.
+ */
+export interface AutosaveState {
+  phase: 'idle' | 'saving' | 'saved' | 'error' | 'conflict';
+  at?: string;
+  error?: string;
+  conflict?: { reason: 'changed'; row: SignatureRequest } | { reason: 'gone' };
+}
+
+/** Whether `now` is still the packet `was` (edited since, perhaps), not another one opened in its place. */
+export function samePacket(was: Packet, now: Packet): boolean {
+  return now === was || (now.requestId === was.requestId && now.items.some((i) => was.items.some((x) => x.id === i.id)));
+}
 
 /** What to do with unsaved work before it's replaced. */
 export type LeaveChoice = 'save' | 'discard' | 'cancel';
@@ -146,6 +167,7 @@ interface AppState {
   leavePrompt?: { reason: 'switch' | 'open-draft' | 'navigate'; resolve: (c: LeaveChoice) => void };
   /** A journalled packet from before a reload, offered back by the Shell. */
   pendingRestore?: Journal;
+  autosave: AutosaveState;
 
   boot(services: Services, contactId?: string): Promise<void>;
   reloadDirectory(): Promise<void>;
@@ -291,6 +313,7 @@ export const useApp = create<AppState>((set, get) => ({
   startPrompt: '',
   sidebarOpen: false,
   paletteOpen: false,
+  autosave: { phase: 'idle' },
 
   async boot(services, contactId) {
     applyTheme(get().theme);
@@ -552,6 +575,8 @@ export const useApp = create<AppState>((set, get) => ({
   },
   loadRequest(req) {
     const { templates, client } = get();
+    // What this tab now has of the row, so autosave can tell if someone saves it after.
+    noteRow(req);
     // Drafts saved before copies existed have no item ids: normalizeItems gives them some.
     const isActive = (id?: string) => !!id && !!client?.accounts.some((a) => a.accountid === id);
     // Accounts the copies of each form keep, so a replacement suggestion avoids them.

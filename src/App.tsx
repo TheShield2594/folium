@@ -26,7 +26,9 @@ import { setDemoUser } from './services/demo';
 import type { Services } from './services/types';
 import { UnsavedGuards } from './shell/Recovery';
 import { Shell } from './shell/Shell';
+import { startAutosave } from './state/autosave';
 import { startJournal, useApp } from './state/store';
+import { withRowVersions } from './state/versions';
 import { Toasts } from './ui/controls';
 
 /** Folium is opened from the Contact form with `?contactId=<guid>` (or `#/...?contactId=`). */
@@ -138,12 +140,15 @@ export function App() {
 
   // Keep the open packet in the session journal so a reload doesn't lose it.
   useEffect(() => startJournal(), []);
+  // And save it to its draft row a few seconds after edits stop.
+  useEffect(() => startAutosave(), []);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const s = await createServices();
+        // Request saves note the row they wrote, so autosave can spot someone else's save.
+        const s = withRowVersions(await createServices());
         const demo = s.mode === 'demo';
         const contactId = await contactIdFromHost(demo);
         if (cancelled) return;
