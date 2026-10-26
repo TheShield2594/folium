@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { DIRECTORY, GROUPS, USERS } from '../services/demo/seed';
 import { actableUsers, canShareWith } from './policy';
 import type { UserProfile } from './types';
-import { bulkSummary, lastAdminProblem, needsSeenStamp, parseCsv, parseUserImport, planBulk, planImport, toCsv, userStatus, usersCsv } from './users';
+import { noProfileEvent } from './usage';
+import { bulkSummary, lastAdminProblem, needsSeenStamp, parseCsv, parseUserImport, planBulk, planImport, toCsv, userStatus, usersCsv, waitingForRole } from './users';
 
 const now = new Date('2026-10-14T12:00:00.000Z');
 const daysAgo = (n: number) => new Date(now.getTime() - n * 86_400_000).toISOString();
@@ -150,5 +151,30 @@ describe('importing people', () => {
     const avery = plan[1];
     expect(avery.kind === 'new' && avery.next).toMatchObject({ systemuserid: 'usr-advisor-4', fullname: 'Avery Graber', role: 'User', repCode: 'EV5100', branch: 'Newton' });
     expect(plan[6].row.errors[0]).toMatch(/more than once/);
+  });
+});
+
+describe('waitingForRole', () => {
+  it('lists people who opened Folium without a profile, newest first, counting days', () => {
+    const events = [
+      ...noProfileEvent('su-a', new Date('2026-10-01T09:00:00Z')),
+      ...noProfileEvent('su-a', new Date('2026-10-01T15:00:00Z')),
+      ...noProfileEvent('su-a', new Date('2026-10-03T09:00:00Z')),
+      ...noProfileEvent('su-b', new Date('2026-10-05T09:00:00Z')),
+      ...noProfileEvent('SU-C', new Date('2026-10-06T09:00:00Z')),
+      { type: 'form.added' as const, userId: 'su-d', occurredOn: '2026-10-07T09:00:00Z' },
+    ];
+    expect(waitingForRole(events, [p({ systemuserid: 'su-c' })])).toEqual([
+      { systemuserid: 'su-b', lastOpenedOn: '2026-10-05T09:00:00.000Z', days: 1 },
+      { systemuserid: 'su-a', lastOpenedOn: '2026-10-03T09:00:00.000Z', days: 2 },
+    ]);
+  });
+
+  it('records at most one row a person a day', () => {
+    const [a] = noProfileEvent('su-a', new Date('2026-10-01T09:00:00Z'));
+    const [b] = noProfileEvent('su-a', new Date('2026-10-01T17:00:00Z'));
+    expect(a.dedupeKey).toBe(b.dedupeKey);
+    expect(a).toMatchObject({ type: 'user.noprofile', userId: 'su-a' });
+    expect(a.templateId).toBeUndefined();
   });
 });

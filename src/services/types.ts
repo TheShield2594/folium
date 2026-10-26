@@ -20,7 +20,7 @@ import type { Announcement } from '../domain/announcements';
 import type { DocuSignSetup } from '../domain/docusign';
 import type { ProviderCapabilities, SigningSettings } from '../domain/signing';
 import type { FormFeedback } from '../domain/feedback';
-import type { UsageEvent } from '../domain/usage';
+import type { UsageEvent, UsageEventType } from '../domain/usage';
 
 /** Dataverse reads for the client the advisor is working on. */
 export interface CrmService {
@@ -73,9 +73,10 @@ export interface UsageLog {
   /**
    * Rows since `since` (ISO), oldest first, for Administration › Readiness. Admins and the
    * reporting role only: everyone else has Create and no Read. `truncated` when there were
-   * more than Folium reads in one go (the Power BI report has the rest).
+   * more than Folium reads in one go (the Power BI report has the rest). `types` keeps
+   * only those event types.
    */
-  list(since: string): Promise<{ events: UsageEvent[]; truncated: boolean }>;
+  list(since: string, types?: UsageEventType[]): Promise<{ events: UsageEvent[]; truncated: boolean }>;
 }
 
 /** Where a form may be used (states, variant group) and which firm profile fills it. */
@@ -235,6 +236,14 @@ export interface DirectoryService {
   setActive(systemuserid: string, active: boolean): Promise<void>;
   /** Directory (`systemuser`) rows for these sign-in emails, with or without a Folium profile. */
   lookupDirectory(emails: string[]): Promise<DirectoryUser[]>;
+  /** Directory rows by `systemuserid`, with or without a Folium profile. */
+  directoryByIds(ids: string[]): Promise<DirectoryUser[]>;
+  /**
+   * People in the directory whose name or email starts with `query` (at least two
+   * characters), for Users & groups › Add user. Turned-off accounts, application users
+   * and other non-interactive accounts are left out. At most 25, by name.
+   */
+  searchDirectory(query: string): Promise<DirectoryUser[]>;
   listGroups(): Promise<UserGroup[]>;
   saveGroup(g: UserGroup): Promise<UserGroup>;
   removeGroup(id: string): Promise<void>;

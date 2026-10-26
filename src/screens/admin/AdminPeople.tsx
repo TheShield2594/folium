@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
-import { withRepAudit } from '../../domain/advisor';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { profileFromDirectory, withRepAudit, type DirectoryUser } from '../../domain/advisor';
 import type { FirmPolicy, FormCategory, FormSource, UserGroup, UserProfile, UserRole } from '../../domain/types';
 import {
   bulkSummary,
@@ -12,9 +12,11 @@ import {
   STATUS_LABEL,
   userStatus,
   usersCsv,
+  waitingForRole,
   type BulkAction,
   type ImportOutcome,
   type UserStatus,
+  type WaitingForRole,
 } from '../../domain/users';
 import { useServices } from '../../services';
 import { Toolbar } from '../../shell/Shell';
@@ -59,7 +61,7 @@ function announce(report: ChangeReport, what: string) {
   else toast.error(`${what}: ${report.saved.length} saved, ${report.failed.length} failed — ${report.failed.map((f) => `${f.name} (${f.error})`).join('; ')}`);
 }
 
-const lastSeen = (u: UserProfile) => (u.lastSeenOn ? new Date(u.lastSeenOn).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'never');
+const lastSeen = (u: Pick<UserProfile, 'lastSeenOn'>) => (u.lastSeenOn ? new Date(u.lastSeenOn).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'never');
 
 /** User groups by role and region, and each person's Folium role, status and rep details. */
 export function AdminPeople() {
@@ -78,7 +80,10 @@ export function AdminPeople() {
   const [bulk, setBulk] = useState<BulkAction>();
   const [importing, setImporting] = useState(false);
   const [editUser, setEditUser] = useState<UserProfile | 'new'>();
+  /** The directory person a new profile starts from, when "Give a role" opened the sheet. */
+  const [newFrom, setNewFrom] = useState<DirectoryUser>();
   const [editGroup, setEditGroup] = useState<UserGroup | 'new'>();
+  const waiting = useWaitingForRole(users);
 
   const now = useMemo(() => new Date(), []);
   const statusOf = (u: UserProfile) => userStatus(u, u.directory, now, dormantDays(policy));
@@ -130,7 +135,15 @@ export function AdminPeople() {
             </Button>
           </>
         )}
-        <Button variant="filled" icon="plus" onClick={() => (tab === 'groups' ? setEditGroup('new') : setEditUser('new'))}>
+        <Button
+          variant="filled"
+          icon="plus"
+          onClick={() => {
+            if (tab === 'groups') return setEditGroup('new');
+            setNewFrom(undefined);
+            setEditUser('new');
+          }}
+        >
           {tab === 'groups' ? 'New group' : 'Add user'}
         </Button>
       </Toolbar>
@@ -184,6 +197,38 @@ export function AdminPeople() {
             </div>
           ) : (
             <div className="stack-3">
+              {waiting.length > 0 && (
+                <section className="stack-2" aria-labelledby="waiting-heading">
+                  <h2 id="waiting-heading" className="t-headline">
+                    Opened Folium without a role ({waiting.length})
+                  </h2>
+                  <p className="t-footnote c3">They can open Folium through the Entra ID group but have no Folium profile, so they work as a User with no groups. Give them a role and groups.</p>
+                  <div className="list">
+                    {waiting.map((w) => (
+                      <div key={w.systemuserid} className="list-row" style={{ padding: '8px 16px' }}>
+                        <Avatar name={w.person.fullname} size={34} />
+                        <div className="grow" style={{ minWidth: 0 }}>
+                          <div className="t-headline">{w.person.fullname}</div>
+                          <div className="t-footnote c3 ellipsis">
+                            {[w.person.email, w.person.title].filter(Boolean).join(' · ')} · last opened {lastSeen({ lastSeenOn: w.lastOpenedOn })}
+                            {w.days > 1 ? `, on ${w.days} days` : ''}
+                          </div>
+                        </div>
+                        <Button
+                          variant="gray"
+                          size="sm"
+                          onClick={() => {
+                            setNewFrom(w.person);
+                            setEditUser('new');
+                          }}
+                        >
+                          Give a role
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
               <div className="row wrap" style={{ gap: 8 }}>
                 <Select aria-label="Status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as UserStatus | '')} style={{ width: 'auto' }}>
                   <option value="">Every status</option>
@@ -321,6 +366,7 @@ export function AdminPeople() {
       {editUser && me && (
         <UserSheet
           user={editUser === 'new' ? undefined : editUser}
+          initial={editUser === 'new' ? newFrom : undefined}
           me={me}
           users={users}
           groups={groups}
@@ -399,8 +445,113 @@ export function AdminPeople() {
   );
 }
 
+/** Look back this far for people who opened Folium without a profile. */
+const WAITING_DAYS = 90;
+
+/**
+ * People who opened Folium without a profile (`user.noprofile` usage events) and still
+ * have none, with their directory details. Empty when the read fails: it's a nicety.
+ */
+function useWaitingForRole(users: UserProfile[]): (WaitingForRole & { person: DirectoryUser })[] {
+  const services = useServices();
+  const [out, setOut] = useState<(WaitingForRole & { person: DirectoryUser })[]>([]);
+  const ids = users.map((u) => u.systemuserid).join(',');
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const since = new Date(Date.now() - WAITING_DAYS * 86_400_000).toISOString();
+      const { events } = await services.usage.list(since, ['user.noprofile']);
+      const waiting = waitingForRole(events, users);
+      const people = waiting.length ? await services.directory.directoryByIds(waiting.map((w) => w.systemuserid)) : [];
+      const byId = new Map(people.map((p) => [p.systemuserid.toLowerCase(), p]));
+      const found = waiting.flatMap((w) => {
+        const person = byId.get(w.systemuserid.toLowerCase());
+        return person && !person.disabled ? [{ ...w, person }] : [];
+      });
+      if (live) setOut(found);
+    })().catch(() => live && setOut([]));
+    return () => {
+      live = false;
+    };
+    // Reload when the list of profiles changes (someone was just given one).
+  }, [services, ids]);
+  return out;
+}
+
+/** Search the directory (`systemuser`, synced from Entra ID) for the person to add. */
+function DirectoryPicker({ users, onPick }: { users: UserProfile[]; onPick: (d: DirectoryUser) => void }) {
+  const services = useServices();
+  const [q, setQ] = useState('');
+  /** The last search's results, with the query they answer. */
+  const [found, setFound] = useState<{ query: string; people: DirectoryUser[] }>();
+  const [problem, setProblem] = useState<string>();
+  const query = q.trim();
+  // Only results for what's typed now: older ones can't be picked while the next search runs.
+  const results = found?.query === query ? found.people : undefined;
+  useEffect(() => {
+    setProblem(undefined);
+    if (query.length < 2) return;
+    let live = true;
+    const t = setTimeout(async () => {
+      try {
+        const people = await services.directory.searchDirectory(query);
+        if (live) setFound({ query, people });
+      } catch (e) {
+        if (live) setProblem(e instanceof Error ? e.message : 'Could not search the directory');
+      }
+    }, 250);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [query, services]);
+  const profileOf = (d: DirectoryUser) => users.find((u) => u.systemuserid.toLowerCase() === d.systemuserid.toLowerCase());
+  return (
+    <div className="stack-3">
+      <SearchField value={q} onChange={setQ} placeholder="Name or email" label="Find a person in the directory" autoFocus />
+      {problem && (
+        <p className="t-footnote" role="alert" style={{ color: 'var(--danger)' }}>
+          {problem}
+        </p>
+      )}
+      {query.length >= 2 && !results && !problem && <span className="spinner" aria-label="Searching" />}
+      {results && !results.length && <p className="t-footnote c3">No one in the directory matches “{query}”.</p>}
+      {results && results.length > 0 && (
+        <div className="list">
+          {results.map((d) => {
+            const has = profileOf(d);
+            return (
+              <button
+                key={d.systemuserid}
+                type="button"
+                className="list-row"
+                disabled={!!has}
+                onClick={() => onPick(d)}
+                style={{ all: 'unset', display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px', cursor: has ? 'default' : 'pointer', opacity: has ? 0.6 : 1 }}
+              >
+                <Avatar name={d.fullname} size={34} />
+                <span className="grow" style={{ minWidth: 0 }}>
+                  <span className="t-headline" style={{ display: 'block' }}>
+                    {d.fullname}
+                  </span>
+                  <span className="t-footnote c3 ellipsis" style={{ display: 'block' }}>
+                    {[d.email, d.title, d.city].filter(Boolean).join(' · ')}
+                  </span>
+                </span>
+                {has ? <Badge>In Folium · {has.role}</Badge> : <Icon name="chevronRight" size={14} className="c3" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {query.length < 2 && <p className="t-footnote c3">Search by name or email. Name, email, phone and title come from their Microsoft account and stay current; you set their role, groups, branch and rep code here.</p>}
+    </div>
+  );
+}
+
 function UserSheet({
   user,
+  initial,
   me,
   users,
   groups,
@@ -411,6 +562,8 @@ function UserSheet({
   onSetActive,
 }: {
   user?: UserProfile;
+  /** For a new profile: the directory person it's for, when already chosen. */
+  initial?: DirectoryUser;
   me: UserProfile;
   users: UserProfile[];
   groups: UserGroup[];
@@ -420,9 +573,18 @@ function UserSheet({
   onSave: (u: UserProfile) => Promise<void>;
   onSetActive?: (active: boolean) => Promise<void>;
 }) {
+  const [picked, setPicked] = useState<DirectoryUser | undefined>(initial);
   const [u, setU] = useState<UserProfile>(
-    user ? { ...user, groupIds: groups.filter((g) => g.memberIds.includes(user.systemuserid)).map((g) => g.id) } : { systemuserid: `usr-${Date.now()}`, fullname: '', email: '', phone: '', repCode: '', branch: '', title: '', role: 'User', groupIds: [] },
+    user
+      ? { ...user, groupIds: groups.filter((g) => g.memberIds.includes(user.systemuserid)).map((g) => g.id) }
+      : initial
+        ? profileFromDirectory(initial)
+        : { systemuserid: '', fullname: '', email: '', phone: '', repCode: '', branch: '', title: '', role: 'User', groupIds: [] },
   );
+  const pick = (d: DirectoryUser | undefined) => {
+    setPicked(d);
+    if (d) setU({ ...profileFromDirectory(d), role: u.role, groupIds: u.groupIds, region: u.region, canEditRepData: u.canEditRepData, canViewReports: u.canViewReports });
+  };
   const [busy, setBusy] = useState(false);
   const set = (p: Partial<UserProfile>) => setU({ ...u, ...p });
   const active = !user || user.active !== false;
@@ -448,14 +610,26 @@ function UserSheet({
           <Button variant="gray" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="filled" busy={busy} disabled={!u.fullname || !u.email || !!roleProblem} onClick={() => runSave(setBusy, () => onSave(u))}>
+          <Button variant="filled" busy={busy} disabled={(!user && !picked) || !u.fullname || !u.email || !!roleProblem} onClick={() => runSave(setBusy, () => onSave(u))}>
             Save
           </Button>
         </>
       }
     >
       <div className="stack-4">
-        {!user && <p className="t-footnote c3">People sign in with their Microsoft account. Add them here to give them a Folium role and groups.</p>}
+        {!user && !picked && <DirectoryPicker users={users} onPick={pick} />}
+        {!user && picked && (
+          <div className="row" style={{ gap: 12 }}>
+            <Avatar name={picked.fullname} size={40} />
+            <div className="grow" style={{ minWidth: 0 }}>
+              <div className="t-headline">{picked.fullname}</div>
+              <div className="t-footnote c3 ellipsis">{[picked.email, picked.title].filter(Boolean).join(' · ')}</div>
+            </div>
+            <Button variant="gray" size="sm" onClick={() => pick(undefined)}>
+              Choose someone else
+            </Button>
+          </div>
+        )}
         {user && status && (
           <p className="t-footnote c3 row" style={{ gap: 8 }}>
             <Badge tone={STATUS_TONE[status]}>{STATUS_LABEL[status]}</Badge>
@@ -468,27 +642,7 @@ function UserSheet({
             {roleProblem ?? deactivateProblem}
           </p>
         )}
-        {user ? (
-          <RepDetails value={u} onChange={set} editor={me} policy={policy} idPrefix="eu" />
-        ) : (
-          <div className="grid-2">
-            <Field label="Name" htmlFor="eu-name">
-              <TextInput id="eu-name" value={u.fullname} onChange={(e) => set({ fullname: e.target.value })} />
-            </Field>
-            <Field label="Email" htmlFor="eu-email">
-              <TextInput id="eu-email" type="email" value={u.email} onChange={(e) => set({ email: e.target.value })} />
-            </Field>
-            <Field label="Title" htmlFor="eu-title">
-              <TextInput id="eu-title" value={u.title} onChange={(e) => set({ title: e.target.value })} />
-            </Field>
-            <Field label="Branch" htmlFor="eu-branch">
-              <TextInput id="eu-branch" value={u.branch} onChange={(e) => set({ branch: e.target.value })} />
-            </Field>
-            <Field label="Rep code" htmlFor="eu-rep" optional>
-              <TextInput id="eu-rep" className="mono" value={u.repCode} onChange={(e) => set({ repCode: e.target.value })} />
-            </Field>
-          </div>
-        )}
+        {(user || picked) && <RepDetails value={u} onChange={set} editor={me} policy={policy} idPrefix="eu" />}
         <div className="grid-2">
           <Field label="Region" htmlFor="eu-region">
             <TextInput id="eu-region" value={u.region ?? ''} onChange={(e) => set({ region: e.target.value })} />

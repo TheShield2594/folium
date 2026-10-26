@@ -16,7 +16,7 @@ import { createSigningRegistry } from '../registry';
 import type { CrmService, DirectoryService, DraftStore, FeedbackStore, IncomingFile, PacketStore, RequestStore, Services, SigningProvider, TemplateLibrary } from '../types';
 import { createUsageQueue } from '../usage';
 import { decodeChoices, encodeChoices } from './choices';
-import { CHOICES, DATAVERSE, ID_DOCUMENT_COLUMNS, SHAREPOINT, SIGNING_CONNECTIONS, CONNECTORS, type SigningConnection } from './config';
+import { CHOICES, DATAVERSE, ID_DOCUMENT_COLUMNS, SHAREPOINT, SIGNING_CONNECTIONS, CONNECTORS, USAGE_EVENT_OPTIONS, type SigningConnection } from './config';
 import { dataSourcesInfo } from './dataSourcesInfo';
 import { feedbackRow, fromFeedbackRow, fromUsageRow, isDuplicateKeyError, requestRow, USAGE_COLUMNS, usageRow, type FeedbackRowIn, type UsageRowIn } from './rows';
 import type { UsageEvent } from '../../domain/usage';
@@ -42,6 +42,7 @@ function unwrap<T>(r: OpResult<T>, what: string): T {
 }
 
 const esc = (s: string) => s.replace(/'/g, "''");
+const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function createPowerServices(): Services {
   const client: DataClient = getClient(dataSourcesInfo);
@@ -127,7 +128,7 @@ export function createPowerServices(): Services {
         if (r.success) found.profile = stamped;
       }
       const dir: DirectoryUser = u ?? { systemuserid: '', fullname: ctx.user.fullName ?? '', email: ctx.user.userPrincipalName ?? undefined };
-      return mergeAdvisor(dir, { ...blankProfile(dir.systemuserid), ...found?.profile, systemuserid: dir.systemuserid });
+      return mergeAdvisor(dir, { ...blankProfile(dir.systemuserid), ...found?.profile, systemuserid: dir.systemuserid, ...(found ? {} : { noProfile: true }) });
     },
     async listUsers() {
       const profiles = await loadProfiles();
@@ -157,6 +158,21 @@ export function createPowerServices(): Services {
     async lookupDirectory(emails) {
       const clean = [...new Set(emails.map((e) => e.trim().toLowerCase()).filter(Boolean))];
       return systemUsers(clean.map((e) => `internalemailaddress eq '${esc(e)}'`), 'Look up people');
+    },
+    async directoryByIds(ids) {
+      const clean = [...new Set(ids.filter((id) => GUID.test(id)))];
+      return systemUsers(clean.map((id) => `systemuserid eq ${id}`), 'Look up people');
+    },
+    async searchDirectory(query) {
+      const q = query.trim();
+      if (q.length < 2) return [];
+      const words = q.split(/\s+/).slice(0, 3).map(esc);
+      // Each word starts the first name, last name, full name or email: "tay bren" finds Taylor Brenneman.
+      const match = words.map((w) => `(startswith(firstname,'${w}') or startswith(lastname,'${w}') or startswith(fullname,'${w}') or startswith(internalemailaddress,'${w}'))`).join(' and ');
+      // accessmode 3 is a support user, 4 non-interactive; application users have an applicationid.
+      const filter = `isdisabled eq false and accessmode ne 3 and accessmode ne 4 and applicationid eq null and ${match}`;
+      const rows = unwrap(await client.retrieveMultipleRecordsAsync<Record<string, unknown>>(DATAVERSE.systemuser, { filter, select: SYSTEMUSER_COLUMNS, orderBy: ['fullname asc'], top: 25 }), 'Search the directory');
+      return rows.map(fromSystemUser);
     },
     async listGroups() {
       const rows = unwrap(await client.retrieveMultipleRecordsAsync<{ ev_foliumgroupid: string; ev_payload: string }>(DATAVERSE.group, {}), 'Load groups');
@@ -426,12 +442,13 @@ export function createPowerServices(): Services {
     }),
     {
       // Page by skip token up to USAGE_READ_CAP rows; the Power BI report covers more.
-      async list(since: string) {
+      async list(since: string, types?: UsageEvent['type'][]) {
+        const only = types?.length ? ` and (${types.map((t) => `ev_eventtype eq ${USAGE_EVENT_OPTIONS[t]}`).join(' or ')})` : '';
         const events: UsageEvent[] = [];
         let skipToken: string | undefined;
         do {
           const r = await client.retrieveMultipleRecordsAsync<UsageRowIn>(DATAVERSE.usageEvent, {
-            filter: `ev_occurredon ge ${new Date(since).toISOString()}`,
+            filter: `ev_occurredon ge ${new Date(since).toISOString()}${only}`,
             select: USAGE_COLUMNS,
             orderBy: ['ev_occurredon asc'],
             maxPageSize: 5000,

@@ -100,6 +100,16 @@ function Root() {
   );
 }
 
+/**
+ * Administration is for Admins: anyone else who opens an admin link lands on Find forms.
+ * This only keeps the screens away. It doesn't protect the writes behind them: that needs
+ * the Dataverse security roles in issue #1.
+ */
+function AdminOnly() {
+  const role = useApp((s) => s.me?.role);
+  return role === 'Admin' ? <Outlet /> : <Navigate to="/" replace />;
+}
+
 // A data router, so leaving Review or Send with unsaved work can be confirmed (useBlocker).
 const router = createHashRouter([
   {
@@ -116,14 +126,19 @@ const router = createHashRouter([
       { path: '/drafts', element: <DraftsScreen /> },
       { path: '/client', element: <ClientScreen /> },
       { path: '/settings', element: <SettingsScreen /> },
-      { path: '/admin/templates', element: <AdminTemplates /> },
-      { path: '/admin/templates/:id', element: <TemplateEditor /> },
-      { path: '/admin/people', element: <AdminPeople /> },
-      { path: '/admin/feedback', element: <AdminFeedback /> },
-      { path: '/admin/announcements', element: <AdminAnnouncements /> },
-      { path: '/admin/firm', element: <AdminFirm /> },
-      { path: '/admin/settings', element: <AdminSettings /> },
-      { path: '/admin/readiness', element: <AdminReadiness /> },
+      {
+        element: <AdminOnly />,
+        children: [
+          { path: '/admin/templates', element: <AdminTemplates /> },
+          { path: '/admin/templates/:id', element: <TemplateEditor /> },
+          { path: '/admin/people', element: <AdminPeople /> },
+          { path: '/admin/feedback', element: <AdminFeedback /> },
+          { path: '/admin/announcements', element: <AdminAnnouncements /> },
+          { path: '/admin/firm', element: <AdminFirm /> },
+          { path: '/admin/settings', element: <AdminSettings /> },
+          { path: '/admin/readiness', element: <AdminReadiness /> },
+        ],
+      },
       { path: '*', element: <Navigate to="/" replace /> },
     ],
   },
