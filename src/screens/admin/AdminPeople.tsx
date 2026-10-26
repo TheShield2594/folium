@@ -482,33 +482,29 @@ function useWaitingForRole(users: UserProfile[]): (WaitingForRole & { person: Di
 function DirectoryPicker({ users, onPick }: { users: UserProfile[]; onPick: (d: DirectoryUser) => void }) {
   const services = useServices();
   const [q, setQ] = useState('');
-  const [results, setResults] = useState<DirectoryUser[]>();
-  const [busy, setBusy] = useState(false);
+  /** The last search's results, with the query they answer. */
+  const [found, setFound] = useState<{ query: string; people: DirectoryUser[] }>();
   const [problem, setProblem] = useState<string>();
+  const query = q.trim();
+  // Only results for what's typed now: older ones can't be picked while the next search runs.
+  const results = found?.query === query ? found.people : undefined;
   useEffect(() => {
-    const query = q.trim();
-    if (query.length < 2) {
-      setResults(undefined);
-      setProblem(undefined);
-      return;
-    }
+    setProblem(undefined);
+    if (query.length < 2) return;
     let live = true;
     const t = setTimeout(async () => {
-      setBusy(true);
       try {
-        const found = await services.directory.searchDirectory(query);
-        if (live) (setResults(found), setProblem(undefined));
+        const people = await services.directory.searchDirectory(query);
+        if (live) setFound({ query, people });
       } catch (e) {
         if (live) setProblem(e instanceof Error ? e.message : 'Could not search the directory');
-      } finally {
-        if (live) setBusy(false);
       }
     }, 250);
     return () => {
       live = false;
       clearTimeout(t);
     };
-  }, [q, services]);
+  }, [query, services]);
   const profileOf = (d: DirectoryUser) => users.find((u) => u.systemuserid.toLowerCase() === d.systemuserid.toLowerCase());
   return (
     <div className="stack-3">
@@ -518,10 +514,10 @@ function DirectoryPicker({ users, onPick }: { users: UserProfile[]; onPick: (d: 
           {problem}
         </p>
       )}
-      {busy && !results && <span className="spinner" aria-label="Searching" />}
-      {results && !results.length && <p className="t-footnote c3">No one in the directory matches “{q.trim()}”.</p>}
+      {query.length >= 2 && !results && !problem && <span className="spinner" aria-label="Searching" />}
+      {results && !results.length && <p className="t-footnote c3">No one in the directory matches “{query}”.</p>}
       {results && results.length > 0 && (
-        <div className="list" aria-busy={busy}>
+        <div className="list">
           {results.map((d) => {
             const has = profileOf(d);
             return (
@@ -548,7 +544,7 @@ function DirectoryPicker({ users, onPick }: { users: UserProfile[]; onPick: (d: 
           })}
         </div>
       )}
-      {!results && !problem && <p className="t-footnote c3">Search by name or email. Name, email, phone and title come from their Microsoft account and stay current; you set their role, groups, branch and rep code here.</p>}
+      {query.length < 2 && <p className="t-footnote c3">Search by name or email. Name, email, phone and title come from their Microsoft account and stay current; you set their role, groups, branch and rep code here.</p>}
     </div>
   );
 }

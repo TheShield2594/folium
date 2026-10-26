@@ -102,7 +102,8 @@ function Root() {
 
 /**
  * Administration is for Admins: anyone else who opens an admin link lands on Find forms.
- * This only keeps the screens away; Dataverse security roles refuse the writes behind them.
+ * This only keeps the screens away. It doesn't protect the writes behind them: that needs
+ * the Dataverse security roles in issue #1.
  */
 function AdminOnly() {
   const role = useApp((s) => s.me?.role);
